@@ -387,9 +387,38 @@ export async function registerRoutes(
   });
 
   app.patch('/api/tasks/:id/checklist/:itemId', async (req) => {
-    const { itemId } = req.params as { id: string; itemId: string };
+    const { id: taskId, itemId } = req.params as { id: string; itemId: string };
     const { done } = req.body as { done: boolean };
-    await db().run('UPDATE task_checklist SET done = ? WHERE id = ?', [done ? 1 : 0, itemId]);
+
+    /*
+     * Resolve the item *through* the task in the URL, then check scope on that task.
+     *
+     * Two defects lived here. The `:id` parameter was ignored entirely, so the item id
+     * in the path was enough to mutate it — a direct-object-reference hole that any
+     * authenticated identity could use, including a client of another tenant. And no
+     * tenancy check ran at all.
+     *
+     * Joining on both ids closes the first: an item that does not belong to the named
+     * task is simply not found, so a correct task id cannot be paired with a foreign
+     * item id. Returning 404 for the mismatch matches the rest of the API, where
+     * absence and denial are deliberately indistinguishable.
+     */
+    const item = await db().get<{ id: string; project_id: string | null }>(
+      `SELECT c.id, t.project_id
+         FROM task_checklist c
+         JOIN tasks t ON t.id = c.task_id
+        WHERE c.id = ? AND c.task_id = ?`,
+      [itemId, taskId],
+    );
+    if (!item) throw notFound('Checklist item not found');
+    await assertProjectInScope(await resolveReadScope(db(), await currentIdentity(req)), item.project_id);
+    await requireProjectAccess(db(), await currentIdentity(req), item.project_id, 'write');
+
+    await db().run('UPDATE task_checklist SET done = ? WHERE id = ? AND task_id = ?', [
+      done ? 1 : 0,
+      itemId,
+      taskId,
+    ]);
     return ok({ id: itemId, done });
   });
 
@@ -1090,10 +1119,46 @@ export async function registerRoutes(
   app.patch('/api/qa/:id', async (req) => {
     const { id: reportId } = req.params as { id: string };
     const b = req.body as Record<string, any>;
+
+    /*
+     * Scope before anything else.
+     *
+     * This route had no tenancy check at all: any authenticated identity, including a
+     * client of a different tenant, could mutate any QA report by id. The response was
+     * a 500 because the arbitrary status value then violated a CHECK constraint — which
+     * is how the edge registry surfaced it ("expected 404, got 200" on the role probes,
+     * and a 500 on a cross-tenant write). A constraint violation is not an access
+     * control, and it leaks the schema.
+     *
+     * 404 rather than 403 for a foreign report, matching every other read and write in
+     * this API: a 403 would confirm the id exists.
+     */
+    const existing = await db().get<{ id: string; project_id: string }>(
+      'SELECT id, project_id FROM qa_reports WHERE id = ?',
+      [reportId],
+    );
+    if (!existing) throw notFound('QA report not found');
+    // Tenancy is a 404 via the shared primitive, not a 403: a 403 would confirm the
+    // report exists and merely belongs to someone else.
+    await assertProjectInScope(await resolveReadScope(db(), await currentIdentity(req)), existing.project_id);
+    await requireProjectAccess(db(), await currentIdentity(req), existing.project_id, 'write');
+
     const sets: string[] = [];
     const params: unknown[] = [];
     for (const [key, col] of [['status', 'status'], ['severity', 'severity'], ['assigneeId', 'assignee_id'], ['title', 'title']] as const) {
       if (b[key] !== undefined) { sets.push(`${col} = ?`); params.push(b[key]); }
+    }
+    /*
+     * Reject values the schema would refuse before touching the database. A CHECK
+     * violation reaching the 500 handler reports "something went wrong" and quotes the
+     * constraint, which is both a worse API and a small schema disclosure.
+     */
+    const QA_STATUS = ['open', 'triaged', 'in_progress', 'fixed', 'verified', 'wont_fix', 'duplicate'];
+    if (b.status !== undefined && !QA_STATUS.includes(b.status)) {
+      throw badRequest(`status must be one of ${QA_STATUS.join(', ')}`);
+    }
+    if (b.severity !== undefined && !['low', 'medium', 'high', 'critical'].includes(b.severity)) {
+      throw badRequest('severity must be one of low, medium, high, critical');
     }
     if (b.status && ['fixed', 'verified', 'wont_fix', 'duplicate'].includes(b.status)) {
       sets.push('resolved_at = ?');

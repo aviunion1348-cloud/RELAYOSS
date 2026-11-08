@@ -328,3 +328,77 @@ test('isolation: an unknown identity cannot reach search through a forged header
   });
   assert.equal(res.statusCode, 401, 'identity header was trusted');
 });
+
+/* ================================== write-path IDOR, not just read paths ==
+ *
+ * Both routes below were reachable by direct object reference: the item's own id was
+ * enough, and neither checked tenancy. `PATCH /api/tasks/:id/checklist/:itemId`
+ * ignored the `:id` in the path altogether, and `PATCH /api/qa/:id` looked up nothing
+ * before writing. The QA route surfaced as a 500 — an arbitrary status value violated
+ * a CHECK constraint — which is how a missing access-control check masquerades as a
+ * schema problem and leaks the constraint text.
+ *
+ * These tests assert two things each: the write is refused, and **the row is
+ * unchanged**. Asserting only the status would pass for a handler that denies after
+ * mutating.
+ */
+
+test('idor: a checklist item cannot be written through a foreign task', async () => {
+  await db.run("INSERT INTO task_checklist (id,task_id,label,done,position) VALUES ('chk1','t_visible','Zephyr step',0,1)");
+
+  // Client B has no grant on p1, which owns t_visible.
+  const res = await app.inject({
+    method: 'PATCH',
+    url: '/api/tasks/t_visible/checklist/chk1',
+    headers: { cookie: clientB.cookie, 'x-csrf-token': clientB.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify({ done: true }),
+  });
+  assert.equal(res.statusCode, 404, 'a foreign client mutated another tenant\'s checklist item');
+
+  const row = await db.get("SELECT done FROM task_checklist WHERE id = 'chk1'");
+  assert.equal(Number(row.done), 0, 'the refused write still changed the row');
+
+  // Pairing a task the caller may write with an item belonging to a different task
+  // must not work either: the item is resolved through the task in the URL.
+  const paired = await app.inject({
+    method: 'PATCH',
+    url: `/api/tasks/${'t_other'}/checklist/chk1`,
+    headers: { cookie: admin.cookie, 'x-csrf-token': admin.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify({ done: true }),
+  });
+  assert.equal(paired.statusCode, 404, 'an item was reachable through a task that does not own it');
+});
+
+test('idor: a QA report cannot be written by a foreign identity, and a bad status is a 400', async () => {
+  await db.run("INSERT INTO qa_reports (id,project_id,kind,title) VALUES ('qa_scope','p1','bug','Zephyr defect')");
+
+  const foreign = await app.inject({
+    method: 'PATCH',
+    url: '/api/qa/qa_scope',
+    headers: { cookie: clientB.cookie, 'x-csrf-token': clientB.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify({ status: 'verified' }),
+  });
+  assert.equal(foreign.statusCode, 404, 'a foreign identity mutated a QA report');
+  const after1 = await db.get("SELECT status FROM qa_reports WHERE id = 'qa_scope'");
+  assert.equal(after1.status, 'open', 'the refused write still changed the report');
+
+  // An authorised identity sending a value the schema would reject gets a validation
+  // error, not a constraint violation surfaced as a 500.
+  const invalid = await app.inject({
+    method: 'PATCH',
+    url: '/api/qa/qa_scope',
+    headers: { cookie: admin.cookie, 'x-csrf-token': admin.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify({ status: 'not_a_status' }),
+  });
+  assert.equal(invalid.statusCode, 400, 'an invalid status must be a 400, not a 500');
+  assert.match(invalid.json().error.message, /status must be one of/);
+
+  // And the legitimate write works.
+  const ok = await app.inject({
+    method: 'PATCH',
+    url: '/api/qa/qa_scope',
+    headers: { cookie: admin.cookie, 'x-csrf-token': admin.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify({ status: 'verified' }),
+  });
+  assert.equal(ok.statusCode, 200);
+});
