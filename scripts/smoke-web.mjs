@@ -519,6 +519,40 @@ for (const [name, , route, endpoints] of SCREENS) {
 }
 
 /*
+ * A 200 that is not JSON must be a failure, not data.
+ *
+ * This is the other buffering path, and on a real deployment the likeliest one:
+ * when /api is routed to the web service instead of the API service, the
+ * platform answers every API call with the index.html of the SPA and a 200. The
+ * status check passed, the body parsed to null, and the component received
+ * undefined as its data — which its data-presence check read as still loading, so
+ * the screen buffered with no error to show. Here the client is pointed at a stub
+ * server that returns exactly that, and must report a routing fault.
+ */
+{
+  const http = await import('node:http');
+  const stub = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<!doctype html><html><body><div id="root"></div></body></html>');
+  });
+  await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+  const port = stub.address().port;
+  let code = null;
+  let message = '';
+  try {
+    await requestWithDeadline('/api/dashboard', { base: 'http://127.0.0.1:' + port });
+  } catch (e) {
+    code = e && e.code;
+    message = (e && e.message) || '';
+  }
+  stub.close();
+  const ok = code === 'network' && /routing fault|HTML page/i.test(message);
+  check('html-200', ok, ok
+    ? 'an HTML page served at /api is reported as a routing fault, not accepted as data'
+    : 'a non-JSON 200 was not rejected: ' + code + ' ' + message);
+}
+
+/*
  * The timeout must render as a timeout, not as a generic network fault: the two
  * have different remedies, and conflating them is the mistake ApiFailure was
  * written to stop.

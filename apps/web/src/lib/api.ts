@@ -142,12 +142,38 @@ async function request<T>(path: string, init?: RequestInit & { deadlineMs?: numb
    */
   const text = await res.text();
   let body: any = null;
+  let parsed = false;
   if (text) {
     try {
       body = JSON.parse(text);
+      parsed = true;
     } catch {
       body = null;
     }
+  }
+
+  /**
+   * A *successful* response that is not JSON is not a success.
+   *
+   * This is the other way a screen could buffer, and on a deployment it is the
+   * likeliest one. The checks below only rejected a bad *status*, so a `200` whose
+   * body was an HTML page — which is exactly what the platform returns when `/api`
+   * is routed to the web service instead of the API service, or when a stale
+   * service is promoted — parsed to `null`, sailed through, and was handed to the
+   * component as `data`. The component's `!data` check then treated it as "still
+   * loading" and showed a skeleton, with no error anywhere to explain it.
+   *
+   * Reporting it as a routing fault is the honest answer: the request reached
+   * something, and that something served the wrong application.
+   */
+  if (res.ok && !parsed) {
+    const looksHtml = /^\s*<(!doctype|html)/i.test(text);
+    throw new NetworkError(
+      'network',
+      looksHtml
+        ? 'The API address served an HTML page instead of JSON. This is a routing fault: /api is being answered by the web application rather than the API service.'
+        : `The API returned ${res.status} with a body that is not JSON (${text.length} bytes). The response cannot be used.`,
+    );
   }
 
   if (!res.ok) {
