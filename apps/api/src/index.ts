@@ -12,7 +12,7 @@ import { recordSweep, setSweepRunning } from './lib/metrics.ts';
 import { getDb, closeDb } from './db/index.ts';
 
 const { app } = await buildApp();
-const db = getDb();
+const db = await getDb();
 
 
 // Background sweeper: every overdue clock becomes a missed record + activity row.

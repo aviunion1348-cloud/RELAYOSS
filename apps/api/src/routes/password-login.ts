@@ -58,7 +58,14 @@ export interface PasswordLoginOptions {
 
 export async function registerPasswordLogin(app: FastifyInstance, opts: PasswordLoginOptions = {}) {
   const throttle = opts.throttle;
-  const db = () => getDb();
+  /**
+ * The database handle, as a promise.
+ *
+ * `getDb()` is async because the SQLite driver is loaded on demand. Call sites
+ * write `await (await db()).all(...)`: the inner await obtains the handle, the
+ * outer one runs the query.
+ */
+const db = () => getDb();
 
   /**
    * The shared login.
@@ -79,7 +86,7 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
 
     if (!parsed.success) {
       // Malformed attempts are recorded: they are frequently the first probe.
-      await auditAuthEvent(db(), { kind: 'login_malformed', ip, userAgent: ua });
+      await auditAuthEvent((await db()), { kind: 'login_malformed', ip, userAgent: ua });
       throw badRequest('Username and password are required.');
     }
 
@@ -91,7 +98,7 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
     for (const key of [addressKey, userKey]) {
       const locked = await throttle?.check(key);
       if (locked?.locked) {
-        await auditAuthEvent(db(), {
+        await auditAuthEvent((await db()), {
           kind: 'login_throttled', ip, userAgent: ua, detail: username,
         });
         reply.header('retry-after', String(locked.retryAfterSec));
@@ -99,14 +106,14 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
       }
     }
 
-    const credential = await findCredential(db(), username);
+    const credential = await findCredential((await db()), username);
 
     // Constant-work path: a missing credential still pays for one verification.
     if (!credential) {
       await verifyAgainstDummy(password);
       await throttle?.fail(addressKey);
       await throttle?.fail(userKey);
-      await auditAuthEvent(db(), { kind: 'login_failed', ip, userAgent: ua, detail: username });
+      await auditAuthEvent((await db()), { kind: 'login_failed', ip, userAgent: ua, detail: username });
       throw rejectBadCredentials();
     }
 
@@ -114,7 +121,7 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
       await verifyAgainstDummy(password);
       await throttle?.fail(addressKey);
       await throttle?.fail(userKey);
-      await auditAuthEvent(db(), {
+      await auditAuthEvent((await db()), {
         kind: 'login_disabled', ip, userAgent: ua, detail: username,
       });
       throw rejectBadCredentials();
@@ -124,19 +131,19 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
     if (!valid) {
       await throttle?.fail(addressKey);
       await throttle?.fail(userKey);
-      await auditAuthEvent(db(), { kind: 'login_failed', ip, userAgent: ua, detail: username });
+      await auditAuthEvent((await db()), { kind: 'login_failed', ip, userAgent: ua, detail: username });
       throw rejectBadCredentials();
     }
 
     // The credential is right; the account behind it must still be usable.
-    const user = await db().get<{ id: string; email: string; role: string; full_name: string; is_active: number }>(
+    const user = await (await db()).get<{ id: string; email: string; role: string; full_name: string; is_active: number }>(
       'SELECT id,email,role,full_name,is_active FROM users WHERE id = ?',
       [credential.user_id],
     );
     if (!user || !user.is_active) {
       await throttle?.fail(addressKey);
       await throttle?.fail(userKey);
-      await auditAuthEvent(db(), {
+      await auditAuthEvent((await db()), {
         kind: 'login_inactive_user', ip, userAgent: ua, detail: username,
       });
       throw rejectBadCredentials();
@@ -148,7 +155,7 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
     // Session fixation defence: the id is generated here, never accepted from the
     // client, and any previously issued session cookie is irrelevant because the
     // response replaces it.
-    const session = await createSession(db(), {
+    const session = await createSession((await db()), {
       userId: user.id,
       method: 'password',
       ttlMs: SESSION_TTL_MS,
@@ -156,15 +163,15 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
       ip,
     });
 
-    await db().run(
+    await (await db()).run(
       'UPDATE local_credentials SET last_used_at = ? WHERE id = ?',
       [new Date().toISOString().slice(0, 19).replace('T', ' '), credential.id],
     );
-    await db().run('UPDATE sessions SET credential_version = ? WHERE id = ?', [
+    await (await db()).run('UPDATE sessions SET credential_version = ? WHERE id = ?', [
       credential.version, session.id,
     ]);
 
-    await auditAuthEvent(db(), {
+    await auditAuthEvent((await db()), {
       userId: user.id, sessionId: session.id, kind: 'login_password', ip, userAgent: ua, detail: username,
     });
 
@@ -197,7 +204,7 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
 
     if (!raw) return ok({ authenticated: false });
 
-    const found = await lookupSession(db(), decodeURIComponent(raw), { touch: false });
+    const found = await lookupSession((await db()), decodeURIComponent(raw), { touch: false });
     if (!found) return ok({ authenticated: false });
 
     return ok({

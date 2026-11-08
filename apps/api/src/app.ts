@@ -68,7 +68,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
    */
   assertStaticAuthConfiguration();
 
-  const db = opts.db ?? getDb();
+  const db = opts.db ?? (await getDb());
   if (opts.db) setDb(opts.db);
   const migrated = opts.migrateOnBoot ?? (process.env.SKIP_MIGRATE !== '1' && !opts.db);
   if (migrated) {

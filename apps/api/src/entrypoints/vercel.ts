@@ -192,7 +192,7 @@ async function maybeSweep(): Promise<void> {
   if (now - lastSweep < SWEEP_THROTTLE_MS) return;
   lastSweep = now;
   try {
-    await sweepTimers(getDb());
+    await sweepTimers(await getDb());
   } catch {
     /* the cron endpoint surfaces sweep failures; a user request must still succeed */
   }
