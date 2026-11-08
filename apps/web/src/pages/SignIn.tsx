@@ -19,6 +19,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { auth, type SessionInfo, AUTH_EXPIRED_EVENT } from '../lib/api';
 import { Button, Card } from '../components/ui';
 import { Icons } from '../components/icons';
+import { ApiFailure } from '../components/ApiFailure';
 import { cls } from '../lib/cls';
 
 interface DevUser {
@@ -30,7 +31,21 @@ interface DevUser {
   color: string;
 }
 
-export function SignIn({ info, onSignedIn }: { info: SessionInfo | null; onSignedIn: () => void }) {
+export function SignIn({
+  info,
+  probeError,
+  onSignedIn,
+}: {
+  info: SessionInfo | null;
+  /**
+   * Why the session probe failed, when it failed for a reason other than 401.
+   * Rendered above the form: if the deployment is not provisioned, no sign-in
+   * can succeed, so saying so before the user types a password is the honest
+   * order. `null` for an anonymous visitor, which is not a failure.
+   */
+  probeError?: unknown;
+  onSignedIn: () => void;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -70,6 +85,12 @@ export function SignIn({ info, onSignedIn }: { info: SessionInfo | null; onSigne
         </div>
 
         <Card className="p-5">
+          {probeError ? (
+            <div className="mb-4">
+              <ApiFailure error={probeError} what="The session could not be checked." />
+            </div>
+          ) : null}
+
           {isPassword ? (
             <form
               className="space-y-3.5"
@@ -121,9 +142,12 @@ export function SignIn({ info, onSignedIn }: { info: SessionInfo | null; onSigne
               </Button>
 
               {passwordSignIn.isError && (
-                <p role="alert" className="text-center text-[11.5px] leading-relaxed text-rose-300">
-                  {(passwordSignIn.error as Error).message}
-                </p>
+                <div role="alert">
+                  <ApiFailure
+                    error={passwordSignIn.error}
+                    what="The sign-in attempt was not accepted."
+                  />
+                </div>
               )}
 
               <p className="pt-1 text-center text-[10.5px] leading-relaxed text-mist-600">
@@ -147,9 +171,9 @@ export function SignIn({ info, onSignedIn }: { info: SessionInfo | null; onSigne
                   <Icons.Loader2 size={16} className="animate-spin" />
                 </div>
               ) : users.isError ? (
-                <p className="py-6 text-center text-[12px] text-rose-300">
-                  Could not load identities. Is the API running on :4000?
-                </p>
+                <div className="py-4">
+                  <ApiFailure error={users.error} what="The demo identities could not be loaded." />
+                </div>
               ) : (
                 <div className="space-y-1.5">
                   {(users.data ?? []).map((u: DevUser) => (
