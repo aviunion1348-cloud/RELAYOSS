@@ -9,6 +9,7 @@ import { config } from '../config.ts';
 import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized } from '../lib/http.ts';
 import type { Identity } from '../auth/index.ts';
 import { requireProjectAccess } from '../auth/middleware.ts';
+import { resolveReadScope, tasksWhere, projectsWhere, docsWhere, clientsWhere, dealsWhere, assertProjectInScope } from '../auth/scope.ts';
 import { id, nowIso } from '../lib/ids.ts';
 import { toDate } from '../lib/dates.ts';
 import { TASK_SELECT, mapTask, mapUser, mapClient, mapProject, mapDeal } from '../repositories/query.ts';
@@ -243,6 +244,15 @@ export async function registerRoutes(
 
   app.get('/api/tasks/:id', async (req) => {
     const { id: taskId } = req.params as { id: string };
+    // Authorise against the task's own project before returning anything. A
+    // denial and a missing task are deliberately indistinguishable.
+    const owner = await db().get<{ project_id: string; client_visible: number }>(
+      'SELECT project_id, client_visible FROM tasks WHERE id = ?', [taskId],
+    );
+    if (!owner) throw notFound('Task not found');
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    await assertProjectInScope(scope, owner.project_id);
+    if (scope.externalOnly && !owner.client_visible) throw notFound('Task not found');
     return ok(await taskDetail(db(), taskId));
   });
 
@@ -1253,25 +1263,141 @@ export async function registerRoutes(
   });
 
   /* ------------------------------------------------------------- search --- */
+  /**
+   * Permission-scoped search.
+   *
+   * Every entity is filtered by the resolved read scope *inside the query*, so
+   * an unauthorised row is never loaded, never counted and never paginated
+   * over. The shapes below are derived from the scope predicates, which are
+   * also what `requireProjectAccess` and the list endpoints use — search cannot
+   * drift from them without breaking those tests too.
+   *
+   * What a leak would look like, and why it cannot happen here:
+   *  - a result set: the predicate is in the WHERE clause
+   *  - a total or facet: the same predicate produces the count
+   *  - a suggestion: same query, fewer columns
+   *  - an empty query: returns nothing rather than everything
+   *  - archived/hidden rows: excluded by `hidden_at`/`deleted_at`
+   */
   app.get('/api/search', async (req) => {
-    const q = queryStr(req, 'q') ?? '';
-    if (q.length < 2) return ok({ tasks: [], projects: [], clients: [], deals: [], docs: [] });
+    const q = (queryStr(req, 'q') ?? '').trim();
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    const empty = { tasks: [], projects: [], clients: [], deals: [], docs: [], comments: [], meetings: [], counts: {} };
+    if (q.length < 2) return ok(empty);
     const like = `%${q}%`;
+
+    const tw = tasksWhere(scope, 't');
+    const pw = projectsWhere(scope, 'p');
+    const dw = docsWhere(scope, 'd');
+    const cw = clientsWhere(scope, 'c');
+    const dlw = dealsWhere(scope, 'd');
+
+    const tasks = await db().all<Record<string, any>>(
+      `${TASK_SELECT} WHERE (${tw.sql}) AND t.hidden_at IS NULL AND (t.title LIKE ? OR t.key LIKE ?)
+       ORDER BY t.updated_at DESC LIMIT 8`,
+      [...tw.params, like, like],
+    );
+    const projects = await db().all<Record<string, any>>(
+      `SELECT p.id, p.key, p.name FROM projects p
+        WHERE (${pw.sql}) AND p.hidden_at IS NULL AND (p.name LIKE ? OR p.key LIKE ?)
+        ORDER BY p.name LIMIT 5`,
+      [...pw.params, like, like],
+    );
+    const clients = await db().all<Record<string, any>>(
+      `SELECT c.id, c.name, c.initials, c.accent_color FROM clients c
+        WHERE (${cw.sql}) AND c.name LIKE ? ORDER BY c.name LIMIT 5`,
+      [...cw.params, like],
+    );
+    const deals = await db().all<Record<string, any>>(
+      `SELECT d.id, d.title, d.value_cents FROM deals d
+        WHERE (${dlw.sql}) AND d.title LIKE ? ORDER BY d.value_cents DESC LIMIT 5`,
+      [...dlw.params, like],
+    );
+    const docs = await db().all<Record<string, any>>(
+      `SELECT d.id, d.title, d.kind FROM docs d
+        WHERE (${dw.sql}) AND d.status != 'archived' AND d.title LIKE ?
+        ORDER BY d.updated_at DESC LIMIT 5`,
+      [...dw.params, like],
+    );
+
+    // Comments inherit their task's authorisation: a comment is exactly as
+    // visible as the work it is attached to.
+    const comments = await db().all<Record<string, any>>(
+      `SELECT k.id, k.body, k.task_id, k.created_at, t.key AS task_key, t.title AS task_title
+         FROM task_comments k JOIN tasks t ON t.id = k.task_id
+        WHERE (${tw.sql}) AND t.hidden_at IS NULL AND k.deleted_at IS NULL AND k.body LIKE ?
+        ORDER BY k.created_at DESC LIMIT 5`,
+      [...tw.params, like],
+    );
+
+    // Meeting notes are external-visible only when the note is marked shared.
+    const meetings = await db().all<Record<string, any>>(
+      `SELECT m.id, m.title, m.occurred_at, m.project_id FROM meeting_notes m
+        WHERE ${scope.unrestricted
+          ? '1 = 1'
+          : scope.externalOnly
+            ? `m.client_visible = 1 AND m.project_id IN (${scope.projectIds.length ? scope.projectIds.map(() => '?').join(',') : 'NULL'})`
+            : scope.projectIds.length
+              ? `m.project_id IN (${scope.projectIds.map(() => '?').join(',')})`
+              : '1 = 0'}
+          AND m.title LIKE ? ORDER BY m.occurred_at DESC LIMIT 5`,
+      [...(scope.unrestricted ? [] : scope.externalOnly || scope.projectIds.length ? scope.projectIds : []), like],
+    );
+
     return ok({
-      tasks: (await db().all(`${TASK_SELECT} WHERE t.title LIKE ? OR t.key LIKE ? LIMIT 8`, [like, like])).map(mapTask),
-      projects: (await db().all<Record<string, any>>('SELECT * FROM projects WHERE name LIKE ? OR key LIKE ? LIMIT 5', [like, like])).map((p) => ({ id: p.id, key: p.key, name: p.name })),
-      clients: await db().all('SELECT id,name,initials,accent_color FROM clients WHERE name LIKE ? LIMIT 5', [like]),
-      deals: await db().all('SELECT id,title,value_cents FROM deals WHERE title LIKE ? LIMIT 5', [like]),
-      docs: await db().all('SELECT id,title,kind FROM docs WHERE title LIKE ? LIMIT 5', [like]),
+      tasks: tasks.map(mapTask),
+      projects: projects.map((p) => ({ id: p.id, key: p.key, name: p.name })),
+      clients,
+      deals,
+      docs,
+      comments: comments.map((c) => ({
+        id: c.id, body: c.body.slice(0, 180), taskId: c.task_id, taskKey: c.task_key, taskTitle: c.task_title, createdAt: c.created_at,
+      })),
+      meetings: meetings.map((m) => ({ id: m.id, title: m.title, occurredAt: m.occurred_at, projectId: m.project_id })),
+      counts: {
+        tasks: tasks.length, projects: projects.length, clients: clients.length,
+        deals: deals.length, docs: docs.length, comments: comments.length, meetings: meetings.length,
+      },
     });
+  });
+
+  /** Typeahead. Same scope, same predicates, fewer columns, smaller limit. */
+  app.get('/api/search/suggest', async (req) => {
+    const q = (queryStr(req, 'q') ?? '').trim();
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    if (q.length < 2) return ok({ suggestions: [] });
+    const like = `%${q}%`;
+    const tw = tasksWhere(scope, 't');
+    const pw = projectsWhere(scope, 'p');
+    const rows = await db().all<Record<string, any>>(
+      `SELECT t.key AS label, 'task' AS kind, t.id AS id FROM tasks t
+        WHERE (${tw.sql}) AND t.hidden_at IS NULL AND t.title LIKE ?
+        UNION ALL
+       SELECT p.name AS label, 'project' AS kind, p.id AS id FROM projects p
+        WHERE (${pw.sql}) AND p.hidden_at IS NULL AND p.name LIKE ?
+        LIMIT 8`,
+      [...tw.params, like, ...pw.params, like],
+    );
+    return ok({ suggestions: rows });
   });
 
   /* ----------------------------------------------------------- documents -- */
   app.get('/api/docs', async (req) => {
     const projectId = queryStr(req, 'projectId');
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    if (projectId) await assertProjectInScope(scope, projectId);
+    const dw = docsWhere(scope, 'd');
     const rows = projectId
-      ? await db().all<Record<string, any>>('SELECT d.*, p.name AS project_name FROM docs d LEFT JOIN projects p ON p.id = d.project_id WHERE d.project_id = ? ORDER BY d.updated_at DESC', [projectId])
-      : await db().all<Record<string, any>>('SELECT d.*, p.name AS project_name FROM docs d LEFT JOIN projects p ON p.id = d.project_id ORDER BY d.updated_at DESC');
+      ? await db().all<Record<string, any>>(
+          `SELECT d.*, p.name AS project_name FROM docs d LEFT JOIN projects p ON p.id = d.project_id
+            WHERE d.project_id = ? AND (${dw.sql}) ORDER BY d.updated_at DESC`,
+          [projectId, ...dw.params],
+        )
+      : await db().all<Record<string, any>>(
+          `SELECT d.*, p.name AS project_name FROM docs d LEFT JOIN projects p ON p.id = d.project_id
+            WHERE (${dw.sql}) ORDER BY d.updated_at DESC`,
+          dw.params,
+        );
     return ok(rows.map((d) => ({
       id: d.id, title: d.title, kind: d.kind, body: d.body, status: d.status,
       projectName: d.project_name, clientVisible: !!d.client_visible, updatedAt: d.updated_at,
