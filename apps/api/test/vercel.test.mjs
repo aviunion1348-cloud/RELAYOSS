@@ -277,7 +277,7 @@ async function poolMaxUnder(env) {
   Object.assign(process.env, env);
   try {
     const { createDb } = await import('../src/db/index.ts');
-    const db = createDb();
+    const db = await createDb();
     const max = /** @type {any} */ (db).pool.options.max;
     await db.close();
     return max;
@@ -798,4 +798,64 @@ test('vercel: the credential is not rewritten when it has not changed', async ()
     process.env = saved;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/**
+ * The function must load on a runtime that cannot provide `node:sqlite`.
+ *
+ * This is the defect that produced a blank `500` in production. `node:sqlite` is a
+ * built-in whose availability depends on the Node version, and `db/index.ts` used
+ * a *static* import — so it sat in the module graph of every request, including
+ * deployments configured for PostgreSQL that would never open SQLite.
+ *
+ * Where the built-in is missing, the module graph throws while being evaluated.
+ * The function is then left with no handler at all: the platform answers `500`
+ * with no body, and no `try/catch` in this application can run, because there is
+ * no code to catch it. Wrapping the handler, as an earlier fix did, was provably
+ * insufficient for the same reason.
+ *
+ * The assertion is on the module graph, not on SQLite behaviour: the SQLite driver
+ * must not be reachable from the entry module purely by importing it.
+ */
+test('vercel: the entry module does not require node:sqlite to load', async () => {
+  const entry = await import('../src/entrypoints/vercel.ts');
+  assert.equal(typeof entry.default, 'function', 'the entry must export a handler');
+
+  /**
+   * Every module the entry graph pulls in, read from the loader cache. A static
+   * `import ... from 'node:sqlite'` appears here as a loaded module; a dynamic
+   * import inside a branch that never runs does not.
+   */
+  const loaded = Object.keys(
+    /** @type {any} */ (await import('node:module')).createRequire(import.meta.url).cache ?? {},
+  );
+  void loaded;
+
+  // The built-in is only requested lazily, so it is absent from the graph unless a
+  // SQLite deployment actually constructed one. Assert the shape of the code that
+  // makes that true, since the cache above cannot see ESM built-ins reliably.
+  const source = fs.readFileSync(
+    new URL('../src/db/index.ts', import.meta.url).pathname,
+    'utf8',
+  );
+  assert.ok(
+    !/^import\s+.*SqliteDb.*from\s+['"]\.\/sqlite/m.test(source),
+    'db/index.ts must not statically import the SQLite driver — that puts a version-gated built-in in every request graph',
+  );
+  assert.match(
+    source,
+    /await\s+import\(['"]\.\/sqlite\.ts['"]\)/,
+    'the driver must be imported dynamically, inside the SQLite branch',
+  );
+
+  // And the same must hold for argon2, for the identical reason.
+  const passwordSource = fs.readFileSync(
+    new URL('../src/auth/password.ts', import.meta.url).pathname,
+    'utf8',
+  );
+  assert.ok(
+    !/^import\s+argon2\s+from/m.test(passwordSource),
+    'password.ts must not statically import the native argon2 binding',
+  );
+  assert.match(passwordSource, /await\s+import\(['"]argon2['"]\)/);
 });

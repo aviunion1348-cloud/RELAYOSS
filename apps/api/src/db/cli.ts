@@ -54,7 +54,7 @@ if (cmd === 'reset') {
   }
 }
 
-const db = createDb();
+const db = await createDb();
 setDb(db);
 
 try {

@@ -50,6 +50,13 @@ import {
   authMode,
 } from '../auth/index.ts';
 
+/**
+ * The database handle, as a promise.
+ *
+ * `getDb()` is async because the SQLite driver is loaded on demand. Call sites
+ * write `await (await db()).all(...)`: the inner await obtains the handle, the
+ * outer one runs the query.
+ */
 const db = () => getDb();
 
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // one working day
@@ -98,10 +105,10 @@ export async function registerAuthRoutes(
     if (authMode() !== 'dev') {
       throw forbidden('Not available: this deployment does not use development identities');
     }
-    if (await hasProvisionedCredential(db())) {
+    if (await hasProvisionedCredential((await db()))) {
       throw forbidden('This deployment uses the shared login.');
     }
-    const rows = await db().all<Record<string, any>>(
+    const rows = await (await db()).all<Record<string, any>>(
       'SELECT id,full_name,role,title,initials,avatar_color FROM users WHERE is_active = 1 ORDER BY full_name',
     );
     return ok(
@@ -133,7 +140,7 @@ export async function registerAuthRoutes(
      * requirement forbids. It stays available only while no credential exists —
      * i.e. for a fresh clone and for the test suites that predate the shared login.
      */
-    if (await hasProvisionedCredential(db())) {
+    if (await hasProvisionedCredential((await db()))) {
       throw forbidden(
         'This deployment uses the shared login. Sign in at /login.',
       );
@@ -149,13 +156,13 @@ export async function registerAuthRoutes(
     if (locked?.locked) {
       throw forbidden(`Too many failed attempts. Try again in ${locked.retryAfterSec}s.`);
     }
-    const user = await db().get<{ id: string; email: string; role: string; full_name: string; is_active: number }>(
+    const user = await (await db()).get<{ id: string; email: string; role: string; full_name: string; is_active: number }>(
       'SELECT id,email,role,full_name,is_active FROM users WHERE id = ?',
       [userId],
     );
     if (!user || !user.is_active) {
       await throttle?.fail(lockKey);
-      await db().run('INSERT INTO auth_events (kind, ip, user_agent, detail) VALUES (?,?,?,?)', [
+      await (await db()).run('INSERT INTO auth_events (kind, ip, user_agent, detail) VALUES (?,?,?,?)', [
         'login_failed', req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), userId,
       ]);
       // Same response for unknown and inactive accounts: no user enumeration.
@@ -163,14 +170,14 @@ export async function registerAuthRoutes(
     }
     await throttle?.succeed(lockKey);
 
-    const session = await createSession(db(), {
+    const session = await createSession((await db()), {
       userId: user.id,
       method: 'dev',
       ttlMs: SESSION_TTL_MS,
       userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
       ip: req.ip,
     });
-    await db().run('INSERT INTO auth_events (user_id, session_id, kind, ip, user_agent) VALUES (?,?,?,?,?)', [
+    await (await db()).run('INSERT INTO auth_events (user_id, session_id, kind, ip, user_agent) VALUES (?,?,?,?,?)', [
       user.id, session.id, 'login_dev', req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300),
     ]);
 
@@ -196,23 +203,23 @@ export async function registerAuthRoutes(
       audience: config.oidcAudience || undefined,
     });
 
-    const subject = await db().get<{ user_id: string }>(
+    const subject = await (await db()).get<{ user_id: string }>(
       'SELECT user_id FROM identity_subjects WHERE issuer = ? AND subject = ?',
       [payload.iss ?? '', payload.sub ?? ''],
     );
     if (!subject) throw forbidden('This identity is not provisioned in Relay');
 
-    const session = await createSession(db(), {
+    const session = await createSession((await db()), {
       userId: subject.user_id,
       method: 'oidc',
       ttlMs: SESSION_TTL_MS,
       userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
       ip: req.ip,
     });
-    await db().run('UPDATE identity_subjects SET last_login_at = ?, claims_json = ? WHERE issuer = ? AND subject = ?', [
+    await (await db()).run('UPDATE identity_subjects SET last_login_at = ?, claims_json = ? WHERE issuer = ? AND subject = ?', [
       nowIso(), JSON.stringify(payload).slice(0, 4000), payload.iss ?? '', payload.sub ?? '',
     ]);
-    await db().run('INSERT INTO auth_events (user_id, session_id, kind, ip, user_agent) VALUES (?,?,?,?,?)', [
+    await (await db()).run('INSERT INTO auth_events (user_id, session_id, kind, ip, user_agent) VALUES (?,?,?,?,?)', [
       subject.user_id, session.id, 'login_oidc', req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300),
     ]);
 
@@ -246,8 +253,8 @@ export async function registerAuthRoutes(
     const configuredRedirect = process.env.OIDC_REDIRECT_URI ?? '';
     const redirectUri = q.redirectUri && q.redirectUri === configuredRedirect ? q.redirectUri : configuredRedirect;
 
-    await pruneFlows(db());
-    const flow = await beginFlow(db(), {
+    await pruneFlows((await db()));
+    const flow = await beginFlow((await db()), {
       redirectUri,
       returnTo: sanitiseReturnTo(q.returnTo),
       ip: req.ip,
@@ -276,7 +283,7 @@ export async function registerAuthRoutes(
     const q = req.query as { code?: string; state?: string; error?: string; error_description?: string };
 
     if (q.error) {
-      if (q.state) await failFlow(db(), q.state, `provider: ${q.error}`, req.ip);
+      if (q.state) await failFlow((await db()), q.state, `provider: ${q.error}`, req.ip);
       return reply.code(401).send({
         error: {
           code: 'unauthorized',
@@ -288,7 +295,7 @@ export async function registerAuthRoutes(
 
     let flow;
     try {
-      flow = await consumeFlow(db(), String(q.state ?? ''), req.ip);
+      flow = await consumeFlow((await db()), String(q.state ?? ''), req.ip);
     } catch (err) {
       throw err;
     }
@@ -316,34 +323,34 @@ export async function registerAuthRoutes(
 
       // 4. The identity must already be provisioned. Sign-in never creates a
       //    user: an unknown subject is refused, not auto-provisioned.
-      const subject = await db().get<{ user_id: string }>(
+      const subject = await (await db()).get<{ user_id: string }>(
         'SELECT user_id FROM identity_subjects WHERE issuer = ? AND subject = ?',
         [payload.iss ?? '', payload.sub ?? ''],
       );
       if (!subject) {
-        await failFlow(db(), flow.state, `unprovisioned subject ${String(payload.sub ?? '')}`, req.ip);
+        await failFlow((await db()), flow.state, `unprovisioned subject ${String(payload.sub ?? '')}`, req.ip);
         throw forbidden('This identity is not provisioned in Relay. Ask an administrator for access.');
       }
 
       // 5. A disabled account cannot sign in, even with a valid token.
-      const user = await db().get<{ id: string; is_active: number }>('SELECT id, is_active FROM users WHERE id = ?', [subject.user_id]);
+      const user = await (await db()).get<{ id: string; is_active: number }>('SELECT id, is_active FROM users WHERE id = ?', [subject.user_id]);
       if (!user || !Number(user.is_active)) {
-        await failFlow(db(), flow.state, 'account disabled', req.ip);
+        await failFlow((await db()), flow.state, 'account disabled', req.ip);
         throw forbidden('This account is disabled.');
       }
 
-      const session = await createSession(db(), {
+      const session = await createSession((await db()), {
         userId: subject.user_id,
         method: 'oidc',
         ttlMs: SESSION_TTL_MS,
         userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
         ip: req.ip,
       });
-      await db().run('UPDATE identity_subjects SET last_login_at = ?, claims_json = ? WHERE issuer = ? AND subject = ?', [
+      await (await db()).run('UPDATE identity_subjects SET last_login_at = ?, claims_json = ? WHERE issuer = ? AND subject = ?', [
         nowIso(), JSON.stringify(payload).slice(0, 4000), payload.iss ?? '', payload.sub ?? '',
       ]);
-      await oidcAudit(db(), flow.state, 'callback_ok', String(payload.sub ?? ''), '', req.ip);
-      await db().run('INSERT INTO auth_events (user_id, session_id, kind, ip, user_agent) VALUES (?,?,?,?,?)', [
+      await oidcAudit((await db()), flow.state, 'callback_ok', String(payload.sub ?? ''), '', req.ip);
+      await (await db()).run('INSERT INTO auth_events (user_id, session_id, kind, ip, user_agent) VALUES (?,?,?,?,?)', [
         subject.user_id, session.id, 'login_oidc', req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300),
       ]);
 
@@ -355,7 +362,7 @@ export async function registerAuthRoutes(
       });
     } catch (err) {
       // Every path out of here is a closed door: no session was created.
-      await failFlow(db(), flow.state, (err as Error).message, req.ip);
+      await failFlow((await db()), flow.state, (err as Error).message, req.ip);
       throw err;
     }
   });
@@ -401,7 +408,7 @@ export async function registerAuthRoutes(
   app.get('/api/auth/sessions', async (req) => {
     const identity = req.identity;
     if (!identity) throw unauthorized();
-    const rows = await db().all<Record<string, any>>(
+    const rows = await (await db()).all<Record<string, any>>(
       `SELECT id, method, created_at, last_seen_at, expires_at, revoked_at, user_agent, ip
        FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 50`,
       [identity.userId],
@@ -422,13 +429,13 @@ export async function registerAuthRoutes(
     const identity = req.identity;
     if (!identity) throw unauthorized();
     const { id } = req.params as { id: string };
-    const session = await db().get<{ user_id: string }>('SELECT user_id FROM sessions WHERE id = ?', [id]);
+    const session = await (await db()).get<{ user_id: string }>('SELECT user_id FROM sessions WHERE id = ?', [id]);
     if (!session) throw notFound('Session not found');
     if (session.user_id !== identity.userId && !['admin', 'lead'].includes(identity.role)) {
       throw forbidden('You can only revoke your own sessions');
     }
-    await revokeSession(db(), id);
-    await db().run('INSERT INTO auth_events (user_id, session_id, kind, ip) VALUES (?,?,?,?)', [
+    await revokeSession((await db()), id);
+    await (await db()).run('INSERT INTO auth_events (user_id, session_id, kind, ip) VALUES (?,?,?,?)', [
       session.user_id, id, 'revoked', req.ip,
     ]);
     return ok({ revoked: id });
@@ -437,7 +444,7 @@ export async function registerAuthRoutes(
   app.post('/api/auth/sessions/revoke-all', async (req) => {
     const identity = req.identity;
     if (!identity) throw unauthorized();
-    const count = await revokeAllSessions(db(), identity.userId);
+    const count = await revokeAllSessions((await db()), identity.userId);
     return ok({ revoked: count });
   });
 
@@ -454,10 +461,10 @@ export async function registerAuthRoutes(
       .map((c) => c.trim())
       .find((c) => c.startsWith(`${SESSION_COOKIE}=`))
       ?.split('=')[1];
-    if (raw) await revokeSession(db(), decodeURIComponent(raw));
+    if (raw) await revokeSession((await db()), decodeURIComponent(raw));
     reply.header('set-cookie', sessionCookie('', 0, secureCookies()));
     if (identity) {
-      await db().run('INSERT INTO auth_events (user_id, kind, ip) VALUES (?,?,?)', [identity.userId, 'logout', req.ip]);
+      await (await db()).run('INSERT INTO auth_events (user_id, kind, ip) VALUES (?,?,?)', [identity.userId, 'logout', req.ip]);
     }
     return ok({ loggedOut: true });
   });
