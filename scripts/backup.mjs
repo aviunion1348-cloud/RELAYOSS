@@ -194,8 +194,30 @@ async function verify(file) {
  * count, then drop the scratch database. Reports the measured restore time so
  * RTO is a number from this machine rather than a wish.
  */
+/**
+ * A clean checkout has no database, so a drill would fail for the wrong reason.
+ * Provisioning one first turns `npm run backup:verify` into a self-contained
+ * proof: migrate from empty, seed, back up, restore, compare. That is also what
+ * CI needs, and what an operator needs on a fresh host.
+ */
+async function ensureDatabase() {
+  if (DATABASE_URL) return;
+  if (fs.existsSync(DB_PATH)) return;
+  console.log('  · no database at ' + DB_PATH + ' — provisioning one (migrate + seed)');
+  const { SqliteDb } = await import('../apps/api/src/db/sqlite.ts');
+  const { migrate } = await import('../apps/api/src/db/migrate.ts');
+  const { seed } = await import('../apps/api/src/db/seed.ts');
+  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  const db = new SqliteDb(DB_PATH);
+  await migrate(db, { log: () => {} });
+  await seed(db, () => {});
+  await db.close();
+  console.log('  · provisioned for the drill');
+}
+
 async function drill() {
   const started = Date.now();
+  await ensureDatabase();
   const file = await backup();
 
   if (file.endsWith('.sqlite')) {
