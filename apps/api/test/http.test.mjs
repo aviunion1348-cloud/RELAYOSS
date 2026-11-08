@@ -46,12 +46,35 @@ await db.run("INSERT INTO partners (id,client_id,name,slug,plan) VALUES ('pa1','
 await db.run("INSERT INTO releases (id,project_id,version,name,status) VALUES ('r1','p1','v1.0.0','Launch','in_qa') ON CONFLICT DO NOTHING");
 
 const { app } = await buildApp({ db, serveStatic: false, logger: false });
-const hdr = { 'x-actor-id': 'u1', 'content-type': 'application/json' };
-
 after(async () => { await app.close(); await db.close(); });
 
+/**
+ * Authenticate for real: the API no longer accepts a client-asserted identity,
+ * so the contract suite logs in through the same endpoint the browser uses and
+ * replays the session cookie plus the CSRF token on mutations.
+ */
+const session = await (async () => {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/dev-login',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ userId: 'u1' }),
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  return { cookie: String(res.headers['set-cookie']).split(';')[0], csrf: res.json().data.csrfToken };
+})();
+
 const request = (method, url, payload) =>
-  app.inject({ method, url, headers: hdr, payload: payload ? JSON.stringify(payload) : undefined });
+  app.inject({
+    method,
+    url,
+    headers: {
+      cookie: session.cookie,
+      ...(method === 'GET' ? {} : { 'x-csrf-token': session.csrf }),
+      ...(payload ? { 'content-type': 'application/json' } : {}),
+    },
+    payload: payload ? JSON.stringify(payload) : undefined,
+  });
 
 test('GET /api/health reports a schema version and storage engine', async () => {
   const res = await request('GET', '/api/health');
@@ -149,7 +172,11 @@ test('clocks: list, resolve and sweep are all wired', async () => {
     const resolved = await request('POST', `/api/clocks/timers/${timer.id}/resolve`, { outcome: 'met', note: 'done in 2h' });
     assert.equal(resolved.statusCode, 200, resolved.body);
   }
-  const emptyBody = await app.inject({ method: 'POST', url: '/api/clocks/sweep', headers: { 'x-actor-id': 'u1', 'content-type': 'application/json' } });
+  const emptyBody = await app.inject({
+    method: 'POST',
+    url: '/api/clocks/sweep',
+    headers: { cookie: session.cookie, 'x-csrf-token': session.csrf, 'content-type': 'application/json' },
+  });
   assert.equal(emptyBody.statusCode, 200, 'empty JSON body must not 500');
 
   const sweep = await request('POST', '/api/clocks/sweep');
@@ -160,9 +187,18 @@ test('clocks: list, resolve and sweep are all wired', async () => {
 test('role guard: member cannot waive a gate', async () => {
   const created = (await request('POST', '/api/tasks', { title: 'Role guard test', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' })).json().data;
   const gateId = created.turnover.checks[0].gateId;
+  // u2 is a plain member; sign in as them rather than asserting a header.
+  const memberLogin = await app.inject({
+    method: 'POST',
+    url: '/api/auth/dev-login',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ userId: 'u2' }),
+  });
+  const memberCookie = String(memberLogin.headers['set-cookie']).split(';')[0];
   const res = await app.inject({
-    method: 'PATCH', url: `/api/tasks/${created.id}/turnover/${gateId}`,
-    headers: { 'x-actor-id': 'u2', 'content-type': 'application/json' },
+    method: 'PATCH',
+    url: `/api/tasks/${created.id}/turnover/${gateId}`,
+    headers: { cookie: memberCookie, 'x-csrf-token': memberLogin.json().data.csrfToken, 'content-type': 'application/json' },
     payload: JSON.stringify({ status: 'waived', evidence: 'skipping' }),
   });
   assert.equal(res.statusCode, 403);

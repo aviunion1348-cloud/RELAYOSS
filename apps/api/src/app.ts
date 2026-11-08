@@ -15,6 +15,9 @@ import { config } from './config.ts';
 import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
 import { registerRoutes } from './routes/index.ts';
+import { registerAuthRoutes } from './routes/auth.ts';
+import { createAuth } from './auth/middleware.ts';
+import { assertAuthConfiguration } from './auth/index.ts';
 import { HttpError } from './lib/http.ts';
 
 export interface BuildOptions {
@@ -39,11 +42,13 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     bodyLimit: 2 * 1024 * 1024,
   });
 
+  assertAuthConfiguration();
+
   await app.register(helmet, { contentSecurityPolicy: false, crossOriginEmbedderPolicy: false });
   await app.register(cors, {
     origin: config.corsOrigin.includes('*') ? true : config.corsOrigin,
     credentials: true,
-    allowedHeaders: ['content-type', 'x-actor-id', 'x-request-id'],
+    allowedHeaders: ['content-type', 'x-request-id', 'x-csrf-token', 'authorization'],
   });
 
   /**
@@ -63,8 +68,29 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     }
   });
 
+  /**
+   * Unregistered content-types (form posts from a proxy, text/plain probes) are
+   * accepted as an empty payload rather than rejected with 415. Registered
+   * after the JSON parser so it never shadows it.
+   */
+  app.addContentTypeParser('*', (req, payload, done) => {
+    payload.resume();
+    done(null, {});
+  });
+
+  /**
+   * A body-declaring content-type on a request with no body is a client bug,
+   * not an error: GETs with `content-type: application/json` are common from
+   * shared HTTP wrappers. Normalise it away before routing so it never becomes
+   * a 415.
+   */
   app.addHook('onRequest', async (req) => {
     (req as unknown as { startedAt: number }).startedAt = Date.now();
+    const length = req.headers['content-length'];
+    const hasBody = (length !== undefined && length !== '0') || req.headers['transfer-encoding'] !== undefined;
+    if (!hasBody && req.headers['content-type']) {
+      delete req.headers['content-type'];
+    }
   });
 
   app.addHook('onResponse', async (req, reply) => {
@@ -74,6 +100,25 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   });
 
   app.setErrorHandler((rawErr: unknown, req, reply) => {
+    // Fastify's own 4xx errors (unsupported media type, payload too large,
+    // malformed body) carry a statusCode; map them to the API's error shape
+    // instead of reporting them as internal failures.
+    const fastifyStatus = (rawErr as { statusCode?: number })?.statusCode;
+    if (typeof fastifyStatus === 'number' && fastifyStatus >= 400 && fastifyStatus < 500) {
+      const code = fastifyStatus === 401 ? 'unauthorized'
+        : fastifyStatus === 403 ? 'forbidden'
+        : fastifyStatus === 404 ? 'not_found'
+        : fastifyStatus === 429 ? 'rate_limited'
+        : fastifyStatus === 409 ? 'conflict'
+        : fastifyStatus === 415 ? 'bad_request'
+        : fastifyStatus === 413 ? 'bad_request'
+        : 'bad_request';
+      req.log.warn({ statusCode: fastifyStatus, url: req.url }, 'client_error');
+      return reply.code(fastifyStatus).send({
+        error: { code, message: (rawErr as Error).message || 'Invalid request' },
+        requestId: req.id,
+      });
+    }
     const err = rawErr as Error & { statusCode?: number; validation?: unknown; details?: unknown };
     if (err instanceof HttpError) {
       return reply.code(err.status).send({
@@ -102,7 +147,12 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     return reply.code(404).send({ error: { code: 'not_found', message: 'Build the web app first (npm run build).' } });
   });
 
-  await registerRoutes(app);
+  // Authentication runs before any business route can observe a request.
+  const auth = createAuth({ db });
+  app.addHook('onRequest', auth.authenticate);
+
+  await app.register(registerAuthRoutes);
+  await registerRoutes(app, { auth });
 
   if ((opts.serveStatic ?? true) && fs.existsSync(config.webDist)) {
     await app.register(fastifyStatic, { root: config.webDist, wildcard: false, cacheControl: true, maxAge: '1h' });

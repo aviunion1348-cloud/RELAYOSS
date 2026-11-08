@@ -1,5 +1,8 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect, useState, type ReactElement } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { auth, AUTH_EXPIRED_EVENT, type SessionInfo } from './lib/api';
+import { SignIn } from './pages/SignIn';
 import { Shell } from './components/Shell';
 import { Skeleton } from './components/ui';
 import Dashboard from './pages/Dashboard';
@@ -29,9 +32,65 @@ function Loading() {
   );
 }
 
+/**
+ * Session gate. The shell never renders before we know who the user is, so no
+ * screen can flash data that the API would refuse — and permission-gated controls
+ * are decided from server-verified claims, not optimistic client state.
+ */
+function SessionGate({ children }: { children: (session: SessionInfo) => ReactElement }) {
+  const [expired, setExpired] = useState(false);
+
+  const session = useQuery({
+    queryKey: ['session'],
+    queryFn: () => auth.me(),
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    const onExpired = () => setExpired(true);
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  if (session.isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-ink-950">
+        <Loading />
+      </div>
+    );
+  }
+
+  if (session.isError || expired) {
+    return (
+      <SignIn
+        info={null}
+        onSignedIn={() => {
+          setExpired(false);
+          void session.refetch();
+        }}
+      />
+    );
+  }
+
+  return children(session.data!);
+}
+
 export default function App() {
   return (
-    <Shell>
+    <SessionGate>
+      {(session) => (
+        <Shell session={session}>
+          <AppRoutes />
+        </Shell>
+      )}
+    </SessionGate>
+  );
+}
+
+function AppRoutes() {
+  return (
+    <>
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -50,6 +109,6 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
-    </Shell>
+    </>
   );
 }

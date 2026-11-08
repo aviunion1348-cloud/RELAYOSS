@@ -2,11 +2,13 @@
  * HTTP surface. Every route is thin: validate → service → serialise.
  * Grouped by bounded context so the OpenAPI/REST contract stays legible.
  */
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getDb } from '../db/index.ts';
 import { config } from '../config.ts';
-import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden } from '../lib/http.ts';
+import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized } from '../lib/http.ts';
+import type { Identity } from '../auth/index.ts';
+import { requireProjectAccess } from '../auth/middleware.ts';
 import { id, nowIso } from '../lib/ids.ts';
 import { toDate } from '../lib/dates.ts';
 import { TASK_SELECT, mapTask, mapUser, mapClient, mapProject, mapDeal } from '../repositories/query.ts';
@@ -17,20 +19,55 @@ import { clockHealth, liveTimers, resolveTimer, startTimer, sweepTimers, closeTi
 
 const db = () => getDb();
 
-/** Demo identity resolution — swap for OIDC claims in production. */
-async function actor(req: { headers: Record<string, unknown> }): Promise<string> {
-  const raw = req.headers['x-actor-id'];
-  const candidate = typeof raw === 'string' && raw.trim() ? raw.trim() : config.demoUserId;
-  const user = await db().get<{ id: string }>('SELECT id FROM users WHERE id = ?', [candidate]);
-  return user?.id ?? config.demoUserId;
+/**
+ * Verified identity for the current request.
+ *
+ * The identity comes from the auth boundary (session row or verified OIDC
+ * token) and was re-read from the `users` table on this request — never from a
+ * client-supplied header. `AUTH_MODE=dev` retains the demo identity so a fresh
+ * clone is explorable; that path is refused in production by
+ * `assertAuthConfiguration()`.
+ */
+async function actor(req: FastifyRequest): Promise<string> {
+  const identity = req.identity ?? (await resolveFallbackIdentity());
+  return identity.userId;
 }
 
-async function requireRole(actorId: string, roles: string[]): Promise<void> {
-  const user = await db().get<{ role: string }>('SELECT role FROM users WHERE id = ?', [actorId]);
-  if (!user || !roles.includes(user.role)) throw forbidden(`Requires role: ${roles.join(' | ')}`);
+async function currentIdentity(req: FastifyRequest): Promise<Identity> {
+  if (req.identity) return req.identity;
+  return resolveFallbackIdentity();
 }
 
-export async function registerRoutes(app: FastifyInstance) {
+/**
+ * Used only when the auth hook was not installed (unit tests that inject a
+ * database but no auth boundary). Production registers the hook unconditionally.
+ */
+let fallbackIdentity: Identity | null = null;
+export function setFallbackIdentity(identity: Identity | null) {
+  fallbackIdentity = identity;
+}
+async function resolveFallbackIdentity(): Promise<Identity> {
+  if (fallbackIdentity) return fallbackIdentity;
+  const user = await db().get<{ id: string; email: string; role: Identity['role']; full_name: string }>(
+    'SELECT id,email,role,full_name FROM users WHERE id = ?',
+    [config.demoUserId],
+  );
+  if (!user) throw unauthorized('No identity available');
+  return { userId: user.id, email: user.email, role: user.role, name: user.full_name, method: 'dev', expiresAt: Date.now() + 60_000, claims: {} };
+}
+
+async function requireRole(req: FastifyRequest, roles: Identity['role'][]): Promise<string> {
+  const identity = await currentIdentity(req);
+  if (!roles.includes(identity.role)) {
+    throw forbidden(`Requires role: ${roles.join(' | ')} (you are ${identity.role})`);
+  }
+  return identity.userId;
+}
+
+export async function registerRoutes(
+  app: FastifyInstance,
+  opts: { auth?: import('../auth/middleware.ts').AuthApi } = {},
+) {
   /* ------------------------------------------------------------- health -- */
   app.get('/api/health', async () => {
     const started = Date.now();
@@ -208,8 +245,7 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.delete('/api/tasks/:id', async (req, reply) => {
-    const actorId = await actor(req as never);
-    await requireRole(actorId, ['admin', 'lead']);
+    const actorId = await requireRole(req, ['admin', 'lead']);
     const { id: taskId } = req.params as { id: string };
     await db().run("UPDATE tasks SET status='cancelled', updated_at=? WHERE id=?", [nowIso(), taskId]);
     await db().run('INSERT INTO audit_log (actor_id,action,entity_type,entity_id) VALUES (?,?,?,?)', [actorId, 'task.cancelled', 'task', taskId]);
@@ -255,7 +291,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (status === 'pass' && !evidence?.trim()) {
       throw badRequest('Passing a turnover gate requires written evidence — that is the whole point of the gate.');
     }
-    if (status === 'waived') await requireRole(actorId, ['admin', 'lead']);
+    if (status === 'waived') await requireRole(req, ['admin', 'lead']);
 
     await ensureTaskChecks(db(), taskId);
     await db().run(
@@ -280,7 +316,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id: taskId } = req.params as { id: string };
     const { step, state, evidence, notes } = req.body as { step: string; state: 'passed' | 'rejected' | 'skipped'; evidence?: string; notes?: string };
     if (!ACCEPTANCE_LADDER.includes(step as never)) throw badRequest(`step must be one of ${ACCEPTANCE_LADDER.join(', ')}`);
-    if (step === 'client_accepted') await requireRole(await actor(req as never), ['admin', 'lead']);
+    if (step === 'client_accepted') await requireRole(req, ['admin', 'lead']);
     const records = await recordAcceptance(db(), taskId, step as never, state, await actor(req as never), evidence, notes);
     return ok({ acceptance: records, task: await taskDetail(db(), taskId) });
   });
@@ -356,12 +392,13 @@ export async function registerRoutes(app: FastifyInstance) {
   app.post('/api/clocks/timers/:id/resolve', async (req) => {
     const { id: timerId } = req.params as { id: string };
     const { outcome, note } = req.body as { outcome: 'met' | 'missed' | 'paused' | 'waived'; note?: string };
-    if (outcome === 'waived') await requireRole(await actor(req as never), ['admin', 'lead']);
+    if (outcome === 'waived') await requireRole(req, ['admin', 'lead']);
     return ok(await resolveTimer(db(), timerId, outcome, note));
   });
 
   /* ------------------------------------------------------------ projects -- */
-  app.get('/api/projects', async () => {
+  app.get('/api/projects', async (req) => {
+    const identity = await currentIdentity(req);
     const rows = await db().all<Record<string, any>>(
       `SELECT p.*, c.name AS client_name, c.accent_color AS client_color, u.full_name AS owner_name,
               u.initials AS owner_initials, u.avatar_color AS owner_color,
@@ -377,6 +414,9 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get('/api/projects/:id', async (req) => {
     const { id: projectId } = req.params as { id: string };
+    // Access is checked before the row is read, so a denial cannot be
+    // distinguished from a non-existent project (no enumeration oracle).
+    await requireProjectAccess(db(), await currentIdentity(req), projectId, 'read');
     const project = await db().get<Record<string, any>>(
       `SELECT p.*, c.name AS client_name, c.accent_color AS client_color, u.full_name AS owner_name,
               u.initials AS owner_initials, u.avatar_color AS owner_color,
@@ -477,6 +517,8 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.patch('/api/projects/:id/phases/:phaseRowId', async (req) => {
+    const identity = await currentIdentity(req);
+    await requireProjectAccess(db(), identity, (req.params as { id: string }).id, 'write');
     const { id: projectId, phaseRowId } = req.params as { id: string; phaseRowId: string };
     const actorId = await actor(req as never);
     const body = req.body as { status?: string; progress?: number; turnoverPassed?: boolean };
@@ -987,7 +1029,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   /* ------------------------------------------------------------- audit ---- */
   app.get('/api/audit', async (req) => {
-    await requireRole(await actor(req as never), ['admin', 'lead']);
+    await requireRole(req, ['admin', 'lead']);
     const limit = Math.min(queryInt(req, 'limit', 50), 200);
     const rows = await db().all<Record<string, any>>(
       `SELECT a.*, u.full_name AS actor FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id

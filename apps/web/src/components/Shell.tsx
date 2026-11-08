@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icons } from './icons';
-import { api } from '../lib/api';
+import { api, auth, type SessionInfo } from '../lib/api';
 import { cls } from '../lib/cls';
 import { clockLabel, inr, relTime } from '../lib/format';
 import { Avatar, Badge, Button, Dot, Kbd, Tooltip } from './ui';
@@ -186,7 +186,7 @@ function ClockStrip() {
   );
 }
 
-export function Shell({ children }: { children: React.ReactNode }) {
+export function Shell({ children, session }: { children: React.ReactNode; session?: SessionInfo }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const location = useLocation();
   const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: api.meta });
@@ -266,12 +266,34 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </button>
           {meta && (
             <div className="mt-2 flex items-center gap-2 rounded-lg px-1.5 py-1.5">
-              <Avatar name={meta.currentUser.name} initials={meta.currentUser.initials} color={meta.currentUser.color} size={26} />
+              <Avatar
+                name={session?.user.name ?? meta.currentUser.name}
+                initials={meta.currentUser.initials}
+                color={meta.currentUser.color}
+                size={26}
+              />
               <div className="min-w-0 flex-1 leading-tight">
-                <p className="truncate text-[11.5px] font-medium text-mist-200">{meta.currentUser.name}</p>
-                <p className="truncate text-[10px] text-mist-500">{meta.currentUser.title}</p>
+                <p className="truncate text-[11.5px] font-medium text-mist-200">
+                  {session?.user.name ?? meta.currentUser.name}
+                </p>
+                <p className="truncate text-[10px] text-mist-500">
+                  {session?.user.email ?? meta.currentUser.title}
+                </p>
               </div>
-              <Badge tone="iris" className="shrink-0">{meta.currentUser.role}</Badge>
+              {session && (
+                <button
+                  type="button"
+                  title={`Sign out${session.method === 'dev' ? ' (development session)' : ''}`}
+                  onClick={async () => {
+                    await auth.logout();
+                    window.location.reload();
+                  }}
+                  className="shrink-0 rounded-md border border-ink-700 px-1.5 py-1 text-[10px] text-mist-500 transition-colors hover:border-ink-600 hover:text-mist-300"
+                >
+                  Exit
+                </button>
+              )}
+              <Badge tone="iris" className="shrink-0">{session?.user.role ?? meta.currentUser.role}</Badge>
             </div>
           )}
         </div>

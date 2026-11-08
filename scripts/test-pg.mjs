@@ -87,8 +87,11 @@ try {
   console.log('\n• domain + governance suite on PostgreSQL 16');
   exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/domain.test.mjs'], { TEST_DATABASE_URL: external });
 
+  console.log('\n• authentication + isolation suite on PostgreSQL 16');
+  exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/auth.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
+
   console.log('\n• HTTP contract suite on PostgreSQL 16');
-  exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/http.test.mjs'], { TEST_DATABASE_URL: external });
+  exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/http.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
 } catch (err) {
   console.error('\n✗ PostgreSQL conformance run failed:', err.message);
   exitCode = 1;

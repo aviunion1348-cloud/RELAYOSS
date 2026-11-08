@@ -18,19 +18,83 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * CSRF token for cookie-authenticated mutations.
+ *
+ * Sessions live in an HttpOnly cookie (not readable by JS, by design), so the
+ * token arrives from /api/auth/me and is cached in memory only — never
+ * localStorage, so a successful XSS cannot lift a long-lived credential.
+ */
+let csrfToken: string | null = null;
+export function setCsrfToken(token: string | null) {
+  csrfToken = token;
+}
+
+/** Fired when the session is gone, so the app can return to the sign-in screen. */
+export const AUTH_EXPIRED_EVENT = 'relay:auth-expired';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
-    ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
-  });
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
+  if (init?.body) headers['content-type'] = 'application/json';
+  if (method !== 'GET' && method !== 'HEAD' && csrfToken) headers['x-csrf-token'] = csrfToken;
+
+  const res = await fetch(BASE + path, { ...init, headers, credentials: 'same-origin' });
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
   if (!res.ok) {
     const err = body?.error ?? { code: 'unknown', message: res.statusText };
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    }
     throw new ApiError(res.status, err.code, err.message, err.details);
   }
   return (body?.data ?? body) as T;
 }
+
+export interface SessionUser {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'lead' | 'member' | 'client' | 'bot';
+}
+
+export interface SessionInfo {
+  user: SessionUser;
+  method: string;
+  authMode: 'oidc' | 'dev';
+  expiresAt: string;
+  csrfToken: string | null;
+  permissions: Record<string, boolean>;
+}
+
+export const auth = {
+  async me(): Promise<SessionInfo> {
+    const me = await request<SessionInfo>('/auth/me');
+    setCsrfToken(me.csrfToken);
+    return me;
+  },
+  /** Local development only — the endpoint is refused in production. */
+  async devLogin(userId?: string): Promise<SessionInfo> {
+    const out = await request<{ user: SessionUser; csrfToken: string }>('/auth/dev-login', {
+      method: 'POST',
+      body: JSON.stringify(userId ? { userId } : {}),
+    });
+    setCsrfToken(out.csrfToken);
+    return this.me();
+  },
+  async logout(): Promise<void> {
+    try {
+      await request('/auth/logout', { method: 'POST' });
+    } finally {
+      setCsrfToken(null);
+    }
+  },
+  async users(): Promise<Array<{ id: string; name: string; role: string; title: string; initials: string; color: string }>> {
+    const users = await request<Array<Record<string, any>>>('/users');
+    return users.map((u) => ({ id: u.id, name: u.name ?? u.fullName, role: u.role, title: u.title, initials: u.initials, color: u.color }));
+  },
+};
 
 const qs = (params: Record<string, unknown>) => {
   const search = new URLSearchParams();

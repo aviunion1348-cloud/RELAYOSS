@@ -1,0 +1,14 @@
+process.env.SESSION_SECRET='test-secret';
+const { buildApp } = await import('../apps/api/src/app.ts');
+const { SqliteDb } = await import('../apps/api/src/db/sqlite.ts');
+const { migrate } = await import('../apps/api/src/db/migrate.ts');
+const db=new SqliteDb(':memory:'); await migrate(db,{log:()=>{}});
+await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_lead','l@x.io','Lee','lead','LL')");
+const { app } = await buildApp({ db, serveStatic: false, logger: false });
+const l = await app.inject({method:'POST',url:'/api/auth/dev-login',headers:{'content-type':'application/json'},payload:JSON.stringify({userId:'u_lead'})});
+console.log('login', l.statusCode);
+const cookie = String(l.headers['set-cookie']).split(';')[0];
+console.log('cookie', cookie.slice(0,30));
+const me = await app.inject({method:'GET',url:'/api/auth/me',headers:{cookie}});
+console.log('me', me.statusCode, me.body.slice(0,160));
+await app.close(); await db.close();

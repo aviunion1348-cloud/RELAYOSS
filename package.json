@@ -18,7 +18,7 @@
     "db:seed": "node apps/api/dist/db/cli.js seed",
     "db:reset": "node apps/api/dist/db/cli.js reset",
     "typecheck": "tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
-    "test": "node --test apps/api/test/*.test.mjs",
+    "test": "node --no-warnings --test apps/api/test/*.test.mjs",
     "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/gen-pg-migrations.mjs --check",
     "build:api": "npm run build -w @relay/api",
     "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build",
