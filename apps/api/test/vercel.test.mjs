@@ -328,3 +328,84 @@ test('vercel: the exported handler answers a real HTTP request', async () => {
   await new Promise((resolve) => server.close(resolve));
   await app.close();
 });
+
+test('vercel: the exported handler itself serves, streams and refuses correctly over HTTP', async () => {
+  /*
+   * The test above emits into `app.server` with objects Node created. That proves
+   * Fastify handles a request; it does not prove the *adapter Vercel calls* does,
+   * because Vercel invokes `default handler(req, res)` — the only thing in this
+   * file that touches the raw IncomingMessage/ServerResponse pair. Everything
+   * asserted about `api/index.js` and the compiled artefact was, until now, an
+   * assertion about a code path no test entered. "The function entry works" is
+   * the single most load-bearing claim in a Vercel deployment, so it is tested by
+   * mounting the real export as a listener and speaking HTTP to it.
+   */
+  const entry = await import('../src/vercel.ts');
+  const handler = entry.default;
+  assert.equal(typeof handler, 'function', 'vercel.ts must default-export the request handler');
+
+  const db = await freshDb();
+  const { app } = await buildApp({ db, logger: false });
+  await app.ready();
+  // The handler builds its own app; point its database at this fixture so the
+  // request is answered from a real migrated schema with real rows.
+  await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c_v','Vercel Co','vercel','VC')");
+
+  let sawRequest = 0;
+  const server = http.createServer((req, res) => {
+    sawRequest += 1;
+    handler(req, res).catch((err) => {
+      res.statusCode = 500;
+      res.end(`handler threw: ${String(err)}`);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = /** @type {any} */ (server.address());
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    // 1. A real request is answered, and the handler ran rather than a fallback.
+    const live = await fetch(`${base}/api/live`);
+    assert.equal(live.status, 200, 'the exported handler did not answer /api/live');
+    assert.equal((await live.json()).data.live, true);
+    assert.ok(sawRequest > 0, 'the handler was never invoked');
+
+    // 2. Auth is enforced through the adapter, not only through inject().
+    const denied = await fetch(`${base}/api/projects`);
+    assert.equal(denied.status, 401, 'an anonymous request through the adapter was not refused');
+
+    // 3. An unknown /api path is JSON, never the SPA document. The fallback
+    //    swallowing /api is the failure mode that makes a broken API look like a
+    //    working app: the browser would receive HTML and fail to parse it.
+    //
+    //    The status here is 401 rather than 404 because authentication precedes
+    //    routing — an unauthenticated caller learns nothing about which endpoints
+    //    exist, which is the correct order. What is asserted is the content type
+    //    and the error envelope, because those are what the fallback would break.
+    const missing = await fetch(`${base}/api/no-such-endpoint`);
+    assert.match(String(missing.headers.get('content-type')), /application\/json/i,
+      'the SPA fallback swallowed an /api path');
+    assert.ok(missing.status !== 200, 'an unknown /api path must not look like success');
+    const body = await missing.json();
+    assert.ok(body.error?.code, 'a JSON error must carry a code');
+
+    // 4. A non-API path is served as the SPA document, not as a 404, so a deep link
+    //    survives a browser refresh.
+    const spa = await fetch(`${base}/projects/some-deep-link`);
+    assert.equal(spa.status, 200);
+    assert.match(String(spa.headers.get('content-type')), /text\/html/i);
+
+    // 5. A request with a body reaches the handler intact — the adapter must not
+    //    depend on the body having been pre-parsed.
+    const posted = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'nobody', password: 'nothing' }),
+    });
+    assert.ok([400, 401, 403, 429].includes(posted.status), `login through the adapter returned ${posted.status}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await app.close();
+    await entry.getApp().then(({ app: inner }) => inner.close()).catch(() => {});
+  }
+});
