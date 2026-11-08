@@ -57,9 +57,10 @@ export class SqliteDb implements Db {
     return this.stmt(sql).get(...(params as never[])) as T | undefined;
   }
 
-  async run(sql: string, params: SqlParams = []): Promise<void> {
+  async run(sql: string, params: SqlParams = []): Promise<{ changes: number }> {
     this.check(params);
-    this.stmt(sql).run(...(params as never[]));
+    const info = this.stmt(sql).run(...(params as never[]));
+    return { changes: Number(info?.changes ?? 0) };
   }
 
   async exec(sql: string): Promise<void> {

@@ -254,6 +254,11 @@ test('clocks: starting the same clock twice does not create a second timer', asy
 });
 
 test('clocks: a missed clock cannot be acknowledged with a throwaway reason', async () => {
+  // A timer hangs off an entity, and the clock routes are tenancy-checked against
+  // that entity — so the task must exist and be on a project the caller can see.
+  await db.run(
+    "INSERT INTO tasks (id,key,title,board_id,column_id,project_id,status,priority,assignee_id) VALUES ('x1','SHP-999','Clock fixture','b1','b1_todo','p1','todo','medium','u_lead') ON CONFLICT (id) DO NOTHING",
+  );
   const created = await startTimer(db, 'module-turnover', 'task', 'x1', 'turnover');
   assert.ok(created);
   await db.run('UPDATE sla_timers SET due_at = ? WHERE id = ?', [
@@ -294,6 +299,11 @@ test('clocks: a waiver without a written exception is refused', async () => {
 });
 
 test('clocks: resolving a clock inside its window records "met", not "missed"', async () => {
+  // The qa clock hangs off a real QA report; the tenancy check resolves the
+  // report to its project, so a fabricated id is correctly refused.
+  await db.run(
+    "INSERT INTO qa_reports (id,project_id,kind,title,severity,status) VALUES ('qa_fresh','p1','test','Fresh report','p3','open') ON CONFLICT (id) DO NOTHING",
+  );
   const created = await startTimer(db, 'qa-report', 'qa', 'qa_fresh', 'report');
   const res = await req('POST', `/api/clocks/timers/${created}/resolve`, lead, { outcome: 'met' });
   assert.equal(res.statusCode, 200);
@@ -301,6 +311,9 @@ test('clocks: resolving a clock inside its window records "met", not "missed"', 
 });
 
 test('clocks: a late "met" is recorded as missed — the clock decides, not the caller', async () => {
+  await db.run(
+    "INSERT INTO qa_reports (id,project_id,kind,title,severity,status) VALUES ('qa_late','p1','test','Late report','p3','open') ON CONFLICT (id) DO NOTHING",
+  );
   const created = await startTimer(db, 'qa-report', 'qa', 'qa_late', 'report');
   await db.run('UPDATE sla_timers SET due_at = ? WHERE id = ?', [
     new Date(Date.now() - 60_000).toISOString().slice(0, 19).replace('T', ' '), created,

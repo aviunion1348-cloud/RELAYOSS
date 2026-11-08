@@ -154,6 +154,37 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     if ((err as { validation?: unknown }).validation) {
       return reply.code(400).send({ error: { code: 'validation', message: err.message }, requestId: req.id });
     }
+
+    // A TypeError or RangeError raised while reading a request body is a *client*
+    // fault, not a server one: the body carried a shape the handler did not
+    // expect (`.trim` on a number, an array bound as a parameter). Reporting 500
+    // hides the caller's mistake and looks like a server defect. These are mapped
+    // to 400 with the field named where it is known.
+    //
+    // The line is drawn at errors that arise from request-shaped values only:
+    // anything thrown elsewhere (a database failure, a bug in logic) is still a
+    // 500 and is still logged, because pretending otherwise would hide real
+    // outages.
+    //
+    // Rather than requiring every handler to remember to flag itself, the check
+    // is on the error's origin: a TypeError/RangeError raised during this request
+    // is treated as a body-shape fault, because request parsing happens inside
+    // the handler. A database or logic failure surfaces as a different error type
+    // and keeps its 500.
+    const errName = (err as Error)?.name ?? '';
+    const requestShaped = errName === 'TypeError' || errName === 'RangeError'
+      // A bind error for an array/object parameter: the value came from the body.
+      || /Unknown named parameter|no column named|Bind parameter|must be of type/i.test((err as Error)?.message ?? '');
+    if (requestShaped) {
+      req.log.warn({ err, url: req.url }, 'invalid_request_body');
+      return reply.code(400).send({
+        error: {
+          code: 'bad_request',
+          message: `The request body is not valid for this endpoint (${err.message}).`,
+        },
+        requestId: req.id,
+      });
+    }
     req.log.error({ err }, 'unhandled');
     return reply.code(500).send({
       error: { code: 'internal_error', message: config.env === 'production' ? 'Something went wrong.' : err.message },

@@ -448,8 +448,75 @@ export async function registerRoutes(
     return ok({ swept, at: nowIso() });
   });
 
+  /**
+   * Tenancy check for a clock timer.
+   *
+   * A timer is only reachable if the entity it is attached to is inside the
+   * caller's scope. Without this, a client identity for one tenant could pause,
+   * resume or resolve another tenant's clock — and a paused clock is excluded
+   * from the elapsed measurement, so that is a way to erase a breach.
+   *
+   * Returns the timer and its scope, or a 404 identical to a missing timer.
+   */
+  async function assertTimerInScope(database: ReturnType<typeof db>, identity: Identity, timerId: string) {
+    const timer = await database.get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
+    if (!timer) throw notFound('Timer not found');
+    const scope = await resolveReadScope(database, identity);
+    // A clock hangs off a project, a phase, a task, a release or a client. Each
+    // resolves through the same primitives the read endpoints use.
+    let visible = false;
+    if (timer.entity_type === 'project') {
+      const pw = projectsWhere(scope, 'p');
+      const row = await database.get<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM projects p WHERE p.id = ? AND (${pw.sql})`, [timer.entity_id, ...pw.params]);
+      visible = Number(row?.c ?? 0) > 0;
+    } else if (timer.entity_type === 'client' || timer.entity_type === 'lifecycle') {
+      const cw = clientsWhere(scope, 'c');
+      const row = await database.get<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [timer.entity_id, ...cw.params]);
+      visible = Number(row?.c ?? 0) > 0;
+    } else if (timer.entity_type === 'task') {
+      const tw = tasksWhere(scope, 't');
+      const row = await database.get<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM tasks t WHERE t.id = ? AND (${tw.sql})`, [timer.entity_id, ...tw.params]);
+      visible = Number(row?.c ?? 0) > 0;
+    } else if (timer.entity_type === 'phase') {
+      // A phase clock is keyed by the phase catalogue id (`ph_build`), which may
+      // appear on many projects. It is visible if *any* project carrying that
+      // phase is in scope, which is the same rule the phase read endpoint uses.
+      const rows = await database.all<{ project_id: string }>(
+        'SELECT project_id FROM project_phases WHERE phase_id = ?', [timer.entity_id],
+      );
+      const pw = projectsWhere(scope, 'p');
+      for (const row of rows) {
+        const hit = await database.get<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM projects p WHERE p.id = ? AND (${pw.sql})`, [row.project_id, ...pw.params]);
+        if (Number(hit?.c ?? 0) > 0) { visible = true; break; }
+      }
+    } else if (timer.entity_type === 'release') {
+      const row = await database.get<{ project_id: string }>('SELECT project_id FROM releases WHERE id = ?', [timer.entity_id]);
+      if (row?.project_id) {
+        const pw = projectsWhere(scope, 'p');
+        const hit = await database.get<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM projects p WHERE p.id = ? AND (${pw.sql})`, [row.project_id, ...pw.params]);
+        visible = Number(hit?.c ?? 0) > 0;
+      }
+    } else if (timer.entity_type === 'qa') {
+      const row = await database.get<{ project_id: string }>('SELECT project_id FROM qa_reports WHERE id = ?', [timer.entity_id]);
+      if (row?.project_id) {
+        const pw = projectsWhere(scope, 'p');
+        const hit = await database.get<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM projects p WHERE p.id = ? AND (${pw.sql})`, [row.project_id, ...pw.params]);
+        visible = Number(hit?.c ?? 0) > 0;
+      }
+    }
+    if (!visible) throw notFound('Timer not found');
+    return timer;
+  }
+
   app.post('/api/clocks/timers/:id/resolve', async (req) => {
     const { id: timerId } = req.params as { id: string };
+    await assertTimerInScope(db(), await currentIdentity(req), timerId);
     const { outcome, note } = req.body as { outcome: 'met' | 'missed' | 'paused' | 'waived'; note?: string };
     if (outcome === 'waived') await requireRole(req, ['admin', 'lead']);
     // A waiver without a written exception is just a deleted violation.
@@ -472,6 +539,7 @@ export async function registerRoutes(
     const { id: timerId } = req.params as { id: string };
     const identity = await currentIdentity(req);
     const body = req.body as { reason?: string; escalatedTo?: string };
+    await assertTimerInScope(db(), identity, timerId);
     if (!body.reason?.trim() || body.reason.trim().length < 12) {
       throw badRequest('An acknowledgement needs a substantive reason (at least 12 characters).');
     }
@@ -1157,7 +1225,11 @@ export async function registerRoutes(
 
   app.post('/api/notifications/:id/read', async (req) => {
     const { id: notifId } = req.params as { id: string };
-    await db().run('UPDATE notifications SET read_at = ? WHERE id = ?', [nowIso(), notifId]);
+    // An UPDATE that matches nothing is indistinguishable from a successful one
+    // unless the row count is checked. Returning 200 for an id that does not
+    // exist told the caller a notification had been read when none had.
+    const result = await db().run('UPDATE notifications SET read_at = ? WHERE id = ?', [nowIso(), notifId]);
+    if (!result.changes) throw notFound('Notification not found');
     return ok({ id: notifId });
   });
 
@@ -1393,6 +1465,25 @@ export async function registerRoutes(
 
   /* ---------------------------------------------------- client lifecycle -- */
   /**
+   * Tenancy check for a client-scoped route.
+   *
+   * Returns 404 — identical to absence — for a client that is not visible in the
+   * caller's scope, so the endpoint cannot be used to enumerate clients. Kept in
+   * one place because two copies of this check is exactly how the evidence route
+   * came to be missing it.
+   */
+  async function assertClientInScope(database: ReturnType<typeof db>, identity: Identity, clientId: string) {
+    const scope = await resolveReadScope(database, identity);
+    const cw = clientsWhere(scope, 'c');
+    const visible = await database.get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`,
+      [clientId, ...cw.params],
+    );
+    if (!(visible?.c ?? 0)) throw notFound('Client not found');
+  }
+
+
+  /**
    * The 18-stage lifecycle. Reading is scoped like everything else; writing is
    * enforced by the transition service, not by these handlers — the handlers
    * only translate HTTP into a service call so the rules cannot be bypassed by
@@ -1400,20 +1491,16 @@ export async function registerRoutes(
    */
   app.get('/api/clients/:id/lifecycle', async (req) => {
     const { id: clientId } = req.params as { id: string };
-    const scope = await resolveReadScope(db(), await currentIdentity(req));
-    const client = await db().get<{ id: string }>('SELECT id FROM clients WHERE id = ?', [clientId]);
-    if (!client) throw notFound('Client not found');
-    const cw = clientsWhere(scope, 'c');
-    const visible = await db().get<{ c: number }>(`SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [clientId, ...cw.params]);
-    if (!(visible?.c ?? 0)) throw notFound('Client not found');
+    await assertClientInScope(db(), await currentIdentity(req), clientId);
     return ok(await lifecycleView(db(), clientId));
   });
 
   app.post('/api/clients/:id/lifecycle/:stageKey/transitions', async (req) => {
     const { id: clientId, stageKey } = req.params as { id: string; stageKey: string };
     const identity = await currentIdentity(req);
+    await assertClientInScope(db(), identity, clientId);
     const body = req.body as { to?: string; reason?: string; note?: string; exception?: boolean };
-    if (!body.to) throw badRequest('A transition needs a target state');
+    if (!body.to || typeof body.to !== 'string') throw badRequest('A transition needs a target state');
     // Only staff may drive the lifecycle; a client identity may only ever
     // decide a client-approval stage (the service enforces which).
     if (identity.role === 'client' && body.to !== 'approved') {
@@ -1435,11 +1522,20 @@ export async function registerRoutes(
   app.post('/api/clients/:id/lifecycle/:stageKey/evidence', async (req) => {
     const { id: clientId, stageKey } = req.params as { id: string; stageKey: string };
     const identity = await currentIdentity(req);
-    const body = req.body as { kind?: string; label?: string; url?: string; body?: string };
-    if (!body.kind || !body.label) throw badRequest('Evidence needs a kind and a label');
+    // Evidence is a write, so it needs the same tenancy check as the read route.
+    // Without this, a client identity for one tenant could file evidence against
+    // another tenant's lifecycle: the row is created on a client nobody in the
+    // request is authorised for.
+    await assertClientInScope(db(), identity, clientId);
+    const body = req.body as { kind?: unknown; label?: unknown; url?: unknown; body?: unknown };
+    if (typeof body.kind !== 'string' || !body.kind.trim() || typeof body.label !== 'string' || !body.label.trim()) {
+      throw badRequest('Evidence needs a kind and a label, both non-empty strings');
+    }
+    if (body.url !== undefined && typeof body.url !== 'string') throw badRequest('Evidence url must be a string');
+    if (body.body !== undefined && typeof body.body !== 'string') throw badRequest('Evidence body must be a string');
     const row = await addEvidence(db(), {
       clientId, stageKey, kind: body.kind, label: body.label,
-      url: body.url, body: body.body, actorId: identity.userId,
+      url: body.url as string | undefined, body: body.body as string | undefined, actorId: identity.userId,
     });
     return ok({ evidence: row, lifecycle: await lifecycleView(db(), clientId) });
   });
@@ -1473,8 +1569,7 @@ export async function registerRoutes(
   /** Clock history for one timer — every pause, resume and verdict. */
   app.get('/api/clocks/timers/:id/history', async (req) => {
     const { id: timerId } = req.params as { id: string };
-    const timer = await db().get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
-    if (!timer) throw notFound('Timer not found');
+    const timer = await assertTimerInScope(db(), await currentIdentity(req), timerId);
     return ok({ timer, events: await clockHistory(db(), timerId) });
   });
 
@@ -1484,8 +1579,7 @@ export async function registerRoutes(
     const identity = await currentIdentity(req);
     const body = req.body as { reason?: string; category?: 'client' | 'internal' | 'vendor' };
     if (!body.reason?.trim()) throw badRequest('A pause needs a reason — it is excluded from the elapsed measurement.');
-    const timer = await db().get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
-    if (!timer) throw notFound('Timer not found');
+    const timer = await assertTimerInScope(db(), identity, timerId);
     if (timer.outcome !== 'running') throw badRequest(`Only a running clock can be paused (this one is ${timer.outcome}).`);
     const category = body.category ?? 'client';
     const paused = await pauseTimerFor(db(), timer.entity_type, timer.entity_id, body.reason.trim(), {
@@ -1497,8 +1591,7 @@ export async function registerRoutes(
   app.post('/api/clocks/timers/:id/resume', async (req) => {
     const { id: timerId } = req.params as { id: string };
     const identity = await currentIdentity(req);
-    const timer = await db().get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
-    if (!timer) throw notFound('Timer not found');
+    const timer = await assertTimerInScope(db(), identity, timerId);
     if (!timer.paused_at) throw badRequest('This clock is not paused.');
     const resumed = await resumeTimerFor(db(), timer.entity_type, timer.entity_id, { actorId: identity.userId });
     return ok({ timer: resumed, events: await clockHistory(db(), timerId) });
@@ -1736,6 +1829,11 @@ export async function registerRoutes(
     const { id: changeRequestId } = req.params as { id: string };
     const identity = await currentIdentity(req);
     if (!['admin', 'lead'].includes(identity.role)) throw forbidden('Only an admin or lead may decide a change request.');
+    // A change request is a commercial commitment on a client, so the id must be
+    // reachable in the caller's scope before it is decided.
+    const owner = await db().get<{ client_id: string }>('SELECT client_id FROM change_requests WHERE id = ?', [changeRequestId]);
+    if (!owner) throw notFound('Change request not found');
+    await assertClientInScope(db(), identity, owner.client_id);
     const body = req.body as { decision?: 'approved' | 'rejected'; reason?: string };
     if (!body.decision) throw badRequest('decision is required');
     return ok(await decideChangeRequest(db(), {

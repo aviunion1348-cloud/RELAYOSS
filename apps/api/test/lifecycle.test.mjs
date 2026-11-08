@@ -41,12 +41,19 @@ const users = [
   ['u_lead', 'lead@x.io', 'Lee Lead', 'lead'],
   ['u_member', 'mem@x.io', 'Mia Member', 'member'],
   ['u_client', 'client@acme.io', 'Cara Client', 'client'],
+  ['u_stranger', 'stranger@x.io', 'Sam Stranger', 'member'],
 ];
 for (const [id, email, name, role] of users) {
   await db.run('INSERT INTO users (id,email,full_name,role,initials) VALUES (?,?,?,?,?)', [id, email, name, role, name.slice(0, 2)]);
 }
 await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c1','Acme','acme','AC')");
 await db.run("INSERT INTO client_portal_users (user_id,client_id) VALUES ('u_client','c1')");
+// Project grants: the lifecycle routes are tenancy-checked like every other
+// client-scoped route, so staff need real access before a role question is even
+// reached. A member keeps a grant here so the tests prove *capability* denials
+// (403) rather than accidentally proving tenancy denials (404).
+await db.run("INSERT INTO projects (id,key,name,client_id) VALUES ('p1','ACM','Acme Portal','c1')");
+await db.run("INSERT INTO project_members (project_id,user_id,access) VALUES ('p1','u_member','member')");
 
 const { app } = await buildApp({ db, serveStatic: false, logger: false });
 after(async () => {
@@ -325,9 +332,19 @@ test('lifecycle dashboard: shows position, overdue stages and client waits, scop
   assert.ok(typeof c1.overdueCount === 'number');
 
   // A member with no relationship to these clients must not enumerate them.
+  // A member *with* a grant on c1 sees c1 and only c1 — the dashboard is scoped,
+  // not global. The unrelated-member case is covered by the tenancy suite; here
+  // the point is that a grant does not widen the result beyond the granted client.
   const asMember = await get(member, '/api/lifecycle');
-  assert.equal(asMember.status, 200);
-  assert.deepEqual(asMember.body.data.clients, [], 'lifecycle dashboard leaked clients to an unrelated member');
+  assert.equal(asMember.status, 200, JSON.stringify(asMember.body));
+  const visible = asMember.body.data.clients.map((c) => c.clientId).sort();
+  assert.deepEqual(visible, ['c1'], 'a member sees their granted client and nothing else');
+
+  // An ungranted member sees nothing at all.
+  const stranger = await login('u_stranger');
+  const asStranger = await get(stranger, '/api/lifecycle');
+  assert.equal(asStranger.status, 200);
+  assert.deepEqual(asStranger.body.data.clients, [], 'an ungranted member must not see any client');
 });
 
 test('lifecycle: evidence is appended, never overwritten, and needs a label', async () => {

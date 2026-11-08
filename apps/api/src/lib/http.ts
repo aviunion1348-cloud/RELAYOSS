@@ -52,3 +52,47 @@ export function queryList(req: FastifyRequest, key: string): string[] {
   if (!raw) return [];
   return String(raw).split(',').map((s) => s.trim()).filter(Boolean);
 }
+
+/**
+ * Type guards for request bodies.
+ *
+ * A request body is untrusted input with no schema by default, so `body.title`
+ * may be an array, an object, a number or absent. Calling `.trim()` on it throws
+ * a TypeError, which surfaces as a 500 — the caller learns nothing and the server
+ * looks broken. Each of these returns a 400 that names the field instead.
+ *
+ * These exist because the same crash appeared independently in every module that
+ * added a handler: the fix belongs in one place, not in nine.
+ */
+export function requireString(value: unknown, field: string, opts: { min?: number; max?: number } = {}): string {
+  if (typeof value !== 'string') throw badRequest(`${field} must be a string`);
+  const trimmed = value.trim();
+  if (opts.min !== undefined && trimmed.length < opts.min) {
+    throw badRequest(`${field} must be at least ${opts.min} character${opts.min === 1 ? '' : 's'}`);
+  }
+  if (opts.max !== undefined && trimmed.length > opts.max) {
+    throw badRequest(`${field} must be at most ${opts.max} characters`);
+  }
+  return trimmed;
+}
+
+/** Optional string: absent and undefined pass through as undefined, anything else must be a string. */
+export function optionalString(value: unknown, field: string, opts: { max?: number } = {}): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') throw badRequest(`${field} must be a string`);
+  if (opts.max !== undefined && value.length > opts.max) throw badRequest(`${field} must be at most ${opts.max} characters`);
+  return value;
+}
+
+/** A value that will be bound as a SQL parameter must be scalar. */
+export function requireScalar(value: unknown, field: string): string {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  throw badRequest(`${field} must be a single value`);
+}
+
+export function optionalNumber(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) throw badRequest(`${field} must be a number`);
+  return n;
+}

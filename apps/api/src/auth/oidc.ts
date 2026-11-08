@@ -168,9 +168,11 @@ export async function audit(db: Db, state: string, kind: string, subject: string
 
 /** Opportunistic cleanup of expired flows; safe to call on any login. */
 export async function pruneFlows(db: Db): Promise<void> {
-  await db.run(
-    "DELETE FROM oidc_flows WHERE expires_at < datetime('now', '-1 day')",
-  );
+  // A day past expiry is comfortably outside the 10-minute flow window, so a
+  // slow callback can never race the pruner. The cutoff is computed in JS so the
+  // statement is identical on both engines.
+  const cutoff = new Date(Date.now() - 24 * 3_600_000).toISOString().slice(0, 19).replace('T', ' ');
+  await db.run('DELETE FROM oidc_flows WHERE expires_at < ?', [cutoff]);
 }
 
 /** Pre-flight check: what is missing for a working browser login. */

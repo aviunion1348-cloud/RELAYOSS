@@ -67,8 +67,9 @@ export class PostgresDb implements Db {
     return (await this.query<T>(sql, params)).rows[0];
   }
 
-  async run(sql: string, params: SqlParams = []): Promise<void> {
-    await this.query(sql, params);
+  async run(sql: string, params: SqlParams = []): Promise<{ changes: number }> {
+    const result = await this.query(sql, params);
+    return { changes: Number(result?.rowCount ?? 0) };
   }
 
   async exec(sql: string): Promise<void> {
