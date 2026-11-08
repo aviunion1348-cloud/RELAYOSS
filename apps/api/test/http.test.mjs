@@ -263,3 +263,33 @@ test('ops: health reports the live engine, schema version and database probe', a
   assert.ok(data.schemaVersion >= 6);
   assert.ok(!JSON.stringify(data).includes('secret'));
 });
+
+test('PATCH /api/deals/:id validates rather than relying on the CHECK constraints', async () => {
+  // `deals.status` and `deals.probability` are CHECK-constrained, so bad values were
+  // stopped by the database — but as a constraint error, which reached the client as
+  // a 500. A 500 is a server fault report for a caller mistake, and it differs
+  // between SQLite and PostgreSQL, so the contract was engine-dependent.
+  for (const body of [{ status: 'banana' }, { probability: 900 }, { probability: 'high' }, { nextStep: 42 }]) {
+    const res = await request('PATCH', '/api/deals/d1', body);
+    assert.equal(res.statusCode, 400, `${JSON.stringify(body)} was not rejected: ${res.body}`);
+  }
+  const unchanged = await db.get("SELECT status, probability FROM deals WHERE id = 'd1'");
+  assert.equal(unchanged.status, 'open', 'a rejected PATCH still changed the row');
+  assert.equal(Number(unchanged.probability), 60);
+});
+
+test('PATCH /api/deals/:id applies title, and refuses a body that names nothing', async () => {
+  // The route's own probe body has always been `{ title }`, and the handler had no
+  // branch for it: renaming a deal returned 200 with the old name intact.
+  const renamed = await request('PATCH', '/api/deals/d1', { title: '  Acme platform, phase two  ' });
+  assert.equal(renamed.statusCode, 200, renamed.body);
+  const row = await db.get("SELECT title FROM deals WHERE id = 'd1'");
+  assert.equal(row.title, 'Acme platform, phase two', 'the rename was accepted and discarded');
+});
+
+test('PATCH /api/deals/:id rejects an empty body instead of reporting success', async () => {
+  for (const body of [{}, { unknownField: 'x' }]) {
+    const res = await request('PATCH', '/api/deals/d1', body);
+    assert.equal(res.statusCode, 400, 'a no-op PATCH reported success');
+  }
+});

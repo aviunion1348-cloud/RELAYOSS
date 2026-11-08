@@ -993,7 +993,7 @@ export async function registerRoutes(
   app.patch('/api/deals/:id', async (req) => {
     const { id: dealId } = req.params as { id: string };
     const actorId = await actor(req as never);
-    const body = req.body as { stageId?: string; stageKey?: string; status?: string; nextStep?: string; probability?: number; ownerId?: string };
+    const body = req.body as { title?: string; stageId?: string; stageKey?: string; status?: string; nextStep?: string; probability?: number; ownerId?: string };
     const deal = await db().get<Record<string, any>>('SELECT * FROM deals WHERE id = ?', [dealId]);
     if (!deal) throw notFound('Deal not found');
     /*
@@ -1007,6 +1007,60 @@ export async function registerRoutes(
     if (!['admin', 'lead'].includes(dealIdentity.role)) {
       throw forbidden('Only an admin or lead may change a deal');
     }
+    /*
+     * Validate before writing, because a CHECK constraint is not validation.
+     *
+     * `deals.status` and `deals.probability` both have CHECKs, so an out-of-range
+     * value did not corrupt anything — it raised a constraint error, which
+     * surfaced as a 500 from a client-supplied body. A 500 is a server fault
+     * report for a client mistake, and on PostgreSQL it also leaves the request
+     * with a different error shape than SQLite gives. Everything the caller can
+     * get wrong is rejected here, in one place, as a 400.
+     */
+    /*
+     * A PATCH that names no field this route updates is a client mistake, not a
+     * successful write. Returning 200 told the caller the deal had been changed
+     * when nothing had, including for the `{ title }` body the route's own probe
+     * has always sent — see below.
+     */
+    const UPDATABLE = ['title', 'stageId', 'stageKey', 'status', 'nextStep', 'probability', 'ownerId'];
+    if (!UPDATABLE.some((k) => (body as Record<string, unknown>)[k] !== undefined)) {
+      throw badRequest(`Nothing to update. Supply at least one of: ${UPDATABLE.join(', ')}`);
+    }
+    /*
+     * `title` was accepted and discarded.
+     *
+     * The route's own probe body has always been `{ title }`, and the handler had
+     * no branch for it, so renaming a deal returned 200 with the old name intact.
+     * A field the API documents and silently drops is worse than one it rejects:
+     * the caller believes the write happened.
+     */
+    if (body.title !== undefined) {
+      if (typeof body.title !== 'string' || !body.title.trim()) throw badRequest('title must be a non-empty string');
+      if (body.title.length > 300) throw badRequest('title must be 300 characters or fewer');
+    }
+    if (body.status !== undefined && !['open', 'won', 'lost', 'paused'].includes(String(body.status))) {
+      throw badRequest('status must be one of: open, won, lost, paused');
+    }
+    if (body.probability !== undefined) {
+      const p = body.probability;
+      if (typeof p !== 'number' || !Number.isInteger(p) || p < 0 || p > 100) {
+        throw badRequest('probability must be an integer between 0 and 100');
+      }
+    }
+    if (body.nextStep !== undefined && typeof body.nextStep !== 'string') {
+      throw badRequest('nextStep must be a string');
+    }
+    if (body.nextStep !== undefined && body.nextStep.length > 2000) {
+      throw badRequest('nextStep must be 2000 characters or fewer');
+    }
+    if (body.ownerId !== undefined) {
+      if (typeof body.ownerId !== 'string' || !body.ownerId) throw badRequest('ownerId must be a non-empty string');
+      const owner = await db().get('SELECT 1 AS ok FROM users WHERE id = ?', [body.ownerId]);
+      if (!owner) throw badRequest(`No such user: ${body.ownerId}`);
+    }
+    if (body.stageId !== undefined && typeof body.stageId !== 'string') throw badRequest('stageId must be a string');
+    if (body.stageKey !== undefined && typeof body.stageKey !== 'string') throw badRequest('stageKey must be a string');
     if (body.stageId || body.stageKey) {
       const stage = body.stageId
         ? await db().get<Record<string, any>>('SELECT * FROM pipeline_stages WHERE id = ?', [body.stageId])
@@ -1034,6 +1088,7 @@ export async function registerRoutes(
         body.status, body.status === 'won' ? nowIso() : deal.won_at, body.status === 'lost' ? nowIso() : deal.lost_at, nowIso(), dealId,
       ]);
     }
+    if (body.title !== undefined) await db().run('UPDATE deals SET title = ?, updated_at = ? WHERE id = ?', [body.title.trim(), nowIso(), dealId]);
     if (body.nextStep !== undefined) await db().run('UPDATE deals SET next_step = ? WHERE id = ?', [body.nextStep, dealId]);
     if (body.probability !== undefined) await db().run('UPDATE deals SET probability = ? WHERE id = ?', [body.probability, dealId]);
     if (body.ownerId !== undefined) await db().run('UPDATE deals SET owner_id = ? WHERE id = ?', [body.ownerId, dealId]);
