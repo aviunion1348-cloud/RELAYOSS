@@ -19,9 +19,7 @@ on:
 permissions:
   contents: read
 
-env:
-  # No authentication variables. The suite asserts that the API works without
-  # them — supplying them would weaken that assertion.
+# No `env:` block: no authentication variables are needed by this drill.
 
 jobs:
   drill:

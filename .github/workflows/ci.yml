@@ -12,11 +12,8 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # Never a real secret: CI runs the development auth mode explicitly, and the
-  # boot guard refuses dev auth when NODE_ENV=production.
-  # No authentication variables. The suite asserts that the API works without
-  # them — supplying them would weaken that assertion.
+# No `env:` block, deliberately. The suite asserts that the API works with no
+# authentication environment at all, so supplying one would weaken the assertion.
 
 jobs:
   verify:
