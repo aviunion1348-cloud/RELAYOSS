@@ -440,3 +440,68 @@ test('exposure: staff rates are withheld from a client but kept for staff', asyn
     'a plain member read a cost rate',
   );
 });
+
+/* ============ write paths that trusted the id in the URL, all three fixed =====
+ *
+ * `POST /api/tasks/:id/comments`, `POST /api/tasks/:id/checklist` and
+ * `PATCH /api/tasks/:id/turnover/:gateId` each wrote against a task without checking
+ * tenancy. With a task id that does not exist the write failed on a foreign key and
+ * surfaced as a 500, so a missing authorisation decision looked like a database fault.
+ * Each test below asserts the refusal status *and* that nothing was written.
+ */
+async function asClientB(method, url, payload) {
+  const res = await app.inject({
+    method,
+    url,
+    headers: { cookie: clientB.cookie, 'x-csrf-token': clientB.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify(payload ?? {}),
+  });
+  return { status: res.statusCode, body: res.json() };
+}
+
+test('idor: a comment cannot be attached to a foreign task, and no row appears', async () => {
+  const before = await db.get("SELECT COUNT(*) AS c FROM task_comments WHERE task_id = 't_visible'");
+  const res = await asClientB('POST', '/api/tasks/t_visible/comments', { body: 'injected' });
+  assert.equal(res.status, 404, 'a foreign client commented on another tenant\'s task');
+  const after = await db.get("SELECT COUNT(*) AS c FROM task_comments WHERE task_id = 't_visible'");
+  assert.equal(Number(after.c), Number(before.c), 'the refused comment was still written');
+});
+
+test('idor: a checklist item cannot be created on a foreign task', async () => {
+  const before = await db.get("SELECT COUNT(*) AS c FROM task_checklist WHERE task_id = 't_visible'");
+  const res = await asClientB('POST', '/api/tasks/t_visible/checklist', { label: 'injected' });
+  assert.equal(res.status, 404, 'a foreign client added a checklist item');
+  const after = await db.get("SELECT COUNT(*) AS c FROM task_checklist WHERE task_id = 't_visible'");
+  assert.equal(Number(after.c), Number(before.c), 'the refused item was still written');
+});
+
+test('idor: a turnover gate cannot be approved by a foreign identity', async () => {
+  const res = await asClientB('PATCH', '/api/tasks/t_visible/turnover/first_demo', {
+    status: 'pass',
+    evidence: 'should not be accepted',
+  });
+  assert.equal(res.status, 404, 'a foreign client approved a turnover gate');
+  // And no gate row was created as a side effect of the attempt.
+  const orphan = await db.get("SELECT COUNT(*) AS c FROM turnover_checks WHERE task_id = 't_visible'");
+  assert.equal(Number(orphan.c), 0, 'the refused attempt still created gate rows');
+});
+
+test('idor: a write to a task that does not exist is a 404, never a 500', async () => {
+  for (const [method, url, payload] of [
+    ['POST', '/api/tasks/t_no_such_task/comments', { body: 'x' }],
+    ['POST', '/api/tasks/t_no_such_task/checklist', { label: 'x' }],
+    ['PATCH', '/api/tasks/t_no_such_task/turnover/first_demo', { status: 'pending' }],
+  ]) {
+    const res = await app.inject({
+      method,
+      url,
+      headers: { cookie: admin.cookie, 'x-csrf-token': admin.csrf, 'content-type': 'application/json' },
+      payload: JSON.stringify(payload),
+    });
+    assert.equal(
+      res.statusCode,
+      404,
+      `${method} ${url} on a missing task must be 404, got ${res.statusCode}`,
+    );
+  }
+});

@@ -402,6 +402,24 @@ export async function registerRoutes(
     const { id: taskId } = req.params as { id: string };
     const body = (req.body as { body?: string })?.body?.trim();
     if (!body) throw badRequest('Comment body is required');
+
+    /*
+     * Resolve the task and assert scope before writing.
+     *
+     * This route had no tenancy check: a client or partner identity could attach a
+     * comment to any task id it knew. With an id that did not exist the insert failed
+     * on the foreign key and surfaced as a 500 — a constraint violation standing in
+     * for an authorisation decision, which is both a worse API and a small schema
+     * disclosure. 404 for a foreign or absent task, matching every other denial.
+     */
+    const task = await db().get<{ id: string; project_id: string }>(
+      'SELECT id, project_id FROM tasks WHERE id = ?',
+      [taskId],
+    );
+    await assertProjectInScope(await resolveReadScope(db(), await currentIdentity(req)), task?.project_id ?? null);
+    if (!task) throw notFound('Task not found');
+    await requireProjectAccess(db(), await currentIdentity(req), task.project_id, 'write');
+
     const commentId = id('cmt');
     await db().run('INSERT INTO task_comments (id,task_id,author_id,body) VALUES (?,?,?,?)', [commentId, taskId, await actor(req as never), body]);
     await db().run('INSERT INTO activity (entity_type,entity_id,actor_id,verb,summary) VALUES (?,?,?,?,?)', [
@@ -414,6 +432,17 @@ export async function registerRoutes(
   app.post('/api/tasks/:id/checklist', async (req) => {
     const { id: taskId } = req.params as { id: string };
     const { label } = req.body as { label: string };
+    if (!label || !String(label).trim()) throw badRequest('Checklist item label is required');
+
+    // Same shape as the comment route: resolve, assert tenancy, then capability.
+    const task = await db().get<{ id: string; project_id: string }>(
+      'SELECT id, project_id FROM tasks WHERE id = ?',
+      [taskId],
+    );
+    await assertProjectInScope(await resolveReadScope(db(), await currentIdentity(req)), task?.project_id ?? null);
+    if (!task) throw notFound('Task not found');
+    await requireProjectAccess(db(), await currentIdentity(req), task.project_id, 'write');
+
     const itemId = id('chk');
     const pos = ((await db().get<{ m: number | null }>('SELECT MAX(position) AS m FROM task_checklist WHERE task_id = ?', [taskId]))?.m ?? 0) + 1;
     await db().run('INSERT INTO task_checklist (id,task_id,label,done,position) VALUES (?,?,?,0,?)', [itemId, taskId, label, pos]);
@@ -466,6 +495,20 @@ export async function registerRoutes(
       throw badRequest('Passing a turnover gate requires written evidence — that is the whole point of the gate.');
     }
     if (status === 'waived') await requireRole(req, ['admin', 'lead']);
+
+    /*
+     * Approving a turnover gate is a governance act, so it needs the same tenancy
+     * check as any other write. Without it, `ensureTaskChecks` inserted gate rows for
+     * a task the caller cannot see and the update then failed on the foreign key — a
+     * 500 where a 404 belongs.
+     */
+    const gateTask = await db().get<{ id: string; project_id: string }>(
+      'SELECT id, project_id FROM tasks WHERE id = ?',
+      [taskId],
+    );
+    await assertProjectInScope(await resolveReadScope(db(), await currentIdentity(req)), gateTask?.project_id ?? null);
+    if (!gateTask) throw notFound('Task not found');
+    await requireProjectAccess(db(), await currentIdentity(req), gateTask.project_id, 'write');
 
     await ensureTaskChecks(db(), taskId);
     await db().run(
