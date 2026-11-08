@@ -13,3 +13,4 @@ data/
 *.log
 .vite/
 .pgdata/
+backups/

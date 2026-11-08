@@ -21,12 +21,16 @@
     "test": "node --no-warnings --test apps/api/test/*.test.mjs",
     "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/gen-pg-migrations.mjs --check",
     "build:api": "npm run build -w @relay/api",
-    "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build",
+    "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build && npm run smoke:web",
     "pg:start": "node scripts/pg-dev.mjs start",
     "pg:stop": "node scripts/pg-dev.mjs stop",
     "pg:migrate": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts migrate",
     "pg:reset": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts reset",
-    "test:pg": "node scripts/test-pg.mjs"
+    "test:pg": "node scripts/test-pg.mjs",
+    "backup": "node scripts/backup.mjs backup",
+    "backup:verify": "node scripts/backup.mjs drill",
+    "smoke:web": "node scripts/smoke-web.mjs",
+    "db:status": "node apps/api/src/db/cli.ts status"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

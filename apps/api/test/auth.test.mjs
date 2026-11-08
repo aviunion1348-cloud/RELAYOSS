@@ -367,3 +367,13 @@ test('audit: successful and failed logins are recorded with actor and ip', async
   assert.ok(rows.length >= 1);
   assert.ok(rows[0].user_id);
 });
+
+test('security: operational endpoints are anonymous but expose no user data', async () => {
+  for (const path of ['/api/health', '/api/live', '/api/ready', '/api/metrics']) {
+    const res = await req('GET', path);
+    assert.equal(res.statusCode, 200, `${path} should be reachable by an orchestrator`);
+    assert.ok(!/maya@|lead@|admin@/i.test(res.body), `${path} must not leak user identities`);
+  }
+  // Everything else stays private.
+  assert.equal((await req('GET', '/api/dashboard')).statusCode, 401);
+});

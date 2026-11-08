@@ -20,6 +20,7 @@ import { createAuth } from './auth/middleware.ts';
 import { assertAuthConfiguration } from './auth/index.ts';
 import { RateLimiter, LoginThrottle } from './lib/rate-limit.ts';
 import { tooMany } from './lib/http.ts';
+import { inc, routeTemplate } from './lib/metrics.ts';
 import { HttpError } from './lib/http.ts';
 
 export interface BuildOptions {
@@ -95,10 +96,32 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     }
   });
 
+  /**
+   * Structured access log + RED metrics. One JSON line per request with the
+   * correlation id, route template (never the raw URL: ids are not cardinality
+   * we can afford) and duration. Request bodies and headers are never logged.
+   */
   app.addHook('onResponse', async (req, reply) => {
-    if (!req.log.info) return;
     const startedAt = (req as unknown as { startedAt?: number }).startedAt ?? Date.now();
-    req.log.info({ statusCode: reply.statusCode, ms: Date.now() - startedAt, path: req.url }, 'request');
+    const durationMs = Date.now() - startedAt;
+    const route = routeTemplate(req.url);
+    const statusClass = `${Math.floor(reply.statusCode / 100)}xx`;
+
+    inc('relay_http_requests_total', { route, method: req.method, status: statusClass });
+    if (durationMs > 500) inc('relay_http_slow_total', { route });
+
+    if (!req.log.info) return;
+    req.log.info(
+      {
+        reqId: req.id,
+        method: req.method,
+        route,
+        status: reply.statusCode,
+        ms: durationMs,
+        actor: req.identity?.userId ?? null,
+      },
+      'request',
+    );
   });
 
   app.setErrorHandler((rawErr: unknown, req, reply) => {

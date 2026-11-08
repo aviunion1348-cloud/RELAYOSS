@@ -230,3 +230,36 @@ test('unknown /api routes 404 with JSON, never HTML', async () => {
   assert.match(res.headers['content-type'], /application\/json/);
 });
 
+
+/* ------------------------------------------------------- observability -- */
+test('ops: liveness, readiness and metrics are exposed without leaking secrets', async () => {
+  const live = await request('GET', '/api/live');
+  assert.equal(live.statusCode, 200);
+  assert.equal(live.json().data.live, true);
+
+  const ready = await request('GET', '/api/ready');
+  assert.equal(ready.statusCode, 200);
+  assert.equal(ready.json().data.ready, true);
+
+  const metrics = await request('GET', '/api/metrics');
+  assert.equal(metrics.statusCode, 200);
+  assert.match(metrics.headers['content-type'], /text\/plain/);
+  assert.match(metrics.body, /relay_http_requests_total/);
+  assert.match(metrics.body, /relay_clocks_overdue/);
+  // No credential material or connection strings in the exposition.
+  assert.ok(!/password|postgres:\/\/|SESSION_SECRET|Bearer /i.test(metrics.body));
+
+  const json = await app.inject({ method: 'GET', url: '/api/metrics', headers: { accept: 'application/json', cookie: session.cookie } });
+  assert.equal(json.statusCode, 200);
+  assert.ok(json.json().data.text.includes('relay_process_uptime_seconds'));
+});
+
+test('ops: health reports the live engine, schema version and database probe', async () => {
+  const res = await request('GET', '/api/health');
+  const data = res.json().data;
+  assert.equal(data.database.ok, true);
+  assert.ok(['postgres', 'sqlite-wal'].includes(data.storage));
+  assert.equal(data.storage, data.database.engine === 'postgres' ? 'postgres' : 'sqlite-wal');
+  assert.ok(data.schemaVersion >= 6);
+  assert.ok(!JSON.stringify(data).includes('secret'));
+});

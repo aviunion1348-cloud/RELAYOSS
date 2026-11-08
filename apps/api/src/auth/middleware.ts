@@ -152,7 +152,9 @@ export function createAuth(ctx: AuthContext) {
     async authenticate(req: FastifyRequest, _reply: FastifyReply) {
       const url = req.url.split('?')[0];
       if (!url.startsWith('/api')) return;
-      if (url.startsWith('/api/health')) return;
+      // Operational probes are machine-consumed (orchestrators, Prometheus) and
+      // expose no user data: health, liveness, readiness and metrics.
+      if (url.startsWith('/api/health') || url === '/api/live' || url === '/api/ready' || url === '/api/metrics') return;
 
       // Creating a session is the one truly anonymous operation.
       if (url === '/api/auth/dev-login' || url === '/api/auth/oidc/exchange') return;

@@ -16,6 +16,7 @@ import { SLA_HOURS, scoreRisk, slaState } from '../domain/risk.ts';
 import { plan } from '../domain/planner.ts';
 import { createTask, updateTask, taskDetail, recordAcceptance, ensureTaskChecks, ACCEPTANCE_LADDER } from '../services/tasks.ts';
 import { clockHealth, liveTimers, resolveTimer, startTimer, sweepTimers, closeTimersFor } from '../services/clocks.ts';
+import { setGauge, renderMetrics, sweeperStats } from '../lib/metrics.ts';
 
 const db = () => getDb();
 
@@ -69,7 +70,7 @@ export async function registerRoutes(
   opts: { auth?: import('../auth/middleware.ts').AuthApi } = {},
 ) {
   /* ------------------------------------------------------------- health -- */
-  app.get('/api/health', async () => {
+  app.get('/api/health', async (_req, reply) => {
     const started = Date.now();
     const engine = db().dialect;
     let dbOk = true;
@@ -81,23 +82,10 @@ export async function registerRoutes(
       dbOk = false;
     }
     const latencyMs = Date.now() - started;
-    // Degraded (503) when the database is unreachable: orchestrators must be
-    // able to tell "process is up" from "process can serve requests".
-    if (!dbOk) {
-      return {
-        status: 'degraded',
-        service: 'relay-api',
-        env: config.env,
-        schemaVersion: version,
-        latencyMs,
-        uptimeSec: Math.round(process.uptime()),
-        storage: engine === 'postgres' ? 'postgres' : 'sqlite-wal',
-        database: { ok: false, engine, latencyMs },
-      };
-    }
-    return ok({
-      status: 'ok',
+    const payload = {
+      status: dbOk ? 'ok' : 'degraded',
       service: 'relay-api',
+      version: process.env.APP_VERSION ?? '1.0.0',
       env: config.env,
       schemaVersion: version,
       latencyMs,
@@ -106,7 +94,57 @@ export async function registerRoutes(
       database: { ok: dbOk, engine, latencyMs },
       worker: { name: 'clock-sweeper', intervalMs: config.sweepIntervalMs },
       memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
-    });
+      authMode: config.authMode,
+    };
+    // No secrets, no connection strings, no user data — safe for an
+    // unauthenticated probe to read.
+    if (!dbOk) return reply.code(503).send({ error: { code: 'unavailable', message: 'Database unreachable', details: payload } });
+    return ok(payload);
+  });
+
+  /** Liveness: is the process running? Never touches the database. */
+  app.get('/api/live', async () => ok({ live: true, uptimeSec: Math.round(process.uptime()) }));
+
+  /** Readiness: can we serve traffic? Fails when the database is unreachable. */
+  app.get('/api/ready', async (_req, reply) => {
+    let ready = true;
+    try {
+      ready = db().ping ? await db().ping!() : true;
+    } catch {
+      ready = false;
+    }
+    if (!ready) return reply.code(503).send({ error: { code: 'unavailable', message: 'Database unreachable' } });
+    return ok({ ready: true, engine: db().dialect });
+  });
+
+  /**
+   * Prometheus text exposition. Business gauges are computed on scrape so the
+   * delivery numbers cannot drift from the database they describe.
+   */
+  app.get('/api/metrics', async (req, reply) => {
+    const wantsJson = String((req.headers.accept ?? '')).includes('application/json');
+    const taskRows = await db().all<{ status: string; c: number }>('SELECT status, COUNT(*) AS c FROM tasks GROUP BY status');
+    for (const row of taskRows) setGauge(`relay_tasks_${row.status}`, Number(row.c), `Tasks in status ${row.status}`);
+
+    const overdue = await db().get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM sla_timers WHERE outcome = 'running' AND due_at < ?",
+      [new Date().toISOString().slice(0, 19).replace('T', ' ')],
+    );
+    setGauge('relay_clocks_overdue', Number(overdue?.c ?? 0), 'Running clocks past their deadline');
+
+    const missed = await db().all<{ clock_key: string; c: number }>(
+      "SELECT clock_key, COUNT(*) AS c FROM sla_timers WHERE outcome = 'missed' GROUP BY clock_key",
+    );
+    for (const row of missed) setGauge(`relay_clock_missed_${row.clock_key.replace(/-/g, '_')}`, Number(row.c), 'Missed clocks by key');
+
+    setGauge('relay_worker_sweeps_total', sweeperStats().sweeps, 'Clock sweeper runs');
+    setGauge('relay_worker_failures_total', sweeperStats().failures, 'Clock sweeper failures');
+    setGauge('relay_process_uptime_seconds', Math.round(process.uptime()), 'Process uptime');
+    setGauge('relay_process_resident_memory_bytes', process.memoryUsage().rss, 'Resident set size');
+
+    const body = renderMetrics();
+    reply.header('content-type', wantsJson ? 'application/json' : 'text/plain; version=0.0.4; charset=utf-8');
+    return wantsJson ? { data: { text: body } } : body;
   });
 
   /* -------------------------------------------------------------- meta --- */

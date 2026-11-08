@@ -9,10 +9,20 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  # Never a real secret: CI runs the development auth mode explicitly, and the
+  # boot guard refuses dev auth when NODE_ENV=production.
+  SESSION_SECRET: ci-session-secret-not-a-production-value
+  AUTH_MODE: dev
+
 jobs:
   verify:
-    name: Typecheck · Test · Build · Guard
+    name: Guard · Typecheck · Test (SQLite + PostgreSQL 16) · Build · Smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -21,33 +31,80 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci --no-audit --no-fund
+      - name: Lockfile integrity
+        run: npm ci --no-audit --no-fund
 
-      - name: Architecture guard (no JSON file pretending to be a DB)
+      - name: Dependency audit (high and critical only)
+        run: npm audit --audit-level=high || echo "::warning::npm audit reported findings — review before release"
+
+      - name: Secret scan
+        run: |
+          # Fail on obvious committed credentials. .env.example is documentation.
+          if git grep -nIE '(BEGIN (RSA|EC|OPENSSH) PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{32,})' -- . ':!*.example' ':!docs/*'; then
+            echo "::error::Potential secret committed"; exit 1
+          fi
+          echo "✓ no credential patterns found"
+
+      - name: Architecture guards
         run: npm run guard
 
-      - name: Typecheck API
-        run: npx tsc -p apps/api --noEmit
+      - name: Typecheck (API + web, strict)
+        run: npm run typecheck
 
-      - name: Typecheck web
-        run: npx tsc -p apps/web --noEmit
-
-      - name: Migrations + seed against a fresh database
+      - name: SQLite migrations from a clean database
         run: |
           npm run build:api
           DB_PATH=./data/ci.sqlite node apps/api/dist/db/cli.js reset
           DB_PATH=./data/ci.sqlite node apps/api/dist/db/cli.js status
 
-      - name: API tests
+      - name: Unit, governance and HTTP contract tests (SQLite)
         run: npm test
+
+      - name: PostgreSQL 16 conformance (migrations · seed · governance · auth · resilience · HTTP)
+        run: npm run test:pg
+
+      - name: Backup and restore drill
+        run: npm run backup:verify
 
       - name: Web production build
         run: npm run build -w @relay/web
 
-      - name: Postgres schema applies cleanly
+      - name: Server-render smoke test for every screen
+        run: npm run smoke:web
+
+      - name: Docker image builds
+        run: docker build -t relay-oss:ci .
+
+      - name: Docker fresh-start with PostgreSQL 16
         run: |
-          docker run -d --name pg -e POSTGRES_PASSWORD=pg -e POSTGRES_USER=relay -e POSTGRES_DB=relay -p 5432:5432 postgres:16-alpine
-          for i in $(seq 1 30); do docker exec pg pg_isready -U relay -d relay && break; sleep 2; done
-          docker run --rm --network host -v "$PWD/db/postgres:/sql:ro" -e PGPASSWORD=pg postgres:16-alpine \
-            sh -c 'until psql -h 127.0.0.1 -U relay -d relay -c "select 1" >/dev/null 2>&1; do sleep 1; done; psql -h 127.0.0.1 -U relay -d relay -v ON_ERROR_STOP=1 -f /sql/schema.sql'
-          docker exec pg psql -U relay -d relay -c "\dt" | head -40
+          docker compose up -d --build
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4000/api/ready >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:4000/api/health
+          docker compose logs --tail=40
+          docker compose down -v
+
+      - name: Upload build artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-build
+          path: |
+            apps/web/dist
+            apps/api/dist
+          retention-days: 7
+
+  audit-trail:
+    name: Requirement traceability present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Traceability document must exist and every requirement must have a status
+        run: |
+          test -f docs/REQUIREMENT-TRACEABILITY.md || { echo "::error::docs/REQUIREMENT-TRACEABILITY.md missing"; exit 1; }
+          # Every row must declare one of the four permitted statuses.
+          missing=$(grep -E '^\| *R[0-9]+' docs/REQUIREMENT-TRACEABILITY.md | grep -vcE 'Verified|Incomplete|Blocked|N/A' || true)
+          echo "rows without a status: $missing"
+          test "$missing" -eq 0 || { echo "::error::traceability rows missing a status"; exit 1; }

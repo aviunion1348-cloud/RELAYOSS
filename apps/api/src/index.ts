@@ -8,29 +8,29 @@
 import { config } from './config.ts';
 import { buildApp } from './app.ts';
 import { sweepTimers } from './services/clocks.ts';
+import { recordSweep, setSweepRunning } from './lib/metrics.ts';
 import { getDb, closeDb } from './db/index.ts';
 
 const { app } = await buildApp();
 const db = getDb();
-export const workerStats = () => ({ sweeps, sweepFailures, running: sweeping });
+
 
 // Background sweeper: every overdue clock becomes a missed record + activity row.
 const SWEEP_MS = Number(process.env.SWEEP_INTERVAL_MS ?? 60_000);
 let sweeping = false;
-let sweeps = 0;
-let sweepFailures = 0;
 const sweeper = setInterval(() => {
   // Re-entrancy guard: a slow sweep must never overlap itself, otherwise two
   // workers could double-notify the same missed clock.
   if (sweeping) return;
   sweeping = true;
+  setSweepRunning(true);
   void (async () => {
     try {
       const swept = await sweepTimers(db);
-      sweeps += 1;
+      recordSweep({ count: swept });
       if (swept) app.log.warn({ swept }, 'clocks swept');
     } catch (err) {
-      sweepFailures += 1;
+      recordSweep({ count: 0, failed: true });
       app.log.error({ err }, 'sweep failed');
     } finally {
       sweeping = false;
