@@ -425,6 +425,103 @@ async function main() {
       if (bad.length) throw new Error(`refused requests during normal use: ${bad.slice(0, 5).join(' | ')}`);
     });
 
+    await step('no screen is still buffering after it settles', async () => {
+      /**
+       * The user's report, stated as an assertion.
+       *
+       * "The dashboard opens but nothing works when clicked — they are just
+       * buffering." A skeleton is the shape of that failure, and it is invisible
+       * to every status-code test because everything answers 200. So this walks
+       * the navigation the way a person does and requires each screen to replace
+       * its placeholders with content.
+       *
+       * The timeout is generous (5s) because a cold serverless instance is slow
+       * to answer its first request; the defect being guarded against does not
+       * settle at all.
+       */
+      const stuck = [];
+      const ctx = await browser.newContext({ baseURL: BASE });
+      const p = await ctx.newPage();
+      /*
+       * The product's own route list, taken from the sidebar in Shell.tsx. Note
+       * /intel, not /intelligence: an unknown path is redirected to the dashboard,
+       * so asserting on a route that does not exist would pass while testing the
+       * wrong screen.
+       */
+      const routes = ['/', '/board', '/pipeline', '/clocks', '/projects', '/workload', '/qa', '/releases', '/clients', '/partners', '/intel', '/docs'];
+      for (const route of routes) {
+        await p.goto(route, { waitUntil: 'domcontentloaded' });
+        // Wait for content, not for network idle: the pages poll on intervals.
+        const settled = await p
+          .waitForFunction(() => document.querySelectorAll('.shimmer').length === 0, { timeout: 5000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!settled) {
+          const remaining = await p.evaluate(() => document.querySelectorAll('.shimmer').length);
+          stuck.push(`${route} (${remaining} placeholders after 5s)`);
+          continue;
+        }
+        // A settled screen must contain something a reader can use, or say why not.
+        const text = await p.evaluate(() => document.body.innerText.trim().length);
+        if (text < 120) stuck.push(`${route} (settled but only ${text} characters of text)`);
+      }
+      await ctx.close();
+      if (stuck.length) throw new Error(`screens never stopped loading: ${stuck.join(' | ')}`);
+    });
+
+    await step('a failing API is reported on screen instead of buffering', async () => {
+      /**
+       * The same defect, forced. Every API call is answered with 503 — the shape a
+       * deployment with no database produces — and the dashboard must say so. If
+       * the old behaviour ever returns, this hangs on an animated skeleton and the
+       * step fails on its timeout rather than passing quietly.
+       *
+       * 503 is also the status that must never be reported as a network fault: the
+       * API answered, and it explained itself.
+       */
+      const ctx = await browser.newContext({ baseURL: BASE });
+      const p = await ctx.newPage();
+      await p.route('**/api/**', (route) =>
+        route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'misconfigured',
+              message: 'The database is not configured.',
+              stage: 'database',
+              summary: 'No DATABASE_URL is set and SQLite is unavailable in this runtime.',
+              missing: ['DATABASE_URL'],
+              invalid: [],
+              optional: [],
+              remedy: ['Set DATABASE_URL to a PostgreSQL connection string'],
+            },
+          }),
+        }),
+      );
+      await p.goto('/', { waitUntil: 'domcontentloaded' });
+
+      const explained = await p
+        .waitForFunction(
+          () => /could not load|could not reach|not configured yet|rejected the request/i.test(document.body.innerText),
+          { timeout: 8000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      const placeholders = await p.evaluate(() => document.querySelectorAll('.shimmer').length);
+      const offeredRetry = await p.evaluate(() => /retry/i.test(document.body.innerText));
+      const bodyText = await p.evaluate(() => document.body.innerText.slice(0, 600));
+      await ctx.close();
+
+      if (!explained) {
+        throw new Error(`a broken API was not reported on the dashboard. Placeholders on screen: ${placeholders}. Text: ${bodyText}`);
+      }
+      if (placeholders > 0) {
+        throw new Error(`the dashboard kept ${placeholders} loading placeholder(s) while reporting the failure`);
+      }
+      if (!offeredRetry) throw new Error('the failure was reported but no retry was offered');
+    });
+
     await browser.close();
   } finally {
     server.kill('SIGTERM');
