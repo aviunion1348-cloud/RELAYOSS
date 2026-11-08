@@ -546,3 +546,26 @@ test('idor: a signatory decision cannot be recorded on another tenant\'s contrac
   const row = await db.get("SELECT state FROM legal_signatories WHERE id = 'sig_scope'");
   assert.equal(row.state, 'pending', 'the refused decision was still recorded');
 });
+
+test('partner routes: an unknown partner id is 404, not an empty success', async () => {
+  // `assertPartner` used to return early for staff, before the partner was looked
+  // up at all, so `GET /api/partners/anything/devices` answered `200 []` — an
+  // invented id was indistinguishable from a partner that genuinely has no
+  // devices. Staff are still allowed through for real partners (partners are
+  // cross-tenant by design); only existence is now unconditional.
+  for (const id of ['pa_does_not_exist', 'p1', 'c_a']) {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/partners/${id}/devices`,
+      headers: { cookie: lead.cookie },
+    });
+    assert.equal(res.statusCode, 404, `an unknown partner id "${id}" was answered as if it existed`);
+  }
+  // The real partner still resolves for staff.
+  const real = await app.inject({
+    method: 'GET',
+    url: '/api/partners/pa1/devices',
+    headers: { cookie: lead.cookie },
+  });
+  assert.equal(real.statusCode, 200, 'the existence check broke the legitimate staff path');
+});

@@ -1091,7 +1091,19 @@ export async function registerRoutes(
    * transaction as the write — a check that runs in a separate round trip can be
    * raced by two concurrent registrations.
    */
+  /**
+   * Partners are cross-tenant by design — a partner is an external agency that
+   * may be engaged on several clients at once — so this is not a client-tenant
+   * scope check and staff are legitimately allowed through.
+   *
+   * Staff bypass previously short-circuited before the partner was looked up, so
+   * `GET /api/partners/<anything>/devices` answered `200 []`: an unknown id
+   * looked exactly like a partner with no devices. Existence is now checked for
+   * every caller; *authorisation* still differs by identity.
+   */
   const assertPartner = async (identity: Identity, partnerId: string) => {
+    const exists = await db().get('SELECT 1 AS ok FROM partners WHERE id = ?', [partnerId]);
+    if (!exists) throw notFound(`Partner "${partnerId}" does not exist.`);
     if (identity.role === 'admin' || identity.role === 'lead') return;
     const row = await db().get(
       "SELECT 1 AS ok FROM partner_iam_users WHERE partner_id = ? AND user_id = ? AND status = 'active'",

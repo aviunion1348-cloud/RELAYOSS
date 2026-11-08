@@ -311,6 +311,10 @@ async function main() {
   const fixtures = {
     ids: {
       project: 'p1', partner: 'pa1', client: 'c1', timer: String(timerId ?? 'tm_missing'),
+      // Without this every `:id` task probe fell through to `ids.project` and asked
+      // for /api/tasks/p1 — a project id. The route 404'd for the *right* reason and
+      // the registry recorded it as a missing authz check in ten routes at once.
+      task: taskId || 'task_missing',
       release: release?.id ?? 'rel_missing', qa: qa?.id ?? 'qa_missing',
       legalDoc: doc?.id ?? 'doc_missing', thread: thread?.id ?? 'thr_missing',
       changeRequest: change?.id ?? 'chg_missing', notification: notif?.id ?? 'notif_missing',

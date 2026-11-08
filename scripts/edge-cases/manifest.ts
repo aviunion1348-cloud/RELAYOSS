@@ -160,8 +160,8 @@ export const ROUTE_META: Record<string, Partial<RouteDef>> = {
   'DELETE /api/tasks/:id': { needsId: 'task' },
   'POST /api/tasks/:id/comments': { needsId: 'task', body: { body: 'probe' } },
   'POST /api/tasks/:id/checklist': { okStatus: 200, needsId: 'task', body: { label: 'probe item' } },
-  'PATCH /api/tasks/:id/checklist/:itemId': { needsId: 'taskChecklist', body: { done: true } },
-  'PATCH /api/tasks/:id/turnover/:gateId': { needsId: 'taskGate', body: { status: 'pass', evidence: 'Edge probe: turnover evidence recorded by the registry.' } },
+  'PATCH /api/tasks/:id/checklist/:itemId': { needsId: 'task', body: { done: true } },
+  'PATCH /api/tasks/:id/turnover/:gateId': { needsId: 'task', body: { status: 'pass', evidence: 'Edge probe: turnover evidence recorded by the registry.' } },
   'POST /api/tasks/:id/acceptance': { okStatus: 200, needsId: 'task', body: { step: 'internal_review', state: 'passed' } },
   'POST /api/deals': { body: { title: 'Probe deal', clientId: 'c1' } },
   'PATCH /api/deals/:id': { needsId: 'deal', body: { title: 'Probe deal renamed' } },
@@ -224,8 +224,8 @@ export const ROUTE_SURFACE: RouteDef[] = [
   { method: 'DELETE', path: '/api/tasks/:id', needsId: 'task' },
   { method: 'POST', path: '/api/tasks/:id/comments', okStatus: 200, needsId: 'task', body: { body: 'probe' } },
   { method: 'POST', path: '/api/tasks/:id/checklist', okStatus: 200, needsId: 'task', body: { text: 'probe item' } },
-  { method: 'PATCH', path: '/api/tasks/:id/checklist/:itemId', needsId: 'taskChecklist', body: { done: true } },
-  { method: 'PATCH', path: '/api/tasks/:id/turnover/:gateId', needsId: 'taskGate', body: { status: 'pass', evidence: 'Edge probe: turnover evidence recorded by the registry.' } },
+  { method: 'PATCH', path: '/api/tasks/:id/checklist/:itemId', needsId: 'task', body: { done: true } },
+  { method: 'PATCH', path: '/api/tasks/:id/turnover/:gateId', needsId: 'task', body: { status: 'pass', evidence: 'Edge probe: turnover evidence recorded by the registry.' } },
   { method: 'POST', path: '/api/tasks/:id/acceptance', okStatus: 200, needsId: 'task', body: { rung: 1 } },
   // --- deals
   { method: 'POST', path: '/api/deals', body: { title: 'Probe deal', clientId: 'c1' } },
@@ -1240,7 +1240,19 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
    * Every endpoint, regardless of module, owes the same eight contract
    * guarantees. Each is a separate assertion about the response envelope.
    */
-  const CONTRACT: Array<{ key: string; scenario: string; expected: string; severity: EdgeCase['severity']; category: EdgeCase['category']; probe: (route: (typeof ROUTE_SURFACE)[number]) => Probe }> = [
+  /**
+   * A contract probe asks one question about the response, so it only applies to
+   * the routes that can answer it. `idempotent_read` used to force `method: 'GET'`
+   * onto every route, which sent a GET to a POST-only path and recorded the
+   * resulting 404 as a missing route. A probe that is not a question about this
+   * route is not a failing case.
+   */
+  const CONTRACT: Array<{
+    key: string; scenario: string; expected: string;
+    severity: EdgeCase['severity']; category: EdgeCase['category'];
+    applies?: (route: (typeof ROUTE_SURFACE)[number]) => boolean;
+    probe: (route: (typeof ROUTE_SURFACE)[number]) => Probe;
+  }> = [
     {
       key: 'envelope_shape', severity: 'high', category: 'functional',
       scenario: 'returns the { data } envelope with no leaked internals',
@@ -1275,6 +1287,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
     },
     {
       key: 'idempotent_read', severity: 'medium', category: 'functional',
+      applies: (route) => route.method === 'GET',
       scenario: 'a repeated identical read returns the same shape',
       expected: 'Two identical GETs differ only in volatile fields (timestamps), never in shape',
       probe: (route) => ({
@@ -1326,6 +1339,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
   for (const route of GENERIC_ROUTES) {
     const module = route.path.split('/')[2] ?? 'root';
     for (const contract of CONTRACT) {
+      if (contract.applies && !contract.applies(route)) continue;
       push(module, `contract_${contract.key}`, {
         module,
         scenario: `${route.method} ${route.path} — ${contract.scenario}`,
