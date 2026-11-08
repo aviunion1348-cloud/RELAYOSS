@@ -1,0 +1,82 @@
+name: Scheduled backup drill
+
+# A backup nobody verifies is a hope. This runs the same drill the release gate
+# runs, on a schedule, so a regression in backup or restore is discovered on a
+# Sunday rather than during an incident.
+#
+# It does NOT back up production: this workflow has no production credentials and
+# no network path to the production database, by design. What it proves is that
+# the backup and restore machinery still works against a real PostgreSQL 16 with
+# the current migrations. Production backup scheduling, retention and offsite
+# replication are an operator responsibility and are recorded as such in
+# docs/BACKUP-RECOVERY.md.
+
+on:
+  schedule:
+    - cron: '17 2 * * *'   # 02:17 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SESSION_SECRET: ci-session-secret-not-a-production-value
+  AUTH_MODE: dev
+
+jobs:
+  drill:
+    name: Backup · restore drill · integrity · retention · PITR report
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Start PostgreSQL 16
+        run: npm run pg:start
+
+      - name: Migrate and seed a production-shaped database
+        run: |
+          npm run pg:reset
+          npm run pg:seed
+
+      - name: Continuous-archiving report (never assumed)
+        run: |
+          set +e
+          npm run backup:pitr
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then
+            echo "PITR is blocked on this runner: continuous archiving is not configured, so recovery is to the last backup rather than to a point in time. This is the documented state."
+          fi
+
+      - name: Backup and restore drill
+        run: npm run backup:verify
+
+      - name: Integrity manifest over every archive
+        run: |
+          npm run backup:verify-all || {
+            echo "At least one archive could not be proven unaltered"
+            exit 1
+          }
+
+      - name: Retention policy
+        run: npm run backup:retention
+
+      - name: Upload archives and manifests as an artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backup-drill-${{ github.run_id }}
+          path: |
+            backups/*.ndjson
+            backups/*.sqlite
+            backups/*.sha256
+          retention-days: 14
+          if-no-files-found: warn

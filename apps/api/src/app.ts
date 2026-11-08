@@ -1,0 +1,357 @@
+/**
+ * App factory — build a fully-wired Fastify instance without binding a port.
+ *
+ * Kept separate from index.ts so tests can use `app.inject()` against the real
+ * router, error handler and middleware stack, and so a serverless adapter can
+ * reuse the same graph.
+ */
+import Fastify, { type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import fastifyStatic from '@fastify/static';
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from './config.ts';
+import { getDb, setDb, type Db } from './db/index.ts';
+import { migrate } from './db/migrate.ts';
+import { registerRoutes } from './routes/index.ts';
+import { registerAuthRoutes } from './routes/auth.ts';
+import { registerPasswordLogin } from './routes/password-login.ts';
+import { createAuth } from './auth/middleware.ts';
+import {
+  assertAuthConfiguration,
+  assertStaticAuthConfiguration,
+  resetResolvedAuthMode,
+  setResolvedAuthMode,
+} from './auth/index.ts';
+import { hasProvisionedCredential } from './auth/password.ts';
+import { DbLoginThrottle, consumeRateLimit } from './lib/rate-limit-store.ts';
+import { RateLimiter, LoginThrottle } from './lib/rate-limit.ts';
+import { tooMany } from './lib/http.ts';
+import { inc, routeTemplate } from './lib/metrics.ts';
+import { HttpError } from './lib/http.ts';
+
+export interface BuildOptions {
+  /** Inject a database (tests use in-memory). */
+  db?: Db;
+  migrateOnBoot?: boolean;
+  serveStatic?: boolean;
+  logger?: boolean;
+  /**
+   * Inject a login throttle. Tests need this: several of them fail a login on
+   * purpose, and a fresh application built inside a test would otherwise carry the
+   * default limiter, which then locks the shared username for the remaining tests.
+   * The limiter's real behaviour is covered by its own unit test.
+   */
+  throttle?: LoginThrottle;
+}
+
+export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyInstance; db: Db }> {
+  /*
+   * Static configuration first — before any connection is opened.
+   *
+   * An unreachable database must not be able to masquerade as (or hide) a
+   * misconfigured deployment: the two problems have completely different fixes.
+   */
+  assertStaticAuthConfiguration();
+
+  const db = opts.db ?? getDb();
+  if (opts.db) setDb(opts.db);
+  if (opts.migrateOnBoot ?? (process.env.SKIP_MIGRATE !== '1' && !opts.db)) {
+    await migrate(db, { log: () => {} });
+  }
+
+  const app = Fastify({
+    logger: opts.logger === false ? false : { level: config.logLevel },
+    trustProxy: true,
+    genReqId: () => `req_${Math.random().toString(36).slice(2, 10)}`,
+    bodyLimit: 2 * 1024 * 1024,
+  });
+
+  /**
+   * Resolve the effective authentication mode before any route exists.
+   *
+   * `AUTH_MODE=auto` (the default) means: use the shared login if a credential has
+   * been provisioned, otherwise fall back to whatever the environment says. This
+   * is what makes the repository work unchanged in three settings — a developer
+   * laptop with demo identities, a deployment with one shared password, and a
+   * deployment behind an IdP — without anyone editing source.
+   *
+   * A provisioned credential wins over `dev` because leaving demo identities
+   * reachable on a deployment that has a real password would be a bypass.
+   */
+  resetResolvedAuthMode();
+  const declared = config.authMode;
+  const effective =
+    declared === 'oidc' || declared === 'password' || declared === 'dev'
+      ? declared
+      : (await hasProvisionedCredential(db))
+        ? 'password'
+        : 'dev';
+  setResolvedAuthMode(effective);
+  assertAuthConfiguration(effective);
+
+  await app.register(helmet, { contentSecurityPolicy: false, crossOriginEmbedderPolicy: false });
+  await app.register(cors, {
+    origin: config.corsOrigin.includes('*') ? true : config.corsOrigin,
+    credentials: true,
+    allowedHeaders: ['content-type', 'x-request-id', 'x-csrf-token', 'authorization'],
+  });
+
+  /**
+   * Be liberal with empty JSON bodies: a POST that carries no payload (sweep,
+   * resolve-with-defaults) should not 500 because a client set content-type.
+   * Strictness belongs in schema validation, not in the parser.
+   */
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    const raw = (body as string).trim();
+    if (raw === '' || raw === 'null') return done(null, {});
+    try {
+      done(null, JSON.parse(raw));
+    } catch {
+      const err = new Error('Malformed JSON body') as Error & { statusCode: number };
+      err.statusCode = 400;
+      done(err, undefined);
+    }
+  });
+
+  /**
+   * Unregistered content-types (form posts from a proxy, text/plain probes) are
+   * accepted as an empty payload rather than rejected with 415. Registered
+   * after the JSON parser so it never shadows it.
+   */
+  app.addContentTypeParser('*', (req, payload, done) => {
+    payload.resume();
+    done(null, {});
+  });
+
+  /**
+   * A body-declaring content-type on a request with no body is a client bug,
+   * not an error: GETs with `content-type: application/json` are common from
+   * shared HTTP wrappers. Normalise it away before routing so it never becomes
+   * a 415.
+   */
+  app.addHook('onRequest', async (req) => {
+    (req as unknown as { startedAt: number }).startedAt = Date.now();
+    const length = req.headers['content-length'];
+    const hasBody = (length !== undefined && length !== '0') || req.headers['transfer-encoding'] !== undefined;
+    if (!hasBody && req.headers['content-type']) {
+      delete req.headers['content-type'];
+    }
+  });
+
+  /**
+   * Structured access log + RED metrics. One JSON line per request with the
+   * correlation id, route template (never the raw URL: ids are not cardinality
+   * we can afford) and duration. Request bodies and headers are never logged.
+   */
+  app.addHook('onResponse', async (req, reply) => {
+    const startedAt = (req as unknown as { startedAt?: number }).startedAt ?? Date.now();
+    const durationMs = Date.now() - startedAt;
+    const route = routeTemplate(req.url);
+    const statusClass = `${Math.floor(reply.statusCode / 100)}xx`;
+
+    inc('relay_http_requests_total', { route, method: req.method, status: statusClass });
+    if (durationMs > 500) inc('relay_http_slow_total', { route });
+
+    if (!req.log.info) return;
+    req.log.info(
+      {
+        reqId: req.id,
+        method: req.method,
+        route,
+        status: reply.statusCode,
+        ms: durationMs,
+        actor: req.identity?.userId ?? null,
+      },
+      'request',
+    );
+  });
+
+  app.setErrorHandler((rawErr: unknown, req, reply) => {
+    // Fastify's own 4xx errors (unsupported media type, payload too large,
+    // malformed body) carry a statusCode; map them to the API's error shape
+    // instead of reporting them as internal failures.
+    const fastifyStatus = (rawErr as { statusCode?: number })?.statusCode;
+    if (typeof fastifyStatus === 'number' && fastifyStatus >= 400 && fastifyStatus < 500) {
+      const code = fastifyStatus === 401 ? 'unauthorized'
+        : fastifyStatus === 403 ? 'forbidden'
+        : fastifyStatus === 404 ? 'not_found'
+        : fastifyStatus === 429 ? 'rate_limited'
+        : fastifyStatus === 409 ? 'conflict'
+        : fastifyStatus === 415 ? 'bad_request'
+        : fastifyStatus === 413 ? 'bad_request'
+        : 'bad_request';
+      req.log.warn({ statusCode: fastifyStatus, url: req.url }, 'client_error');
+      return reply.code(fastifyStatus).send({
+        error: { code, message: (rawErr as Error).message || 'Invalid request' },
+        requestId: req.id,
+      });
+    }
+    const err = rawErr as Error & { statusCode?: number; validation?: unknown; details?: unknown };
+    if (err instanceof HttpError) {
+      return reply.code(err.status).send({
+        error: { code: err.code, message: err.message, details: err.details },
+        requestId: req.id,
+      });
+    }
+    if ((err as { validation?: unknown }).validation) {
+      return reply.code(400).send({ error: { code: 'validation', message: err.message }, requestId: req.id });
+    }
+
+    // A TypeError or RangeError raised while reading a request body is a *client*
+    // fault, not a server one: the body carried a shape the handler did not
+    // expect (`.trim` on a number, an array bound as a parameter). Reporting 500
+    // hides the caller's mistake and looks like a server defect. These are mapped
+    // to 400 with the field named where it is known.
+    //
+    // The line is drawn at errors that arise from request-shaped values only:
+    // anything thrown elsewhere (a database failure, a bug in logic) is still a
+    // 500 and is still logged, because pretending otherwise would hide real
+    // outages.
+    //
+    // Rather than requiring every handler to remember to flag itself, the check
+    // is on the error's origin: a TypeError/RangeError raised during this request
+    // is treated as a body-shape fault, because request parsing happens inside
+    // the handler. A database or logic failure surfaces as a different error type
+    // and keeps its 500.
+    const errName = (err as Error)?.name ?? '';
+    const requestShaped = errName === 'TypeError' || errName === 'RangeError'
+      // A bind error for an array/object parameter: the value came from the body.
+      || /Unknown named parameter|no column named|Bind parameter|must be of type/i.test((err as Error)?.message ?? '');
+    if (requestShaped) {
+      req.log.warn({ err, url: req.url }, 'invalid_request_body');
+      return reply.code(400).send({
+        error: {
+          code: 'bad_request',
+          message: `The request body is not valid for this endpoint (${err.message}).`,
+        },
+        requestId: req.id,
+      });
+    }
+    req.log.error({ err }, 'unhandled');
+    // The detail stays in the server log, keyed by request id. It is never put in
+    // the response: an error message can carry a file path, a SQL fragment or a
+    // table name, and the client has no need for any of them. The request id is
+    // what lets an operator join the client's report to the stack trace.
+    //
+    // Previously the raw message was returned whenever `env !== 'production'`,
+    // which meant a staging deployment pointed at real data leaked internals —
+    // and a test that asserted "no leak" failed against the development build for
+    // exactly that reason.
+    //
+    // `INTERNAL_ERROR_DETAIL=1` opts back in for local debugging, and is refused in
+    // production by the boot guard.
+    const showDetail = config.internalErrorDetail === true;
+    return reply.code(500).send({
+      error: {
+        code: 'internal_error',
+        message: showDetail ? `${err.message} (requestId ${req.id})` : 'Something went wrong. Quote the request id when reporting this.',
+      },
+      requestId: req.id,
+    });
+  });
+
+  app.setNotFoundHandler((req, reply) => {
+    if (req.url.startsWith('/api')) {
+      return reply.code(404).send({ error: { code: 'not_found', message: `No route for ${req.method} ${req.url}` } });
+    }
+    const indexFile = path.join(config.webDist, 'index.html');
+    if (fs.existsSync(indexFile)) {
+      return reply.type('text/html').send(fs.readFileSync(indexFile));
+    }
+    return reply.code(404).send({ error: { code: 'not_found', message: 'Build the web app first (npm run build).' } });
+  });
+
+  /**
+   * Rate limiting. Three budgets, because the abuse profiles differ:
+   *   global  — a runaway client or scraper
+   *   auth    — credential stuffing against login
+   *   write   — anything that creates/approves/ships
+   * Limits are per-process (documented in docs/SECURITY.md); a shared store is
+   * required for cluster-wide enforcement.
+   */
+  /*
+   * Request budgets.
+   *
+   * Two strategies behind one interface, chosen by whether the database is shared:
+   *
+   *   in-process  a Map. Correct for one container, and free.
+   *   database    a conditional upsert per request. Correct for N instances, at the
+   *               cost of one round-trip on every request.
+   *
+   * The database path is selected whenever PostgreSQL is configured, because that is
+   * the only case where a per-process budget is not a budget. §10 asks for a
+   * distributed limiter specifically; on a single container the in-process one is
+   * strictly better, since it adds no latency and cannot fail.
+   *
+   * Note that the database limiter is *awaited* in the hook while the in-process one
+   * is not. Both are awaited uniformly below — a resolved non-promise costs nothing.
+   */
+  const distributed = db.dialect === 'postgres';
+  const budgetFor = (scope: string, limit: number) =>
+    distributed
+      ? {
+          take: (key: string) =>
+            consumeRateLimit(db, `${scope}:${key}`, limit, 60_000),
+        }
+      : new RateLimiter({ limit, windowMs: 60_000, scope });
+
+  const globalLimiter = budgetFor('global', config.rateLimit.global);
+  const authLimiter = budgetFor('auth', config.rateLimit.auth);
+  const writeLimiter = budgetFor('write', config.rateLimit.write);
+  /**
+   * Login lockout storage.
+   *
+   * Order: an injected throttle (tests must control it), then the database when the
+   * database is shared, then the in-process map.
+   *
+   * The database is chosen whenever PostgreSQL is configured, because that is
+   * exactly the case where more than one process exists. An in-process lockout on a
+   * serverless deployment is not a lockout: each instance keeps its own counter, so
+   * five failures spread across five cold starts produce five fresh allowances.
+   *
+   * SQLite stays in-process: a single file-backed database means a single process,
+   * so a shared table would add a write per attempt and buy nothing.
+   */
+  const loginThrottle =
+    opts.throttle ??
+    (db.dialect === 'postgres' ? new DbLoginThrottle(db) : new LoginThrottle());
+
+  app.addHook('onRequest', async (req, reply) => {
+    const identityKey = (req.headers.cookie ? 'cookie' : req.ip) ?? 'anon';
+    const key = `${req.ip}|${identityKey}`;
+    // Login attempts draw on the stricter auth budget, whether they use the shared
+    // credential, the demo login or OIDC.
+    const budget = req.url.startsWith('/api/auth/dev-login')
+      || req.url.startsWith('/api/auth/oidc')
+      || req.url.startsWith('/api/auth/login')
+      ? authLimiter
+      : req.method === 'GET' || req.method === 'HEAD'
+        ? globalLimiter
+        : writeLimiter;
+    // Every budget exposes `take`; the database one is async. Awaiting both keeps a
+    // single code path, and a synchronous return awaits to itself.
+    const decision = await budget.take(key);
+    reply.header('x-ratelimit-remaining', String(decision.remaining));
+    if (!decision.allowed) {
+      reply.header('retry-after', String(decision.retryAfterSec));
+      req.log.warn({ url: req.url, ip: req.ip }, 'rate_limited');
+      throw tooMany('Too many requests — slow down.', decision.retryAfterSec);
+    }
+  });
+
+  // Authentication runs before any business route can observe a request.
+  const auth = createAuth({ db });
+  app.addHook('onRequest', auth.authenticate);
+
+  await app.register(registerAuthRoutes, { throttle: loginThrottle });
+  await app.register(registerPasswordLogin, { throttle: loginThrottle });
+  await registerRoutes(app, { auth });
+
+  if ((opts.serveStatic ?? true) && fs.existsSync(config.webDist)) {
+    await app.register(fastifyStatic, { root: config.webDist, wildcard: false, cacheControl: true, maxAge: '1h' });
+  }
+
+  return { app, db };
+}

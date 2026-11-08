@@ -1,0 +1,60 @@
+{
+  "name": "relay-oss",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Relay OSS — Delivery OS: internal agile delivery board for agency client pipelines",
+  "type": "module",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev -w @relay/api",
+    "dev:web": "npm run dev -w @relay/web",
+    "build": "npm run build -w @relay/api && npm run build -w @relay/web",
+    "start": "node apps/api/dist/index.js",
+    "db:migrate": "node apps/api/dist/db/cli.js migrate",
+    "db:seed": "node apps/api/dist/db/cli.js seed",
+    "db:reset": "node apps/api/dist/db/cli.js reset",
+    "typecheck": "tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
+    "test": "node --no-warnings --test apps/api/test/*.test.mjs",
+    "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/guard-declared-deps.mjs && node scripts/gen-pg-migrations.mjs --check && node scripts/guard-deployment-config.mjs && node scripts/check-traceability.mjs",
+    "build:api": "npm run build -w @relay/api",
+    "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build && npm run smoke:web && npm run backup:verify",
+    "pg:start": "node scripts/pg-dev.mjs start",
+    "pg:stop": "node scripts/pg-dev.mjs stop",
+    "pg:migrate": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts migrate",
+    "pg:reset": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts reset",
+    "test:pg": "node scripts/test-pg.mjs",
+    "backup": "node scripts/backup.mjs backup",
+    "backup:verify": "node scripts/backup.mjs drill",
+    "smoke:web": "node scripts/smoke-web.mjs",
+    "db:status": "node apps/api/src/db/cli.ts status",
+    "check:traceability": "node scripts/check-traceability.mjs",
+    "backup:status": "node --no-warnings scripts/backup-ops.mjs status",
+    "backup:pitr": "node --no-warnings scripts/backup-ops.mjs pitr",
+    "backup:retention": "node --no-warnings scripts/backup-ops.mjs retention",
+    "backup:verify-all": "node --no-warnings scripts/backup-ops.mjs verify-all",
+    "test:edge": "node --no-warnings scripts/edge-cases/run.ts",
+    "pg:seed": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts seed",
+    "pg:status": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts status",
+    "test:e2e": "node --no-warnings scripts/e2e-browser.mjs",
+    "db:assign-login": "node apps/api/src/db/cli.ts assign-login",
+    "db:pg:assign-login": "DATABASE_URL=\"${DATABASE_URL:-$(node scripts/pg-dev.mjs url 2>/dev/null)}\"; export DATABASE_URL; node apps/api/src/db/cli.ts assign-login",
+    "set-password": "node scripts/set-password.mjs",
+    "build:vercel": "npm run build -w @relay/api && npm run build -w @relay/web",
+    "db:migrate:prod": "node apps/api/dist/db/cli.js migrate"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "embedded-postgres": "^16.15.0-beta.19",
+    "playwright": "^1.49.1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "argon2": "^0.41.1"
+  }
+}

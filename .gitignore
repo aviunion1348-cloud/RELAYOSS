@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+coverage/
+.smoke/
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.local
+.DS_Store
+*.log
+.vite/
+.pgdata/
+backups/
+.e2e/
+
+# Vercel CLI state — contains project/team ids. Never committed: the requester
+# links the repo in their own account, so these do not apply here.
+.vercel/
+
+# Local env variants that hold real secrets.
+.env.*
+!.env.example
