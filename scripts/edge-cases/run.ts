@@ -33,6 +33,12 @@ async function main() {
 
   process.env.SESSION_SECRET ||= 'edge-registry-runner-secret';
   process.env.RATE_LIMIT_AUTH ||= '100000';
+  /*
+   * `/api/cron/sweep` fails closed without CRON_SECRET — designed behaviour, asserted
+   * in `vercel.test.mjs`. Providing it here means the registry probes the route's real
+   * behaviour instead of re-testing the refusal dozens of times.
+   */
+  process.env.CRON_SECRET ||= 'edge-registry-cron-secret';
   process.env.RATE_LIMIT_GLOBAL ||= '1000000';
   process.env.RATE_LIMIT_WRITE ||= '1000000';
 

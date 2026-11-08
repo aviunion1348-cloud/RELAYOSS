@@ -105,6 +105,12 @@ export const ROUTE_META: Record<string, Partial<RouteDef>> = {
   'POST /api/notifications/:id/read': { okStatus: 200, needsId: 'notification', body: {} },
   'POST /api/planner/runs': { okStatus: 200, body: { projectId: 'p1' } },
   'POST /api/clocks/sweep': { okStatus: 200, body: {} },
+  /*
+   * Scheduled work authenticates with a bearer secret, not a session. Without the
+   * header the endpoint correctly returns 503 (no secret configured) or 401 (wrong
+   * one); supplying it lets the registry probe the route rather than its refusal.
+   */
+  'GET /api/cron/sweep': { okStatus: 200, headers: { authorization: 'Bearer edge-registry-cron-secret' } },
   'POST /api/clocks/timers/:id/pause': { okStatus: 200, needsId: 'timer', body: { reason: 'probe pause', category: 'client' } },
   'POST /api/clocks/timers/:id/resume': { okStatus: 200, needsId: 'timer', body: {} },
   'POST /api/clocks/timers/:id/resolve': { okStatus: 200, needsId: 'timer', body: { outcome: 'met' } },
@@ -348,6 +354,7 @@ const HAPPY: Family = {
   key: 'happy', label: 'authorised happy path', category: 'functional', severity: 'medium',
   apply: (route, ctx) => ({
     kind: 'http', method: route.method, path: fill(route, ctx.ids), as: 'lead',
+    headers: route.headers,
     body: route.body, expectStatus: successStatus(route),
     scenario: `${route.method} ${route.path} — the authorised request succeeds`,
     preconditions: 'An authenticated lead with access to the fixture client and project.',
@@ -363,6 +370,7 @@ const ANON: Family = {
     const body = fill(route, ctx.ids);
     return {
       kind: 'http', method: route.method, path: body, as: 'anon',
+      headers: route.headers,
       body: route.body, expectStatus: anonymousByDesign ? 200 : 401,
       scenario: anonymousByDesign
         ? `${route.method} ${route.path} — an operational probe answers without a session`
@@ -381,6 +389,7 @@ const HEADER_FORGE: Family = {
   key: 'header_forge', label: 'forged identity header', category: 'security', severity: 'critical',
   apply: (route, ctx) => ({
     kind: 'http', method: route.method, path: fill(route, ctx.ids), as: 'anon',
+    headers: route.headers,
     body: route.body, expectStatus: 401,
     headers: { 'x-actor-id': 'u_admin', 'x-forwarded-user': 'admin@relay.test', 'x-user-id': 'u_admin' },
     expectStatus: (route as any).anonymousByDesign ? 200 : 401,
@@ -394,6 +403,7 @@ const MEMBER_DENY: Family = {
   key: 'member_deny', label: 'insufficient role', category: 'permission', severity: 'high',
   apply: (route, ctx) => ({
     kind: 'http', method: route.method, path: fill(route, ctx.ids), as: 'member',
+    headers: route.headers,
     body: route.body,
     // Reads are allowed for a member with a grant; writes that need a lead are 403.
     expectStatus: expectedMemberStatus(route),
@@ -407,6 +417,7 @@ const CLIENT_TENANT: Family = {
   key: 'client_tenant', label: 'cross-tenant client read', category: 'permission', severity: 'critical',
   apply: (route, ctx) => ({
     kind: 'http', method: route.method, path: fill(route, ctx.foreign), as: 'client',
+    headers: route.headers,
     body: route.body,
     // A client identity touching another tenant's object is indistinguishable
     // from touching something that does not exist; a list is scoped to 200/[].
@@ -423,6 +434,7 @@ const MISSING: Family = {
   key: 'missing', label: 'unknown identifier', category: 'data', severity: 'high',
   apply: (route, ctx) => ({
     kind: 'http', method: route.method, path: fillUnknown(route), as: 'lead',
+    headers: route.headers,
     body: route.body, expectStatus: route.path.includes(':id') || route.path.includes(':stageKey') ? 404 : successStatus(route as any),
     scenario: `${route.method} ${route.path} — an identifier that does not exist is handled`,
     preconditions: 'A lead identity and an id that was never issued.',
@@ -434,6 +446,7 @@ const CSRF: Family = {
   key: 'csrf', label: 'missing CSRF token', category: 'security', severity: 'critical',
   apply: (route, ctx) => ({
     kind: 'http', method: route.method, path: fill(route, ctx.ids), as: 'lead',
+    headers: route.headers,
     body: route.body, expectStatus: route.method === 'GET' ? 200 : 403, omitCsrf: true,
     scenario: `${route.method} ${route.path} — a cookie-authenticated mutation without CSRF is refused`,
     preconditions: 'A valid session cookie, no x-csrf-token header.',
@@ -445,6 +458,7 @@ const MALFORMED: Family = {
   key: 'malformed', label: 'malformed body', category: 'data', severity: 'high',
   apply: (route, ctx) => ({
     kind: 'http', method: route.method, path: fill(route, ctx.ids), as: 'lead',
+    headers: route.headers,
     // Every string field replaced by an array: a type error the schema must catch.
     body: route.method === 'GET' ? undefined : Object.fromEntries(
       Object.entries((route.body ?? {}) as Record<string, unknown>).map(([k, v]) => [k, Array.isArray(v) ? v : ['wrong', 'type']]),
@@ -568,6 +582,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: 'An admin is org-wide by design: 200 with the object, or 404 when the id genuinely does not exist. The tenant boundary that must hold for an admin is type-correctness, not visibility.',
       probe: {
         kind: 'http', method: route.method,
+        headers: route.headers,
         path: fillRoute(route.path, route.needsId, fixtures.foreign), as: 'admin',
         body: route.body,
         expectStatus: route.method === 'GET' ? 200 : successStatus(route),
@@ -586,6 +601,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
         expected: 'The value round-trips intact, or a 400 explains the limit; never a 500 or silent truncation',
         probe: {
           kind: 'http', method: route.method,
+          headers: route.headers,
           path: fillRoute(route.path, route.needsId, fixtures.ids), as: 'lead',
           body: { ...(route.body as object), title: `${'দিল্লি🎯'.repeat(20)}`, subject: '🎯'.repeat(500) },
           expectStatus: successStatus(route as any),
@@ -606,6 +622,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
         expected: 'The second response is idempotent (or an explicit conflict), never a duplicate side effect',
         probe: {
           kind: 'http', method: route.method,
+          headers: route.headers,
           path: fillRoute(route.path, route.needsId, fixtures.ids), as: 'lead',
           body: route.body, expectStatus: 200,
         },
@@ -657,6 +674,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
         expected: `HTTP ${expected} — ${clientWrite ? 'a client identity cannot mutate staff resources' : crossTenant ? 'tenancy is enforced before capability' : 'the role is allowed to do this'}`,
         probe: {
           kind: 'http', method: route.method, path, as: role,
+          headers: route.headers,
           body: route.body, expectStatus: expected,
         },
       });
@@ -724,6 +742,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
         expected: `HTTP ${mutation.expect} — ${mutation.why}`,
         probe: {
           kind: 'http', method: route.method, path: fillRoute(route.path, route.needsId, fixtures.ids),
+          headers: route.headers,
           as: 'lead', body: mutation.mutate(route.body), expectStatus: mutation.expect,
         },
       });
@@ -833,6 +852,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
         expected: '404 (the object of the expected type does not exist) or a correctly scoped result — never another type\'s data',
         probe: {
           kind: 'http', method: route.method, path, as: 'lead',
+          headers: route.headers,
           body: route.body, expectStatus: route.method === 'GET' ? 404 : 404,
         },
       });
@@ -923,6 +943,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: '404, identical to a missing object — a 403 here would confirm the object exists',
       probe: {
         kind: 'http', method: route.method,
+        headers: route.headers,
         path: fillRoute(route.path, route.needsId, fixtures.foreign), as: 'member',
         body: route.body, expectStatus: 404,
       },
@@ -1191,6 +1212,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: route.method === 'GET' ? '200, scoped to partner_projects only' : '403 — a partner cannot drive delivery state',
       probe: {
         kind: 'http', method: route.method,
+        headers: route.headers,
         path: fillRoute(route.path, route.needsId, fixtures.ids), as: 'partner',
         body: route.body, expectStatus: route.method === 'GET' ? 200 : 403,
       },
@@ -1206,6 +1228,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: 'The response contains no internal-only rows; client-visible flags are honoured for partners too',
       probe: {
         kind: 'http', method: route.method,
+        headers: route.headers,
         path: fillRoute(route.path, route.needsId, fixtures.ids), as: 'partner',
         body: route.body, expectStatus: route.method === 'GET' ? 200 : 403,
       },
@@ -1224,6 +1247,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: 'The body has a `data` key and no stack trace, SQL fragment or file path',
       probe: (route) => ({
         kind: 'http', method: route.method, path: fillRoute(route.path, route.needsId, fixtures.ids), as: 'lead',
+        headers: route.headers,
         body: route.body, expectStatus: successStatus(route as any),
       }),
     },
@@ -1233,6 +1257,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: 'A machine-readable code and a human message; never a bare string or an HTML page',
       probe: (route) => ({
         kind: 'http', method: route.method,
+        headers: route.headers,
         path: fillRoute(route.path, route.needsId, { ...fixtures.ids, [route.needsId ?? '']: 'missing_for_error' }),
         as: 'lead', body: route.body,
         expectStatus: 404,
@@ -1244,6 +1269,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: 'Content-Type is application/json; a browser never tries to render HTML',
       probe: (route) => ({
         kind: 'http', method: route.method, path: fillRoute(route.path, route.needsId, fixtures.ids), as: 'lead',
+        headers: route.headers,
         body: route.body, expectStatus: successStatus(route as any),
       }),
     },
@@ -1262,6 +1288,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: '400 with a validation message, or 200/201 if the route takes no body — never a crash',
       probe: (route) => ({
         kind: 'http', method: route.method, path: fillRoute(route.path, route.needsId, fixtures.ids),
+        headers: route.headers,
         as: 'lead', body: {}, expectStatus: route.method === 'GET' ? 200 : 400,
       }),
     },
@@ -1271,6 +1298,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: '401 — revocation takes effect on the next request, not at expiry',
       probe: (route) => ({
         kind: 'http', method: route.method, path: fillRoute(route.path, route.needsId, fixtures.ids),
+        headers: route.headers,
         as: 'revoked', body: route.body, expectStatus: 401,
       }),
     },
@@ -1280,6 +1308,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: '401 — an expired cookie is not a valid credential',
       probe: (route) => ({
         kind: 'http', method: route.method, path: fillRoute(route.path, route.needsId, fixtures.ids),
+        headers: route.headers,
         as: 'expired', body: route.body, expectStatus: 401,
       }),
     },
@@ -1289,6 +1318,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: '401 — the cookie is signed; a modified id is not a session',
       probe: (route) => ({
         kind: 'http', method: route.method, path: fillRoute(route.path, route.needsId, fixtures.ids),
+        headers: route.headers,
         as: 'tampered', body: route.body, expectStatus: 401,
       }),
     },
@@ -1325,6 +1355,7 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       expected: '429 with a retry-after value; the limiter is never silently disabled',
       probe: {
         kind: 'http', method: route.method, path: fillRoute(route.path, route.needsId, fixtures.ids),
+        headers: route.headers,
         as: 'lead', body: route.body, expectStatus: 201,
       },
     });
