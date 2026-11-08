@@ -19,7 +19,7 @@ import {
   dealsWhere,
   assertProjectInScope,
 } from '../auth/scope.ts';
-import { id, nowIso } from '../lib/ids.ts';
+import { id, nowIso, nowIsoAt } from '../lib/ids.ts';
 import { toDate } from '../lib/dates.ts';
 import { TASK_SELECT, mapTask, mapUser, mapClient, mapProject, mapDeal } from '../repositories/query.ts';
 import { SLA_HOURS, scoreRisk, slaState } from '../domain/risk.ts';
@@ -2042,6 +2042,7 @@ export async function registerRoutes(
       const t = tasks.find((x) => x.id === taskId);
       if (t && count > 1) {
         insights.push({
+          key: `bottleneck:${t.id}`,
           kind: 'bottleneck', severity: 'high', title: `${t.key} is blocking ${count} downstream tasks`,
           body: `“${t.title}” sits on the critical path for ${count} other units of work. Pull it forward or split it.`,
           action: { label: 'Open task', taskId: t.id },
@@ -2056,6 +2057,7 @@ export async function registerRoutes(
     );
     if (reviewers.length === 1) {
       insights.push({
+        key: 'concentration:lead_approved',
         kind: 'concentration', severity: 'medium', title: 'Every lead approval is one person',
         body: `${reviewers[0].full_name} has approved 100% of lead gates. Add a second approver before Q4 to remove the bus factor.`,
         action: null,
@@ -2076,6 +2078,7 @@ export async function registerRoutes(
       const ratio = d.est ? d.logged / d.est : 0;
       if (ratio > 1.15) {
         insights.push({
+          key: `estimate_drift:${key}`,
           kind: 'estimate_drift', severity: ratio > 1.4 ? 'high' : 'medium',
           title: `${key} is burning ${Math.round((ratio - 1) * 100)}% over estimate`,
           body: `${Math.round(d.logged)}h logged against ${Math.round(d.est)}h estimated on open work. Re-baseline before the next demo promise.`,
@@ -2091,6 +2094,7 @@ export async function registerRoutes(
     });
     if (stale.length) {
       insights.push({
+        key: 'stale_wip:open_work',
         kind: 'stale_wip', severity: stale.length > 4 ? 'high' : 'medium',
         title: `${stale.length} tasks have not moved in 5+ days`,
         body: 'Work-in-progress is ageing, which raises cycle time for everything else. Consider a WIP limit on In Progress.',
@@ -2105,6 +2109,7 @@ export async function registerRoutes(
     );
     for (const f of failedGates) {
       insights.push({
+        key: `turnover_cluster:${f.key}`,
         kind: 'turnover_cluster', severity: 'medium',
         title: `${f.name} fails most often (${f.c}×)`,
         body: 'A gate that fails repeatedly usually means the policy is under-specified, not that the team is careless. Add the failing condition to the template.',
@@ -2116,6 +2121,7 @@ export async function registerRoutes(
     const visibleLate = tasks.filter((t) => t.client_visible && t.due_at && (toDate(t.due_at)?.getTime() ?? Infinity) < now);
     if (visibleLate.length) {
       insights.push({
+        key: 'client_risk:overdue_visible',
         kind: 'client_risk', severity: 'critical',
         title: `${visibleLate.length} client-visible commitments are past due`,
         body: 'These appear on the client status page. Send a written position with a date, or renegotiate the commitment today.',
@@ -2123,9 +2129,120 @@ export async function registerRoutes(
       });
     }
 
+    /*
+     * Apply the dismissals.
+     *
+     * A dismissed finding is *not* deleted from the analysis — it is returned in a
+     * separate list with the reason and the person who decided. Hiding it entirely
+     * would mean the next person cannot tell "we analysed this and chose to accept
+     * it" from "we never noticed", which is the difference between a decision and an
+     * omission. The UI shows dismissed findings collapsed, with an undo.
+     *
+     * `muted_until` makes a dismissal expire on its own: "snooze until the sprint
+     * ends" is the common case, and a dismissal nobody can remember to undo is how a
+     * real problem stays invisible forever.
+     */
+    const dismissals = await (await db()).all<Record<string, any>>(
+      `SELECT d.*, u.full_name AS dismissed_by_name FROM insight_dismissals d
+       LEFT JOIN users u ON u.id = d.dismissed_by`,
+    ).catch(() => [] as Array<Record<string, any>>);
+    /*
+     * Timestamps in this application are `YYYY-MM-DD HH:MM:SS` (see `nowIso`), while
+     * `toISOString()` produces `YYYY-MM-DDTHH:MM:SS.sssZ`. Comparing the two as
+     * strings is not a formatting quibble: `' '` (0x20) sorts before `'T'` (0x54), so
+     * a stored timestamp always compares as *less* than an ISO one from the same
+     * second — an expiry written in ISO would be read as already elapsed, and a
+     * snooze would never hide anything. `new Date()` parses both formats, so the
+     * comparison is done on instants and the storage format stays as it is.
+     */
+    const nowMs = Date.now();
+    const activeKeys = new Set(
+      dismissals
+        .filter((d) => !d.muted_until || new Date(String(d.muted_until).replace(' ', 'T') + 'Z').getTime() > nowMs)
+        .map((d) => String(d.key)),
+    );
+    const byKey = new Map(dismissals.map((d) => [String(d.key), d]));
+
+    const open = insights.filter((i) => !activeKeys.has(String(i.key)));
+    const dismissed = dismissals
+      .filter((d) => activeKeys.has(String(d.key)))
+      .map((d) => ({
+        key: d.key, kind: d.kind, subject: d.subject, reason: d.reason,
+        dismissedBy: d.dismissed_by_name ?? null, dismissedAt: d.dismissed_at,
+        mutedUntil: d.muted_until,
+        // The live finding, when it is still being produced. A dismissal for a
+        // finding that no longer fires is stale, and saying so is more useful than
+        // quietly listing a warning about work that is done.
+        insight: insights.find((i) => String(i.key) === String(d.key)) ?? null,
+      }));
+
     const order = { critical: 0, high: 1, medium: 2, low: 3 } as Record<string, number>;
-    insights.sort((a, b) => order[String(a.severity)] - order[String(b.severity)]);
-    return ok({ insights, generatedAt: nowIso() });
+    open.sort((a, b) => order[String(a.severity)] - order[String(b.severity)]);
+    void byKey;
+    return ok({ insights: open, dismissed, generatedAt: nowIso() });
+  });
+
+  /*
+   * Dismissing a finding, and taking the dismissal back.
+   *
+   * This is the only mutation the Intelligence screen needs, and it is deliberately
+   * the *decision* rather than the finding: the analysis stays exactly as it is, and
+   * what is recorded is that a person looked at it and chose to accept it — with a
+   * reason and a name, because that is what gets asked after an incident.
+   *
+   * `key` is validated against the shape the analyser produces rather than accepted
+   * as free text, so the table cannot fill with arbitrary strings from a client.
+   */
+  app.post('/api/insights/:key/dismiss', async (req, reply) => {
+    const actorId = await requireRole(req, ['admin', 'lead', 'member']);
+    const key = decodeURIComponent((req.params as { key: string }).key);
+    if (!/^[a-z_]+:[A-Za-z0-9_:-]{1,120}$/.test(key)) throw badRequest('Not a finding key');
+
+    const parsed = z.object({
+      reason: z.string().max(500).default(''),
+      /** Hours to snooze. Absent or 0 means indefinitely. */
+      muteHours: z.number().int().min(0).max(24 * 365).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid dismissal payload', parsed.error.issues);
+
+    const [kind, ...rest] = key.split(':');
+    const mutedUntil = parsed.data.muteHours
+      ? nowIsoAt(Date.now() + parsed.data.muteHours * 3600_000)
+      : null;
+
+    const conn = await db();
+    /*
+     * An upsert, because dismissing twice must be idempotent: two people clicking
+     * "acknowledge" at the same moment should not produce a conflict or a duplicate
+     * row, and the second click should not clear the first person's reason.
+     */
+    const existing = await conn.get<{ key: string }>('SELECT key FROM insight_dismissals WHERE key = ?', [key]);
+    if (existing) {
+      await conn.run(
+        'UPDATE insight_dismissals SET reason = ?, muted_until = ? WHERE key = ?',
+        [parsed.data.reason, mutedUntil, key],
+      );
+    } else {
+      await conn.run(
+        `INSERT INTO insight_dismissals (key, kind, subject, reason, dismissed_by, dismissed_at, muted_until)
+         VALUES (?,?,?,?,?,?,?)`,
+        [key, kind, rest.join(':'), parsed.data.reason, actorId, nowIso(), mutedUntil],
+      );
+    }
+    reply.code(existing ? 200 : 201);
+    return ok({ key, dismissed: true, mutedUntil });
+  });
+
+  /** Un-dismiss: the finding returns to the open list immediately. */
+  app.delete('/api/insights/:key/dismiss', async (req, reply) => {
+    await requireRole(req, ['admin', 'lead', 'member']);
+    const key = decodeURIComponent((req.params as { key: string }).key);
+    const conn = await db();
+    const existing = await conn.get<{ key: string }>('SELECT key FROM insight_dismissals WHERE key = ?', [key]);
+    if (!existing) throw notFound('That finding is not dismissed');
+    await conn.run('DELETE FROM insight_dismissals WHERE key = ?', [key]);
+    reply.code(204);
+    return null;
   });
 
   /* ------------------------------------------------------------- audit ---- */

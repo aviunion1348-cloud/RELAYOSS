@@ -343,6 +343,8 @@ export interface Partner {
 }
 
 export interface Issue {
+  /** Stable identity for this finding: `kind:subject`. Used to dismiss it. */
+  key: string;
   kind: string;
   severity: 'critical' | 'high' | 'medium' | 'low';
   title: string;

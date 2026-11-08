@@ -1,6 +1,21 @@
-/** Intelligence — the explainable analytics surface. */
+/**
+ * Intelligence — the explainable analytics surface.
+ *
+ * The findings here are computed, and they must stay that way: a number that came
+ * from the database and can be typed over is not analysis. What a person genuinely
+ * decides is what to *do* about a finding, and there are two honest answers — fix
+ * the work, or accept it knowingly.
+ *
+ * The second one needed somewhere to live. Without it the only options were to see
+ * the same warning every day until it became wallpaper, so this screen now records
+ * the decision: who acknowledged what, when, and why, with an expiry when it is a
+ * "not this sprint". The finding is never deleted — it moves to an acknowledged list
+ * where its wording keeps updating, so "we chose to accept this" never becomes
+ * indistinguishable from "nobody noticed".
+ */
 import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Icons } from '../components/icons';
 import { api } from '../lib/api';
 import { cls } from '../lib/cls';
@@ -8,8 +23,20 @@ import { relTime } from '../lib/format';
 import { PageHeader } from '../components/Shell';
 import { QueryFailure } from '../components/QueryFailure';
 import { useQueryState } from '../lib/query-state';
-import { Badge, Button, Card, Dot, Progress, SectionHeader, Skeleton } from '../components/ui';
+import {
+  Badge, Button, Card, Dot, Field, Modal, Progress, SectionHeader, Select, Skeleton, Textarea,
+} from '../components/ui';
+import { ApiFailure } from '../components/ApiFailure';
 import { TaskDrawer } from '../components/TaskDrawer';
+import type { Issue } from '../types';
+
+/** Snooze options, in hours. 0 means "until someone undoes it". */
+const MUTE_OPTIONS = [
+  { value: '0', label: 'Indefinitely' },
+  { value: '24', label: 'For a day' },
+  { value: String(24 * 7), label: 'For a week' },
+  { value: String(24 * 30), label: 'For a month' },
+] as const;
 
 const SEV_ICON: Record<string, keyof typeof Icons> = {
   critical: 'ShieldAlert', high: 'AlertTriangle', medium: 'AlertCircle', low: 'Info',
@@ -17,11 +44,41 @@ const SEV_ICON: Record<string, keyof typeof Icons> = {
 
 export default function Intelligence() {
   const [params, setParams] = useSearchParams();
+  const qc = useQueryClient();
   const insightsQuery = useQuery({ queryKey: ['insights'], queryFn: api.insights });
   const dashQuery = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard });
   const q = useQueryState(insightsQuery);
   const dash = dashQuery.data;
   const openTask = params.get('task');
+
+  const [acknowledging, setAcknowledging] = useState<Issue | null>(null);
+  const [reason, setReason] = useState('');
+  const [muteHours, setMuteHours] = useState('0');
+
+  /*
+   * One invalidation, not an in-place patch. The open and acknowledged lists are
+   * derived from the same dismissals server-side, so a finding moved by hand in the
+   * cache would be in both lists or neither until the next fetch.
+   */
+  const acknowledge = useMutation({
+    mutationFn: (vars: { key: string; reason: string; muteHours: number }) =>
+      api.dismissInsight(vars.key, { reason: vars.reason, muteHours: vars.muteHours }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['insights'] });
+      setAcknowledging(null);
+    },
+  });
+  const restore = useMutation({
+    mutationFn: (key: string) => api.restoreInsight(key),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['insights'] }),
+  });
+
+  const openAcknowledge = (finding: Issue) => {
+    acknowledge.reset();
+    setReason('');
+    setMuteHours('0');
+    setAcknowledging(finding);
+  };
 
   if (q.state === 'failed') return <QueryFailure error={q.error} what="the intelligence feed" retry={q.refetch} />;
   if (q.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-52" /><div className="mt-4 grid gap-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div></div>;
@@ -87,16 +144,58 @@ export default function Intelligence() {
                     </div>
                     <p className="mt-1.5 text-[12.5px] font-medium leading-snug text-mist-100">{ins.title}</p>
                     <p className="mt-1 text-[11px] leading-relaxed text-mist-500">{ins.body}</p>
-                    {ins.action && (
-                      <Button size="xs" variant="secondary" className="mt-2" icon="ArrowRight" onClick={() => setParams(new URLSearchParams({ task: ins.action!.taskId }))}>
-                        {ins.action.label}
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {ins.action && (
+                        <Button size="xs" variant="secondary" icon="ArrowRight" onClick={() => setParams(new URLSearchParams({ task: ins.action!.taskId }))}>
+                          {ins.action.label}
+                        </Button>
+                      )}
+                      <Button size="xs" variant="ghost" icon="Check" onClick={() => openAcknowledge(ins)}>
+                        Acknowledge
                       </Button>
-                    )}
+                    </div>
                   </div>
                 </div>
               </Card>
             );
           })}
+          {/* ------------------------------------------- acknowledged -- */}
+          {data.dismissed.length > 0 && (
+            <Card className="p-3">
+              <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-mist-500">
+                <Icons.CheckCheck size={11} className="text-mint-400" />
+                Acknowledged · {data.dismissed.length}
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {data.dismissed.map((d) => (
+                  <div key={d.key} className="rounded-lg border border-ink-700 bg-ink-850/40 px-2.5 py-2">
+                    <div className="flex items-start gap-2">
+                      <Icons.CheckCheck size={11} className="mt-0.5 shrink-0 text-mist-500" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] leading-snug text-mist-300">
+                          {d.insight ? d.insight.title : <span className="text-mist-500">{d.kind.replace(/_/g, ' ')} · no longer firing</span>}
+                        </p>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-mist-500">
+                          {d.reason || 'No reason recorded'}
+                          {d.dismissedBy && <span> · {d.dismissedBy}</span>}
+                          <span> · {relTime(d.dismissedAt)}</span>
+                          {d.mutedUntil && <span className="text-amber-400"> · returns {relTime(d.mutedUntil)}</span>}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => restore.mutate(d.key)}
+                        disabled={restore.isPending}
+                        className="shrink-0 rounded px-1 py-0.5 text-[9.5px] text-mist-500 transition-colors hover:bg-ink-700 hover:text-gold-300 disabled:opacity-50"
+                      >
+                        Restore
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {restore.error ? <div className="mt-2"><ApiFailure error={restore.error} what="the finding was not restored." /></div> : null}
+            </Card>
+          )}
         </div>
 
         <div className="space-y-3">
@@ -143,6 +242,65 @@ export default function Intelligence() {
       </div>
 
       {openTask && <TaskDrawer taskId={openTask} onClose={() => setParams(new URLSearchParams())} />}
+
+      {/* --------------------------------------------------- acknowledge */}
+      <Modal
+        open={acknowledging !== null}
+        icon="Check"
+        title="Acknowledge this finding"
+        subtitle="The analysis is not changed. This records that you looked at it and are accepting it, and why."
+        width={520}
+        onClose={() => setAcknowledging(null)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAcknowledging(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              icon="Check"
+              loading={acknowledge.isPending}
+              onClick={() => acknowledging && acknowledge.mutate({
+                key: acknowledging.key,
+                reason: reason.trim(),
+                muteHours: Number(muteHours) || 0,
+              })}
+            >
+              Acknowledge
+            </Button>
+          </>
+        }
+      >
+        {acknowledging && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-ink-600 bg-ink-850/60 px-2.5 py-2">
+              <p className="text-[11.5px] font-medium leading-snug text-mist-200">{acknowledging.title}</p>
+              <p className="mt-1 text-[10.5px] leading-relaxed text-mist-500">{acknowledging.body}</p>
+            </div>
+
+            <Field label="Why are you accepting it?" hint="Asked after an incident: who decided this, and on what grounds. Optional, but the record is worth more with it.">
+              {({ id }) => (
+                <Textarea
+                  id={id}
+                  autoFocus
+                  rows={3}
+                  value={reason}
+                  placeholder="Staffed on the critical path until the 14th; reviewed with the client."
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              )}
+            </Field>
+
+            <Field label="For how long" hint="A snooze returns the finding on its own, so nothing stays hidden because someone forgot.">
+              {({ id }) => (
+                <Select id={id} value={muteHours} onChange={(e) => setMuteHours(e.target.value)}>
+                  {MUTE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </Select>
+              )}
+            </Field>
+
+            {acknowledge.error ? <ApiFailure error={acknowledge.error} what="the finding was not acknowledged." /> : null}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

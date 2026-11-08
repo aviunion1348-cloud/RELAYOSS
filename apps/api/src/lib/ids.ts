@@ -10,7 +10,19 @@ export function id(prefix: string): string {
 }
 
 export function nowIso(): string {
-  return new Date().toISOString().replace('T', ' ').slice(0, 19);
+  return nowIsoAt(Date.now());
+}
+
+/**
+ * The same storage format for an arbitrary instant.
+ *
+ * Exists so nothing has to hand-roll it: every timestamp column in this schema is
+ * `YYYY-MM-DD HH:MM:SS` UTC, and mixing in an ISO string with a `T` silently breaks
+ * any string comparison — `' '` sorts before `'T'`, so an ISO value compares as
+ * earlier than a storage value from the same second.
+ */
+export function nowIsoAt(ms: number): string {
+  return new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
 }
 
 export function today(): string {

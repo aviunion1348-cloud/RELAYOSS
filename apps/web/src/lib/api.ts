@@ -383,7 +383,27 @@ export const api = {
   updateQA: (id: string, patch: Record<string, unknown>) => request(`/qa/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   releases: () => request<Release[]>('/releases'),
   releaseGate: (id: string) => request<ShipGate>(`/releases/${id}/gate`),
-  insights: () => request<{ insights: Issue[]; generatedAt: string }>('/insights'),
+  insights: () => request<{
+    insights: Issue[];
+    dismissed: Array<{
+      key: string; kind: string; subject: string; reason: string;
+      dismissedBy: string | null; dismissedAt: string; mutedUntil: string | null;
+      /** The live finding, or `null` when it no longer fires. */
+      insight: Issue | null;
+    }>;
+    generatedAt: string;
+  }>('/insights'),
+  /*
+   * Acknowledging a finding. The analysis is untouched — what is recorded is that a
+   * person looked at it and chose to accept it, with a reason and a name.
+   */
+  dismissInsight: (key: string, payload: { reason?: string; muteHours?: number }) =>
+    request<{ key: string; dismissed: true; mutedUntil: string | null }>(
+      `/insights/${encodeURIComponent(key)}/dismiss`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  restoreInsight: (key: string) =>
+    request<void>(`/insights/${encodeURIComponent(key)}/dismiss`, { method: 'DELETE' }),
   activity: (limit = 30) => request<Activity[]>(`/activity?limit=${limit}`),
   notifications: () => request<Array<{ id: string; kind: string; title: string; body: string; readAt: string | null; createdAt: string }>>('/notifications'),
   readNotification: (id: string) => request(`/notifications/${id}/read`, { method: 'POST' }),
