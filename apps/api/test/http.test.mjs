@@ -293,3 +293,27 @@ test('PATCH /api/deals/:id rejects an empty body instead of reporting success', 
     assert.equal(res.statusCode, 400, 'a no-op PATCH reported success');
   }
 });
+
+test('malformed input is a 400 on every route that writes a CHECK-constrained column', async () => {
+  // These were all 500s: the value reached a CHECK constraint or a column width and the
+  // driver's error surfaced as a server fault. A 500 for a caller mistake is wrong on
+  // its own terms, and it made the response contract depend on which engine was running.
+  const cases = [
+    ['POST', '/api/qa', { projectId: 'p1', title: 'Report', kind: 'not-a-kind' }],
+    ['POST', '/api/qa', { projectId: 'p1', title: 'Report', severity: 'p9' }],
+    ['POST', '/api/qa', { projectId: 'p1', title: 42 }],
+    ['POST', '/api/qa', { projectId: 'p1', title: 'x'.repeat(5000) }],
+    ['POST', '/api/meetings', { title: 'Sync', occurredAt: 'x'.repeat(500) }],
+    ['POST', '/api/meetings', { title: 'Sync', occurredAt: { not: 'a date' } }],
+    ['POST', '/api/meetings', { title: 'Sync', occurredAt: new Date().toISOString(), notes: 12 }],
+    ['POST', '/api/legal/doc1/signatories', { party: 'somebody', fullName: 'A Person' }],
+    ['POST', '/api/legal/doc1/signatories', { party: 'client', fullName: 'x'.repeat(5000) }],
+  ];
+  for (const [method, url, body] of cases) {
+    const res = await request(method, url, body);
+    assert.ok(
+      res.statusCode === 400 || res.statusCode === 404,
+      `${method} ${url} with ${JSON.stringify(body).slice(0, 60)} → ${res.statusCode}, expected 400`,
+    );
+  }
+});

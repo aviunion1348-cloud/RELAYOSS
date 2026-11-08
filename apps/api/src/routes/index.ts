@@ -732,6 +732,16 @@ export async function registerRoutes(
     const { id: timerId } = req.params as { id: string };
     await assertTimerInScope(db(), await currentIdentity(req), timerId);
     const { outcome, note } = req.body as { outcome: 'met' | 'missed' | 'paused' | 'waived'; note?: string };
+    /*
+     * `outcome` reaches a CHECK-constrained column and a state machine, and a bad
+     * value previously raised a constraint error — a 500 for a caller mistake. The
+     * legal set is small and closed, so it is cheaper to state it here than to
+     * discover it in an error handler.
+     */
+    if (!['met', 'missed', 'paused', 'waived'].includes(String(outcome))) {
+      throw badRequest('outcome must be one of: met, missed, paused, waived');
+    }
+    if (note !== undefined && typeof note !== 'string') throw badRequest('note must be a string');
     if (outcome === 'waived') await requireRole(req, ['admin', 'lead']);
     // A waiver without a written exception is just a deleted violation.
     if (outcome === 'waived' && !note?.trim()) {
@@ -900,6 +910,20 @@ export async function registerRoutes(
     const { id: projectId, phaseRowId } = req.params as { id: string; phaseRowId: string };
     const actorId = await actor(req as never);
     const body = req.body as { status?: string; progress?: number; turnoverPassed?: boolean };
+    // `project_phases.status` is CHECK-constrained (`locked|active|blocked|done`);
+    // an unknown value used to reach the database and return 500.
+    if (body.status !== undefined && !['locked', 'active', 'blocked', 'done'].includes(String(body.status))) {
+      throw badRequest('status must be one of: locked, active, blocked, done');
+    }
+    if (body.progress !== undefined) {
+      const p = body.progress;
+      if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 100) {
+        throw badRequest('progress must be a number between 0 and 100');
+      }
+    }
+    if (body.turnoverPassed !== undefined && typeof body.turnoverPassed !== 'boolean') {
+      throw badRequest('turnoverPassed must be a boolean');
+    }
     const rows = await db().get<Record<string, any>>('SELECT * FROM project_phases WHERE id = ? AND project_id = ?', [phaseRowId, projectId]);
     if (!rows) throw notFound('Phase not found');
     if (body.status) {
@@ -1302,6 +1326,24 @@ export async function registerRoutes(
     const actorId = await actor(req as never);
     const b = req.body as Record<string, any>;
     if (!b.projectId || !b.title) throw badRequest('projectId and title are required');
+    /*
+     * `kind` and `severity` are CHECK-constrained, so a bad enum was stopped by the
+     * database and surfaced as a 500 — see the deal PATCH for the same pattern. The
+     * probe that sends `{ ...every field wrong type }` is a request a real client
+     * would make by mistake, and the answer to a client mistake is 400.
+     */
+    if (typeof b.title !== 'string' || !b.title.trim()) throw badRequest('title must be a non-empty string');
+    if (typeof b.projectId !== 'string' || !b.projectId) throw badRequest('projectId must be a non-empty string');
+    if (b.kind !== undefined && !['bug', 'test', 'regression', 'security', 'a11y', 'perf'].includes(b.kind)) {
+      throw badRequest('kind must be one of: bug, test, regression, security, a11y, perf');
+    }
+    if (b.severity !== undefined && !['p0', 'p1', 'p2', 'p3', 'p4'].includes(b.severity)) {
+      throw badRequest('severity must be one of: p0, p1, p2, p3, p4');
+    }
+    for (const [field, max] of [['title', 300], ['body', 20000], ['reproduction', 20000], ['evidenceUrl', 2000]] as const) {
+      if (b[field] !== undefined && typeof b[field] !== 'string') throw badRequest(`${field} must be a string`);
+      if (typeof b[field] === 'string' && b[field].length > max) throw badRequest(`${field} must be ${max} characters or fewer`);
+    }
     const reportId = id('qa');
     const due = new Date(Date.now() + 12 * 3600_000).toISOString().slice(0, 19).replace('T', ' ');
     await db().run(
@@ -2136,6 +2178,23 @@ export async function registerRoutes(
     const scope = await resolveReadScope(db(), identity);
     const body = req.body as Record<string, any>;
     if (!body.title || !body.occurredAt) throw badRequest('title and occurredAt are required');
+    /*
+     * `occurredAt` is a timestamp written straight to a column, and the oversized probe
+     * put 50,000 characters there — the driver rejected it and the caller saw a 500.
+     * A date that cannot be parsed is a caller mistake; it is checked for shape here,
+     * which also stops a bogus date reaching the timeline the calendar reads.
+     */
+    if (typeof body.title !== 'string' || !body.title.trim()) throw badRequest('title must be a non-empty string');
+    if (body.title.length > 300) throw badRequest('title must be 300 characters or fewer');
+    if (typeof body.occurredAt !== 'string' || body.occurredAt.length > 40) {
+      throw badRequest('occurredAt must be an ISO-8601 timestamp');
+    }
+    if (Number.isNaN(Date.parse(body.occurredAt))) throw badRequest('occurredAt must be a parseable ISO-8601 timestamp');
+    for (const field of ['attendees', 'agenda', 'notes', 'decisions', 'followUps'] as const) {
+      const v = body[field];
+      if (v !== undefined && typeof v !== 'string') throw badRequest(`${field} must be a string`);
+      if (typeof v === 'string' && v.length > 20000) throw badRequest(`${field} must be 20000 characters or fewer`);
+    }
     if (body.projectId) await assertProjectInScope(scope, body.projectId);
     const note = await addMeetingNote(db(), {
       projectId: body.projectId, clientId: body.clientId, title: body.title,
@@ -2207,6 +2266,15 @@ export async function registerRoutes(
     if (!['admin', 'lead'].includes(identity.role)) throw forbidden('Only an admin or lead may record signatories.');
     const body = req.body as { party?: 'agency' | 'client'; fullName?: string; email?: string; title?: string };
     if (!body.party || !body.fullName) throw badRequest('party and fullName are required');
+    // `party` is CHECK-constrained (`agency|client`); the free-text fields are bounded so
+    // an oversized probe is a 400 rather than a driver-level error surfaced as 500.
+    if (!['agency', 'client'].includes(String(body.party))) throw badRequest('party must be agency or client');
+    if (typeof body.fullName !== 'string' || !body.fullName.trim()) throw badRequest('fullName must be a non-empty string');
+    for (const [field, max] of [['fullName', 200], ['email', 320], ['title', 200]] as const) {
+      const v = (body as Record<string, unknown>)[field];
+      if (v !== undefined && typeof v !== 'string') throw badRequest(`${field} must be a string`);
+      if (typeof v === 'string' && v.length > max) throw badRequest(`${field} must be ${max} characters or fewer`);
+    }
     const signatory = await addSignatory(db(), {
       documentId, party: body.party, fullName: body.fullName, email: body.email, title: body.title, actorId: identity.userId,
     });
