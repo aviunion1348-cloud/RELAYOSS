@@ -6,6 +6,26 @@ import type {
 
 const BASE = '/api';
 
+/**
+ * How long a request may stay unanswered before it is abandoned.
+ *
+ * Without this, a request that never receives a response never settles, and the
+ * promise the UI is awaiting never resolves. The screen then waits for a result
+ * that is not coming; that is the "it just buffers" failure, and no amount of
+ * error handling downstream can catch a promise that never rejects. A serverless
+ * invocation that is killed, a proxy that holds a connection open, or a dropped
+ * mobile connection all produce it.
+ *
+ * 20 seconds is chosen against the product's own behaviour, not a round number:
+ * the heaviest screen is the planner over a long horizon, which answers in well
+ * under a second on seeded data. Anything past 20s is not slow, it is stuck — and
+ * a stale spinner is worse than an error, because the error can be retried.
+ *
+ * Callers can override it per request (a long report export would be entitled to)
+ * via `deadlineMs`.
+ */
+const DEFAULT_TIMEOUT_MS = 20_000;
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -15,6 +35,24 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
     this.details = details;
+  }
+}
+
+/**
+ * The request did not complete: no HTTP status was ever received.
+ *
+ * Kept distinct from `ApiError` so the UI can say "the connection failed" rather
+ * than inventing a status code. `code` is `timeout` when the deadline above
+ * fired and `network` when the browser reported a transport failure, which is
+ * the difference between "the server is thinking too long" and "the server was
+ * never reached".
+ */
+export class NetworkError extends Error {
+  code: 'timeout' | 'network';
+  constructor(code: 'timeout' | 'network', message: string) {
+    super(message);
+    this.name = 'NetworkError';
+    this.code = code;
   }
 }
 
@@ -29,17 +67,69 @@ export class ApiError extends Error {
  * security property which no longer exists.
  */
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Exposed for one purpose: proving the deadline fires.
+ *
+ * A timeout that is never exercised is a timeout that quietly stops working — and
+ * the failure mode it prevents (waiting forever) is invisible to every test that
+ * runs against a healthy server. `scripts/smoke-web.mjs` races this against an
+ * endpoint that never answers.
+ *
+ * `base` is overridable only for that test: in the browser the base must stay the
+ * single-origin `/api`.
+ */
+export async function requestWithDeadline<T>(path: string, init?: RequestInit & { deadlineMs?: number; base?: string }): Promise<T> {
+  return request<T>(path, init);
+}
+
+async function request<T>(path: string, init?: RequestInit & { deadlineMs?: number; base?: string }): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
   if (init?.body) headers['content-type'] = 'application/json';
+
+  /*
+   * A deadline, enforced by the browser rather than trusted from the server.
+   *
+   * `AbortSignal.timeout` aborts the fetch itself, so the socket is released and
+   * the promise below rejects — the one thing that turns "buffering forever" into
+   * an error a screen can show. `init.signal` is honoured when a caller supplies
+   * its own (the search box cancels superseded keystrokes that way); combining
+   * both means a manual cancel still works and the deadline still applies.
+   */
+  const deadline = init?.deadlineMs ?? DEFAULT_TIMEOUT_MS;
+  const signal = init?.signal
+    ? AbortSignal.any([init.signal, AbortSignal.timeout(deadline)])
+    : AbortSignal.timeout(deadline);
 
   /*
    * `credentials: 'omit'` states the intent: no cookie is sent, because the API
    * authenticates nothing by cookie. Leaving `same-origin` would keep working, but
    * it would also quietly re-enable cookie semantics if one were ever set.
    */
-  const res = await fetch(BASE + path, { ...init, headers, credentials: 'omit' });
+  let res: Response;
+  try {
+    res = await fetch((init?.base ?? BASE) + path, { ...init, headers, credentials: 'omit', signal });
+  } catch (cause) {
+    /*
+     * The fetch itself failed, so there is no status to report. Previously this
+     * escaped as a bare `TypeError: Failed to fetch` — and, before the timeout
+     * existed, a hang never got here at all, which is exactly how a screen could
+     * wait forever with no error to render.
+     */
+    const aborted = cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError');
+    if (aborted) {
+      throw new NetworkError(
+        'timeout',
+        `No response from the server within ${Math.round(deadline / 1000)}s. The request was abandoned so the page does not wait indefinitely.`,
+      );
+    }
+    throw new NetworkError(
+      'network',
+      // The browser's own text is kept: on a misrouted deployment it names the
+      // actual fault (blocked, refused, CORS) instead of a guess about the API.
+      `The request never reached the server${cause instanceof Error && cause.message ? `: ${cause.message}` : '.'}`,
+    );
+  }
 
   /**
    * Parse defensively.

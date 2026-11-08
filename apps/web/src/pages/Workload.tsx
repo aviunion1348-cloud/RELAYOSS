@@ -10,6 +10,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { hours, parseDate, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { QueryFailure } from '../components/QueryFailure';
+import { useQueryState } from '../lib/query-state';
 import { Badge, Button, Card, Progress, RISK_TONE, SectionHeader, Segmented, Skeleton, Tooltip } from '../components/ui';
 import { useSearchParams } from 'react-router-dom';
 import { TaskDrawer } from '../components/TaskDrawer';
@@ -17,11 +19,15 @@ import { TaskDrawer } from '../components/TaskDrawer';
 export default function Workload() {
   const [horizon, setHorizon] = useState(21);
   const [params, setParams] = useSearchParams();
-  const { data, isLoading } = useQuery({ queryKey: ['planner', horizon], queryFn: () => api.planner(horizon) });
+  const planner = useQuery({ queryKey: ['planner', horizon], queryFn: () => api.planner(horizon) });
+  const q = useQueryState(planner);
 
-  if (isLoading || !data) {
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the capacity plan" retry={q.refetch} />;
+  if (q.state !== 'ready') {
     return <div className="p-5"><Skeleton className="h-8 w-64" /><div className="mt-4 grid gap-3 lg:grid-cols-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div><Skeleton className="mt-3 h-64" /></div>;
   }
+
+  const data = q.data;
 
   const s = data.stats;
   const days = Array.from({ length: Math.min(horizon, data.perPerson[0] ? Object.keys(data.perPerson[0].days).length : 14) });

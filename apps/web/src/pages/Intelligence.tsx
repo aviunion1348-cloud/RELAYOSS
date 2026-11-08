@@ -6,6 +6,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { relTime } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { QueryFailure } from '../components/QueryFailure';
+import { useQueryState } from '../lib/query-state';
 import { Badge, Button, Card, Dot, Progress, SectionHeader, Skeleton } from '../components/ui';
 import { TaskDrawer } from '../components/TaskDrawer';
 
@@ -15,11 +17,16 @@ const SEV_ICON: Record<string, keyof typeof Icons> = {
 
 export default function Intelligence() {
   const [params, setParams] = useSearchParams();
-  const { data, isLoading } = useQuery({ queryKey: ['insights'], queryFn: api.insights });
-  const { data: dash } = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard });
+  const insightsQuery = useQuery({ queryKey: ['insights'], queryFn: api.insights });
+  const dashQuery = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard });
+  const q = useQueryState(insightsQuery);
+  const dash = dashQuery.data;
   const openTask = params.get('task');
 
-  if (isLoading || !data) return <div className="p-5"><Skeleton className="h-8 w-52" /><div className="mt-4 grid gap-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div></div>;
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the intelligence feed" retry={q.refetch} />;
+  if (q.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-52" /><div className="mt-4 grid gap-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div></div>;
+
+  const data = q.data;
 
   const counts = {
     critical: data.insights.filter((i) => i.severity === 'critical').length,

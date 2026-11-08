@@ -6,6 +6,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { daysBetween, dateTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { QueryFailure } from '../components/QueryFailure';
+import { useQueryState } from '../lib/query-state';
 import { Badge, Card, Progress, SectionHeader, Skeleton } from '../components/ui';
 
 const FLOW = ['planning', 'in_qa', 'demo_ready', 'demo_done', 'approved', 'shipped'];
@@ -20,11 +22,12 @@ const FLOW = ['planning', 'in_qa', 'demo_ready', 'demo_done', 'approved', 'shipp
  */
 function ShipGatePanel({ releaseId }: { releaseId: string }) {
   const [open, setOpen] = useState(false);
-  const { data, isLoading } = useQuery({
+  const gate = useQuery({
     queryKey: ['release-gate', releaseId],
     queryFn: () => api.releaseGate(releaseId),
     enabled: open,
   });
+  const gq = useQueryState(gate);
 
   if (!open) {
     return (
@@ -38,10 +41,20 @@ function ShipGatePanel({ releaseId }: { releaseId: string }) {
     );
   }
 
-  if (isLoading || !data) {
+  /*
+   * The gate panel is opened by a deliberate click, so its failure is the most
+   * confusing one to leave as a bare skeleton: the reader asked a direct question
+   * ("will this ship?") and got an animation. The compact failure keeps the
+   * question visible and allows another attempt.
+   */
+  if (gq.state === 'failed') {
+    return <div className="mt-2.5"><QueryFailure compact error={gq.error} what="the ship gate" retry={gq.refetch} /></div>;
+  }
+  if (gq.state !== 'ready') {
     return <div className="mt-2.5"><Skeleton className="h-16 w-full" /></div>;
   }
 
+  const data = gq.data;
   const blocking = data.checks.filter((c) => !c.passed);
   return (
     <div className="mt-2.5 rounded-lg border border-ink-700 bg-ink-850/60 p-2.5">
@@ -74,9 +87,13 @@ function ShipGatePanel({ releaseId }: { releaseId: string }) {
 }
 
 export default function Releases() {
-  const { data, isLoading } = useQuery({ queryKey: ['releases'], queryFn: api.releases });
+  const releases = useQuery({ queryKey: ['releases'], queryFn: api.releases });
+  const q = useQueryState(releases);
 
-  if (isLoading || !data) return <div className="p-5"><Skeleton className="h-8 w-48" /><Skeleton className="mt-4 h-64" /></div>;
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the release calendar" retry={q.refetch} />;
+  if (q.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-48" /><Skeleton className="mt-4 h-64" /></div>;
+
+  const data = q.data;
 
   const upcoming = data.filter((r) => r.status !== 'shipped');
   const shipped = data.filter((r) => r.status === 'shipped');

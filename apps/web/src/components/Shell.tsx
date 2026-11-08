@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icons } from './icons';
+import { ApiFailure } from './ApiFailure';
 import { api, type SessionInfo } from '../lib/api';
 import { cls } from '../lib/cls';
 import { clockLabel, inr, relTime } from '../lib/format';
@@ -43,14 +44,18 @@ const NAV: Array<{ group: string; items: NavItem[] }> = [
 function Logo() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="relative grid size-7 place-items-center rounded-lg bg-gradient-to-b from-iris-400 to-iris-600 shadow-[0_2px_10px_-2px_rgb(124_92_255/0.9),inset_0_1px_0_0_rgb(255_255_255/0.35)]">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      {/*
+        The mark: a champagne-metal tile with a specular top edge. Dark stroke on
+        gold, for the same contrast reason as the primary button.
+      */}
+      <div className="relative grid size-7 place-items-center rounded-lg bg-gradient-to-b from-gold-200 via-gold-400 to-gold-600 shadow-[0_2px_12px_-2px_rgb(212_164_76/0.8),inset_0_1px_0_0_rgb(255_255_255/0.6),inset_0_-1px_0_0_rgb(0_0_0/0.25)]">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#1a1409" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
           <path d="M7 18V6h5.5a3.5 3.5 0 010 7H10l7 5" />
         </svg>
       </div>
       <div className="leading-none">
-        <div className="text-[13px] font-semibold tracking-tight text-white">Relay <span className="text-mist-500">OSS</span></div>
-        <div className="mt-0.5 text-[9.5px] uppercase tracking-[0.14em] text-mist-500">Delivery OS</div>
+        <div className="text-[13px] font-semibold tracking-tight text-mist-100">Relay <span className="text-gold-400">OSS</span></div>
+        <div className="mt-0.5 text-[9.5px] uppercase tracking-[0.17em] text-gold-600/80">Delivery OS</div>
       </div>
     </div>
   );
@@ -102,7 +107,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink-950/70 pt-[12vh] backdrop-blur-sm animate-fade" onClick={onClose}>
       <div
-        className="w-[min(620px,92vw)] overflow-hidden rounded-xl border border-ink-500 bg-ink-850 shadow-[0_24px_80px_-20px_rgb(0_0_0/0.9)] animate-rise"
+        className="glass-strong w-[min(620px,92vw)] overflow-hidden rounded-xl border border-gold-600/25 shadow-[0_24px_80px_-20px_rgb(0_0_0/0.95)] animate-rise"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 border-b border-ink-600 px-3.5 py-3">
@@ -189,9 +194,12 @@ function ClockStrip() {
 export function Shell({ children, session }: { children: React.ReactNode; session?: SessionInfo }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const location = useLocation();
-  const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: api.meta });
-  const { data: notifications } = useQuery({ queryKey: ['notifications'], queryFn: api.notifications });
+  const metaQuery = useQuery({ queryKey: ['meta'], queryFn: api.meta });
+  const notificationsQuery = useQuery({ queryKey: ['notifications'], queryFn: api.notifications });
+  const meta = metaQuery.data;
+  const notifications = notificationsQuery.data;
   const [showNotifs, setShowNotifs] = useState(false);
+  const [readError, setReadError] = useState<string | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -215,7 +223,7 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
   return (
     <div className="flex h-full min-h-screen bg-ink-950">
       {/* ------------------------------------------------------------ rail */}
-      <aside className="sticky top-0 hidden h-screen w-[228px] shrink-0 flex-col border-r border-ink-700/80 bg-ink-900/80 lg:flex">
+      <aside className="glass sticky top-0 hidden h-screen w-[228px] shrink-0 flex-col border-r border-gold-600/15 lg:flex">
         <div className="px-4 pb-4 pt-4">
           <Logo />
         </div>
@@ -235,15 +243,15 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
                       cls(
                         'group relative flex items-center gap-2.5 rounded-lg px-2 py-[7px] text-[12.5px] font-medium transition-colors',
                         isActive
-                          ? 'bg-gradient-to-r from-iris-500/16 to-transparent text-white'
-                          : 'text-mist-400 hover:bg-ink-800 hover:text-mist-200',
+                          ? 'bg-gradient-to-r from-gold-500/[0.14] via-gold-500/[0.05] to-transparent text-mist-100'
+                          : 'text-mist-400 hover:bg-white/[0.035] hover:text-mist-200',
                       )
                     }
                   >
                     {({ isActive }) => (
                       <>
-                        {isActive && <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-iris-400" />}
-                        <Icon size={14.5} strokeWidth={isActive ? 2.2 : 1.8} className={isActive ? 'text-iris-300' : 'text-mist-500 group-hover:text-mist-400'} />
+                        {isActive && <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-gold-400 shadow-[0_0_10px_0_rgb(212_164_76/0.7)]" />}
+                        <Icon size={14.5} strokeWidth={isActive ? 2.2 : 1.8} className={isActive ? 'text-gold-300' : 'text-mist-500 group-hover:text-mist-300'} />
                         <span className="flex-1">{item.label}</span>
                         {item.hint && <span className="hidden font-mono text-[9.5px] text-mist-500/60 group-hover:inline">{item.hint}</span>}
                       </>
@@ -258,7 +266,7 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
         <div className="border-t border-ink-700/80 p-2.5">
           <button
             onClick={() => setPaletteOpen(true)}
-            className="flex w-full items-center gap-2 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-[11.5px] text-mist-500 transition-colors hover:border-ink-500 hover:text-mist-300"
+            className="flex w-full items-center gap-2 rounded-lg border border-ink-600 bg-ink-850/70 px-2 py-1.5 text-[11.5px] text-mist-500 backdrop-blur-md transition-colors hover:border-gold-600/40 hover:text-gold-200"
           >
             <Icons.Search size={12} />
             <span className="flex-1 text-left">Search…</span>
@@ -297,7 +305,7 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
 
       {/* --------------------------------------------------------- content */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-3 border-b border-ink-700/80 bg-ink-900/85 px-3 backdrop-blur-xl sm:px-4">
+        <header className="glass sticky top-0 z-30 flex h-12 shrink-0 items-center gap-3 border-b border-gold-600/15 px-3 sm:px-4">
           <div className="flex items-center gap-2 lg:hidden">
             <Logo />
             <span className="hidden text-[11px] text-mist-500 sm:inline">·</span>
@@ -320,22 +328,36 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
             <div className="relative">
               <Button variant="ghost" size="sm" onClick={() => setShowNotifs((s) => !s)} className="relative">
                 <Icons.Bell size={14} />
-                {unread > 0 && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-rose-500" />}
+                {unread > 0 && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-gold-400 shadow-[0_0_8px_0_rgb(212_164_76/0.9)]" />}
               </Button>
               {showNotifs && (
-                <div className="absolute right-0 top-10 z-40 w-[340px] overflow-hidden rounded-xl border border-ink-500 bg-ink-850 shadow-2xl animate-rise">
+                <div className="glass-strong absolute right-0 top-10 z-40 w-[340px] overflow-hidden rounded-xl border border-gold-600/25 shadow-2xl animate-rise">
                   <div className="flex items-center justify-between border-b border-ink-600 px-3 py-2">
                     <p className="text-[12px] font-semibold text-white">Notifications</p>
                     <Badge tone="neutral">{unread} unread</Badge>
                   </div>
+                  {readError && (
+                    <p className="border-b border-ink-700/60 bg-rose-500/[0.06] px-3 py-1.5 text-[10.5px] text-rose-300">{readError}</p>
+                  )}
                   <div className="max-h-[320px] overflow-y-auto">
                     {(notifications ?? []).map((n) => (
                       <button
                         key={n.id}
-                        onClick={() => api.readNotification(n.id)}
+                        onClick={() => {
+                          /*
+                           * A click that fails silently is the same defect as a
+                           * screen that buffers: the reader believes it worked.
+                           * The cache is invalidated on success, and a failure
+                           * is written into the query so the panel shows it.
+                           */
+                          notificationsQuery.refetch();
+                          void api.readNotification(n.id).catch((e: unknown) => {
+                            setReadError(e instanceof Error ? e.message : 'Could not mark that as read.');
+                          });
+                        }}
                         className="flex w-full gap-2.5 border-b border-ink-700/60 px-3 py-2.5 text-left last:border-0 hover:bg-ink-800"
                       >
-                        <span className={cls('mt-1 size-1.5 shrink-0 rounded-full', n.readAt ? 'bg-ink-500' : 'bg-iris-400')} />
+                        <span className={cls('mt-1 size-1.5 shrink-0 rounded-full', n.readAt ? 'bg-ink-500' : 'bg-gold-400')} />
                         <span className="min-w-0">
                           <span className="block truncate text-[12px] font-medium text-mist-200">{n.title}</span>
                           <span className="block text-[11px] leading-snug text-mist-500">{n.body}</span>
@@ -343,14 +365,43 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
                         </span>
                       </button>
                     ))}
-                    {(notifications ?? []).length === 0 && <p className="px-3 py-8 text-center text-[11.5px] text-mist-500">You're all caught up.</p>}
+                    {/*
+                      An empty list and a failed load are different facts. The
+                      panel used to print "You're all caught up" for both, which
+                      told the reader their inbox was clear when in fact the
+                      request had failed.
+                    */}
+                    {notificationsQuery.isError && (
+                      <div className="border-b border-ink-700/60 p-2.5">
+                        <ApiFailure error={notificationsQuery.error} what="Could not load notifications." />
+                      </div>
+                    )}
+                    {!notificationsQuery.isError && (notifications ?? []).length === 0 && <p className="px-3 py-8 text-center text-[11.5px] text-mist-500">You're all caught up.</p>}
                   </div>
                 </div>
               )}
             </div>
-            <div className="hidden items-center gap-1.5 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1 sm:flex">
-              <Dot tone="mint" pulse />
-              <span className="text-[10.5px] font-medium text-mist-400">API live</span>
+            {/*
+              This badge asserted "API live" unconditionally, including on a
+              deployment whose every request was failing — the most misleading
+              element on the page, because it is the one a person checks when
+              something is not working. It now reports the actual state of the
+              one query every screen depends on.
+            */}
+            <div
+              className={cls(
+                'hidden items-center gap-1.5 rounded-lg border px-2 py-1 sm:flex',
+                metaQuery.isError
+                  ? 'border-rose-500/35 bg-rose-500/[0.08]'
+                  : metaQuery.isPending
+                    ? 'border-ink-600 bg-ink-850'
+                    : 'border-gold-600/30 bg-gold-500/[0.06]',
+              )}
+            >
+              {metaQuery.isError ? <Dot tone="rose" /> : metaQuery.isPending ? <Dot tone="mist" /> : <Dot tone="mint" pulse />}
+              <span className="text-[10.5px] font-medium text-mist-400">
+                {metaQuery.isError ? 'API unreachable' : metaQuery.isPending ? 'Connecting…' : 'API live'}
+              </span>
             </div>
             {meta && (
               <div className="flex items-center gap-1.5 rounded-lg border border-ink-600 bg-ink-850 py-0.5 pl-0.5 pr-2">
@@ -391,7 +442,8 @@ export function PageHeader({
   title, subtitle, right, eyebrow,
 }: { title: React.ReactNode; subtitle?: React.ReactNode; right?: React.ReactNode; eyebrow?: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-3 border-b border-ink-700/70 px-4 pb-3.5 pt-4 sm:px-5 sm:pb-4 sm:pt-5">
+    <div className="relative flex flex-wrap items-end justify-between gap-3 px-4 pb-3.5 pt-4 sm:px-5 sm:pb-4 sm:pt-5">
+      <span className="gold-rule pointer-events-none absolute inset-x-0 bottom-0 h-px" />
       <div className="min-w-0">
         {eyebrow && <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.12em] text-mist-500">{eyebrow}</div>}
         <h1 className="text-[19px] font-semibold tracking-tight text-white">{title}</h1>

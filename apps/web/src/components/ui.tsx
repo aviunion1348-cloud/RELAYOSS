@@ -27,11 +27,15 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         size === 'xs' && 'h-7 px-2 text-[11px]',
         size === 'sm' && 'h-8 px-2.5 text-[12.5px]',
         size === 'md' && 'h-9.5 px-3.5 text-[13px]',
+        /*
+         * Dark ink text on gold, not white on gold: at this lightness white
+         * fails contrast, and this is the primary action of the whole product.
+         */
         variant === 'primary' &&
-          'border-iris-500/60 bg-iris-500 text-white shadow-[0_1px_0_0_rgb(255_255_255/0.18)_inset,0_6px_18px_-8px_rgb(124_92_255/0.9)] hover:bg-iris-400 active:translate-y-px',
+          'border-gold-400/70 bg-gradient-to-b from-gold-300 to-gold-500 text-ink-950 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.45),0_6px_20px_-8px_rgb(212_164_76/0.85)] hover:from-gold-200 hover:to-gold-400 active:translate-y-px',
         variant === 'secondary' &&
-          'border-ink-600 bg-ink-750 text-mist-200 hover:border-ink-500 hover:bg-ink-700 hover:text-white active:translate-y-px',
-        variant === 'ghost' && 'border-transparent bg-transparent text-mist-400 hover:bg-ink-750 hover:text-mist-200',
+          'border-ink-600 bg-ink-750/70 text-mist-200 backdrop-blur-md hover:border-gold-600/45 hover:bg-ink-700/80 hover:text-white active:translate-y-px',
+        variant === 'ghost' && 'border-transparent bg-transparent text-mist-400 hover:bg-ink-750/70 hover:text-gold-200',
         variant === 'danger' && 'border-rose-500/40 bg-rose-500/12 text-rose-400 hover:bg-rose-500/20 hover:text-rose-300',
         variant === 'success' && 'border-mint-500/40 bg-mint-500/12 text-mint-400 hover:bg-mint-500/20',
         className,
@@ -49,7 +53,7 @@ export function Badge({
 }: { children: ReactNode; tone?: string; dot?: boolean; className?: string; mono?: boolean }) {
   const tones: Record<string, string> = {
     neutral: 'border-ink-500 bg-ink-750 text-mist-300',
-    iris: 'border-iris-500/35 bg-iris-500/12 text-iris-300',
+    iris: 'border-gold-500/35 bg-gold-500/10 text-gold-300',
     mint: 'border-mint-500/30 bg-mint-500/10 text-mint-400',
     amber: 'border-amber-500/30 bg-amber-500/10 text-amber-400',
     rose: 'border-rose-500/30 bg-rose-500/10 text-rose-400',
@@ -86,7 +90,7 @@ export function Avatar({ name, initials, color, size = 22, ring }: { name: strin
   return (
     <span
       title={name}
-      style={{ background: `color-mix(in oklab, ${color} 24%, #0d0f14)`, color, width: size, height: size, fontSize: size * 0.42 }}
+      style={{ background: `color-mix(in oklab, ${color} 24%, #0a0908)`, color, width: size, height: size, fontSize: size * 0.42 }}
       className={cls('inline-grid shrink-0 place-items-center rounded-full font-semibold tracking-tight', ring && 'ring-1 ring-ink-600')}
     >
       {initials || name.slice(0, 2).toUpperCase()}
@@ -147,7 +151,7 @@ export function Input({ className, ...rest }: React.InputHTMLAttributes<HTMLInpu
       {...rest}
       className={cls(
         'h-8 w-full rounded-lg border border-ink-600 bg-ink-850 px-2.5 text-[12.5px] text-mist-200 placeholder:text-mist-500/70',
-        'transition-colors focus:border-iris-500/60 focus:outline-none focus:ring-2 focus:ring-iris-500/20',
+        'transition-colors focus:border-gold-500/60 focus:outline-none focus:ring-2 focus:ring-gold-500/20',
         className,
       )}
     />
@@ -160,7 +164,7 @@ export function Textarea({ className, ...rest }: React.TextareaHTMLAttributes<HT
       {...rest}
       className={cls(
         'w-full resize-none rounded-lg border border-ink-600 bg-ink-850 px-2.5 py-2 text-[12.5px] leading-relaxed text-mist-200 placeholder:text-mist-500/70',
-        'transition-colors focus:border-iris-500/60 focus:outline-none focus:ring-2 focus:ring-iris-500/20',
+        'transition-colors focus:border-gold-500/60 focus:outline-none focus:ring-2 focus:ring-gold-500/20',
         className,
       )}
     />
@@ -174,7 +178,7 @@ export function Select({ className, children, ...rest }: React.SelectHTMLAttribu
         {...rest}
         className={cls(
           'h-8 w-full appearance-none rounded-lg border border-ink-600 bg-ink-850 pl-2.5 pr-7 text-[12.5px] text-mist-200',
-          'transition-colors focus:border-iris-500/60 focus:outline-none focus:ring-2 focus:ring-iris-500/20',
+          'transition-colors focus:border-gold-500/60 focus:outline-none focus:ring-2 focus:ring-gold-500/20',
           className,
         )}
       >
@@ -219,7 +223,7 @@ export function Progress({ value, tone = 'iris', className, height = 4 }: { valu
     iris: 'bg-iris-500', mint: 'bg-mint-500', amber: 'bg-amber-500', rose: 'bg-rose-500', sky: 'bg-sky-500', mist: 'bg-mist-500',
   };
   return (
-    <div className={cls('w-full overflow-hidden rounded-full bg-ink-700', className)} style={{ height }}>
+    <div className={cls('w-full overflow-hidden rounded-full bg-ink-700/80 ring-1 ring-inset ring-white/[0.04]', className)} style={{ height }}>
       <div
         className={cls('h-full rounded-full transition-[width] duration-500', colors[tone] ?? colors.iris)}
         style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
@@ -228,7 +232,7 @@ export function Progress({ value, tone = 'iris', className, height = 4 }: { valu
   );
 }
 
-export function Ring({ value, size = 44, stroke = 3.5, tone = '#7c5cff', label }: { value: number; size?: number; stroke?: number; tone?: string; label?: ReactNode }) {
+export function Ring({ value, size = 44, stroke = 3.5, tone = '#d4a44c', label }: { value: number; size?: number; stroke?: number; tone?: string; label?: ReactNode }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const offset = c - (Math.min(100, Math.max(0, value)) / 100) * c;
@@ -246,7 +250,7 @@ export function Ring({ value, size = 44, stroke = 3.5, tone = '#7c5cff', label }
   );
 }
 
-export function Sparkline({ values, tone = '#7c5cff', height = 28, width = 96 }: { values: number[]; tone?: string; height?: number; width?: number }) {
+export function Sparkline({ values, tone = '#d4a44c', height = 28, width = 96 }: { values: number[]; tone?: string; height?: number; width?: number }) {
   if (!values.length) return null;
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
@@ -283,7 +287,7 @@ export function Empty({ icon = 'Inbox', title, hint }: { icon?: keyof typeof Ico
 }
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cls('shimmer rounded-md', className)} />;
+  return <div className={cls('shimmer rounded-md ring-1 ring-inset ring-white/[0.03]', className)} />;
 }
 
 export function Tooltip({ label, children }: { label: string; children: ReactNode }) {

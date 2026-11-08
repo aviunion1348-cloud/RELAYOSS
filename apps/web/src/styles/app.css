@@ -1,59 +1,91 @@
 @import 'tailwindcss';
 
 /* ==========================================================================
-   Relay OSS design system
-   Dark, dense, hairline-bordered — built for 8-hour days on a 27" display.
-   Type: Inter (UI) with tabular numerals for every metric.
+   Relay OSS — black & gold glass
+
+   Obsidian ground, champagne metal, and translucent panels that let the
+   background bleed through. The rules that keep it legible rather than gaudy:
+
+     black      every surface is neutral and very dark; the page itself is
+                true black so glass has something to sit on.
+     gold       one accent, used for emphasis and state — never for body text,
+                never for large fills. Body copy stays a desaturated silver.
+     glass      panels are translucent + blurred + hairline-bordered, with a
+                specular highlight along the top edge. Opacity, not noise:
+                text sits on a readable plate, not on a busy gradient.
+
+   State colours (mint / amber / rose / sky) are preserved deliberately. Gold
+   is the *brand* accent; collapsing "healthy" and "overdue" into the same hue
+   would cost the reader the one thing this product exists to show at a glance.
    ========================================================================== */
 
 @theme {
   --font-sans: 'Inter var', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --color-ink-950: #07080b;
-  --color-ink-900: #0a0b0f;
-  --color-ink-850: #0d0f14;
-  --color-ink-800: #11131a;
-  --color-ink-750: #15181f;
-  --color-ink-700: #1a1d26;
-  --color-ink-600: #232733;
-  --color-ink-500: #2e3340;
-  --color-ink-400: #3d4453;
+  /* black — the ground. Slightly warm, so gold reads as metal not decoration. */
+  --color-ink-950: #050505;
+  --color-ink-900: #0a0908;
+  --color-ink-850: #0e0c0a;
+  --color-ink-800: #131110;
+  --color-ink-750: #191614;
+  --color-ink-700: #201c18;
+  --color-ink-650: #262019;
+  --color-ink-600: #2c251d;
+  --color-ink-500: #3a3128;
+  --color-ink-400: #4c4134;
 
-  /* Extended ramp — referenced by badges, charts and diff/state surfaces. */
-  --color-mist-100: #e8ebf1;
-  --color-ink-650: #1f2330;
-  --color-iris-200: #d6caff;
-  --color-mint-300: #86efbe;
-  --color-amber-300: #fcd34d;
-  --color-amber-200: #fde68a;
-  --color-rose-300: #fda4af;
-  --color-rose-200: #fecdd3;
-  --color-mist-500: #7c8496;
-  --color-mist-400: #98a0b1;
-  --color-mist-300: #b4bccb;
-  --color-mist-200: #d6dae3;
+  /* gold — champagne metal, not yellow. */
+  --color-gold-100: #fdf6e3;
+  --color-gold-200: #f8e7b9;
+  --color-gold-300: #f0d493;
+  --color-gold-400: #e3bd6c;
+  --color-gold-500: #d4a44c;
+  --color-gold-600: #b8862f;
+  --color-gold-700: #8f6420;
+  --color-gold-800: #664718;
+  --color-gold-900: #3d2a0f;
 
-  --color-iris-600: #6d4dfa;
-  --color-iris-500: #7c5cff;
-  --color-iris-400: #9a80ff;
-  --color-iris-300: #bda9ff;
+  /* silver — body copy on black. Warm enough to sit beside gold. */
+  --color-mist-100: #f5f2ec;
+  --color-mist-200: #ded9d0;
+  --color-mist-300: #c0bab0;
+  --color-mist-400: #9c968c;
+  --color-mist-500: #78726a;
 
+  /*
+   * The accent ramp the codebase already uses is `iris-*`. Those names now
+   * resolve to gold — one rename in the design system instead of ninety edits
+   * spread across thirteen screens, and no class anywhere refers to a palette
+   * that no longer exists.
+   */
+  --color-iris-200: #f8e7b9;
+  --color-iris-300: #f0d493;
+  --color-iris-400: #e3bd6c;
+  --color-iris-500: #d4a44c;
+  --color-iris-600: #b8862f;
+
+  /* state — unchanged in meaning, warmed slightly to belong to this palette. */
+  --color-mint-300: #8ff0c4;
+  --color-mint-400: #4fdb9d;
   --color-mint-500: #22c98a;
-  --color-mint-400: #4ade9f;
-  --color-amber-500: #f5a524;
+  --color-amber-200: #fde68a;
+  --color-amber-300: #fcd34d;
   --color-amber-400: #fbbf24;
-  --color-rose-500: #f4486b;
+  --color-amber-500: #f5a524;
+  --color-rose-200: #fecdd3;
+  --color-rose-300: #fda4af;
   --color-rose-400: #fb7185;
-  --color-sky-500: #22a8f5;
+  --color-rose-500: #f4486b;
   --color-sky-400: #38bdf8;
+  --color-sky-500: #22a8f5;
 }
 
 @layer base {
   * {
-    border-color: color-mix(in oklab, var(--color-ink-500) 60%, transparent);
+    border-color: color-mix(in oklab, var(--color-ink-500) 62%, transparent);
     scrollbar-width: thin;
-    scrollbar-color: var(--color-ink-500) transparent;
+    scrollbar-color: var(--color-ink-600) transparent;
   }
   html,
   body,
@@ -67,23 +99,36 @@
     -webkit-font-smoothing: antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
     letter-spacing: -0.008em;
+    /*
+     * Two faint gold light-sources on true black. Fixed, so the page does not
+     * shimmer as you scroll — a background that moves under glass reads as a
+     * rendering fault, not as depth.
+     *
+     * `color-mix(in oklab, …)` inherits from the theme token rather than
+     * repeating the hex, so retuning `--color-gold-500` retunes the page.
+     */
+    background-image:
+      radial-gradient(1000px 620px at 12% -10%, color-mix(in oklab, var(--color-gold-500) 9%, transparent), transparent 70%),
+      radial-gradient(900px 540px at 92% 4%, color-mix(in oklab, var(--color-gold-400) 6%, transparent), transparent 72%);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
   }
   ::selection {
-    background: color-mix(in oklab, var(--color-iris-500) 40%, transparent);
-    color: #fff;
+    background: color-mix(in oklab, var(--color-gold-500) 34%, transparent);
+    color: var(--color-gold-100);
   }
   ::-webkit-scrollbar {
     width: 9px;
     height: 9px;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--color-ink-500);
+    background: var(--color-ink-600);
     border-radius: 99px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-ink-400);
+    background: var(--color-ink-500);
     background-clip: content-box;
   }
   input,
@@ -94,8 +139,13 @@
     letter-spacing: inherit;
   }
   :focus-visible {
-    outline: 2px solid var(--color-iris-400);
+    outline: 2px solid var(--color-gold-400);
     outline-offset: 2px;
+  }
+  /* Native controls rendered inside glass must not flash white. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-gold-500);
   }
 }
 
@@ -105,43 +155,99 @@
     font-feature-settings: 'tnum';
   }
 
-  /* The signature surface: near-black with a hairline top highlight. */
+  /* ---------------------------------------------------------- glass system */
+
+  /*
+   * The signature surface: translucent warm black, blurred, with a hairline of
+   * light along the top edge and a gold-tinged border.
+   *
+   * `backdrop-filter` is the load-bearing property. Browsers that do not
+   * support it fall back to the opaque background declared first, which is why
+   * the fill is specified twice — translucent for glass-capable browsers,
+   * solid enough to read on its own for the rest. A panel whose text is
+   * unreadable without blur is a panel that is broken in an older browser.
+   */
   .surface {
-    background: linear-gradient(180deg, color-mix(in oklab, var(--color-ink-800) 92%, #fff 8%), var(--color-ink-850));
-    border: 1px solid var(--color-ink-600);
+    background: var(--color-ink-850);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--color-ink-800) 82%, transparent),
+      color-mix(in oklab, var(--color-ink-900) 90%, transparent)
+    );
+    border: 1px solid color-mix(in oklab, var(--color-ink-500) 70%, transparent);
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.035),
-      0 1px 2px 0 rgb(0 0 0 / 0.4);
+      inset 0 1px 0 0 rgb(240 212 147 / 0.07),
+      0 1px 2px 0 rgb(0 0 0 / 0.6),
+      0 18px 40px -32px rgb(0 0 0 / 0.9);
+    -webkit-backdrop-filter: blur(16px) saturate(115%);
+    backdrop-filter: blur(16px) saturate(115%);
   }
   .surface-hover {
-    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+    transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
   }
   .surface-hover:hover {
-    background: linear-gradient(180deg, color-mix(in oklab, var(--color-ink-750) 88%, #fff 12%), var(--color-ink-800));
-    border-color: var(--color-ink-500);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--color-ink-750) 86%, transparent),
+      color-mix(in oklab, var(--color-ink-850) 92%, transparent)
+    );
+    border-color: color-mix(in oklab, var(--color-gold-600) 42%, transparent);
+    box-shadow:
+      inset 0 1px 0 0 rgb(240 212 147 / 0.12),
+      0 1px 2px 0 rgb(0 0 0 / 0.6),
+      0 20px 44px -30px rgb(0 0 0 / 0.95);
   }
+
+  /* Heavier glass for chrome that floats above content: sidebar, header, menus. */
   .glass {
-    background: color-mix(in oklab, var(--color-ink-900) 72%, transparent);
-    backdrop-filter: blur(18px) saturate(140%);
+    background: color-mix(in oklab, var(--color-ink-900) 62%, transparent);
+    -webkit-backdrop-filter: blur(22px) saturate(125%);
+    backdrop-filter: blur(22px) saturate(125%);
   }
+  .glass-strong {
+    background: color-mix(in oklab, var(--color-ink-850) 88%, transparent);
+    -webkit-backdrop-filter: blur(26px) saturate(130%);
+    backdrop-filter: blur(26px) saturate(130%);
+  }
+
+  /* Gold gradient for one hero element per screen — never for body text. */
+  .gold-fill {
+    background-image: linear-gradient(140deg, var(--color-gold-300), var(--color-gold-500) 55%, var(--color-gold-700));
+  }
+  /*
+   * Gold *text* is a gradient, so it needs `background-clip: text`. Kept to a
+   * single class so it can never be applied by accident to a paragraph.
+   */
+  .gold-text {
+    background-image: linear-gradient(180deg, var(--color-gold-200), var(--color-gold-500));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* The hairline that separates chrome from content. */
+  .gold-rule {
+    background-image: linear-gradient(90deg, transparent, color-mix(in oklab, var(--color-gold-600) 55%, transparent), transparent);
+  }
+
   .hairline-t {
-    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.05);
+    box-shadow: inset 0 1px 0 0 rgb(240 212 147 / 0.07);
   }
   .grid-fade {
     background-image:
-      linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
-      linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+      linear-gradient(to right, rgb(240 212 147 / 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(240 212 147 / 0.05) 1px, transparent 1px);
     background-size: 44px 44px;
     mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 30%, transparent 78%);
   }
+  /* The hero light behind the page title. Gold replacing the old aurora. */
   .aurora {
     background:
-      radial-gradient(60% 55% at 18% -8%, color-mix(in oklab, var(--color-iris-500) 26%, transparent) 0%, transparent 60%),
-      radial-gradient(50% 45% at 88% -12%, color-mix(in oklab, var(--color-sky-500) 18%, transparent) 0%, transparent 62%),
-      radial-gradient(45% 40% at 52% 108%, color-mix(in oklab, var(--color-mint-500) 10%, transparent) 0%, transparent 65%);
+      radial-gradient(60% 55% at 18% -8%, color-mix(in oklab, var(--color-gold-500) 16%, transparent) 0%, transparent 62%),
+      radial-gradient(50% 45% at 86% -12%, color-mix(in oklab, var(--color-gold-300) 9%, transparent) 0%, transparent 64%),
+      radial-gradient(45% 40% at 52% 108%, color-mix(in oklab, var(--color-gold-700) 12%, transparent) 0%, transparent 66%);
   }
   .ring-soft {
-    box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-iris-500) 45%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-gold-500) 45%, transparent);
   }
   .no-scrollbar::-webkit-scrollbar {
     display: none;
@@ -161,9 +267,9 @@
   .shimmer {
     background: linear-gradient(
       90deg,
-      color-mix(in oklab, var(--color-ink-700) 90%, transparent) 0%,
-      color-mix(in oklab, var(--color-ink-600) 90%, transparent) 50%,
-      color-mix(in oklab, var(--color-ink-700) 90%, transparent) 100%
+      color-mix(in oklab, var(--color-ink-700) 92%, transparent) 0%,
+      color-mix(in oklab, var(--color-ink-600) 92%, transparent) 50%,
+      color-mix(in oklab, var(--color-ink-700) 92%, transparent) 100%
     );
     background-size: 200% 100%;
     animation: shimmer 1.4s linear infinite;

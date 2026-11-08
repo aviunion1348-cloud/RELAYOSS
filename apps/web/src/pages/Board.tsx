@@ -7,6 +7,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { dueTone, hours, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { MutationFailure, QueryFailure } from '../components/QueryFailure';
+import { useMutationFailure, useQueryState } from '../lib/query-state';
 import {
   Avatar, Badge, Button, Card, Dot, Empty, Input, PRIORITY_TONE, RISK_TONE, Segmented, Select, Skeleton, Tooltip,
 } from '../components/ui';
@@ -16,7 +18,7 @@ import type { Task } from '../types';
 const COLUMNS = [
   { key: 'backlog', label: 'Backlog', color: '#64748b', wip: null },
   { key: 'todo', label: 'Ready', color: '#94a3b8', wip: null },
-  { key: 'in_progress', label: 'In Progress', color: '#7c5cff', wip: 4 },
+  { key: 'in_progress', label: 'In Progress', color: '#d4a44c', wip: 4 },
   { key: 'review', label: 'In Review', color: '#f5a524', wip: 3 },
   { key: 'blocked', label: 'Blocked', color: '#f4486b', wip: null },
   { key: 'done', label: 'Shipped', color: '#22c98a', wip: null },
@@ -112,10 +114,11 @@ export default function Board() {
   const [overCol, setOverCol] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
 
-  const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: api.meta });
+  const metaQuery = useQuery({ queryKey: ['meta'], queryFn: api.meta });
+  const meta = metaQuery.data;
   const activeBoard = boardId || meta?.boards[0]?.id || '';
 
-  const { data: tasks, isLoading } = useQuery({
+  const tasksQuery = useQuery({
     queryKey: ['tasks', activeBoard, filters],
     queryFn: () =>
       api.tasks({
@@ -128,14 +131,36 @@ export default function Board() {
       }),
     enabled: !!activeBoard,
   });
+  const q = useQueryState(tasksQuery);
+  const tasks = q.data;
+  /*
+   * `isLoading` now means what it says. The board renders its columns while the
+   * card query is outstanding, and shows a failure when it ends in one — the
+   * previous expression treated "no cards yet" as "still loading", so a failed
+   * card load left four animating skeletons with the drag surface disabled.
+   */
+  const isLoading = q.state === 'loading';
+  const loadFailure = metaQuery.isError ? metaQuery.error : q.state === 'failed' ? q.error : null;
+  const retry = () => {
+    void metaQuery.refetch();
+    void tasksQuery.refetch();
+  };
 
+  const moveError = useMutationFailure();
   const move = useMutation({
     mutationFn: (vars: { id: string; status: string }) => api.updateTask(vars.id, { status: vars.status }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
-    onError: (e: Error) => window.alert(e.message),
+    /*
+     * No `window.alert`. It blocked the thread, could not be styled, appeared
+     * detached from the card that did not move, and on a rejected move it was the
+     * only thing the user saw before the board silently snapped back. The failure
+     * is rendered above the columns instead, next to the surface that failed.
+     */
+    onMutate: () => moveError.clear(),
+    onError: (e: unknown) => moveError.set(e),
   });
 
   const openTaskId = params.get('task');
@@ -250,16 +275,31 @@ export default function Board() {
         </span>
       </div>
 
+      {moveError.error !== null && (
+        <div className="px-3 pt-2">
+          <MutationFailure
+            error={moveError.error}
+            what="Moving that card"
+            onDismiss={moveError.clear}
+          />
+        </div>
+      )}
+
       {/* columns */}
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-3 py-3">
         <div className="flex h-full min-w-max gap-2.5">
-          {isLoading && COLUMNS.map((c) => (
+          {loadFailure !== null && (
+            <div className="w-full">
+              <QueryFailure error={loadFailure} what="the task board" retry={retry} />
+            </div>
+          )}
+          {loadFailure === null && isLoading && COLUMNS.map((c) => (
             <div key={c.key} className="flex h-full w-[278px] shrink-0 flex-col gap-2">
               <Skeleton className="h-7 w-full" />
               {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[92px]" />)}
             </div>
           ))}
-          {!isLoading && COLUMNS.map((col) => {
+          {loadFailure === null && !isLoading && COLUMNS.map((col) => {
             const list = byStatus[col.key] ?? [];
             const overWip = col.wip !== null && list.length > col.wip;
             return (
@@ -446,7 +486,7 @@ function NewTaskModal({
             Create task
           </Button>
         </div>
-        {create.error && <p className="mt-2 text-[11px] text-rose-400">{(create.error as Error).message}</p>}
+        {create.error && <div className="mt-2"><MutationFailure error={create.error} what="Creating that task" /></div>}
       </div>
     </div>
   );

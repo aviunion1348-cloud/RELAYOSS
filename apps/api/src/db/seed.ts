@@ -782,15 +782,26 @@ export async function seed(db: Db, log: (m: string) => void = console.log): Prom
       ['p2', 'test', 'Load test report — 3× festive peak'],
       ['p1', 'bug', 'Locale switch resets the checkout step'],
     ];
+    /*
+     * The first report's id, remembered because the QA turnover clock below hangs
+     * off a real report. It used to be the literal 'QA-2201', which names nothing
+     * in this schema — `qa_reports` has no number column — so the clock pointed at
+     * a row that did not exist. That made the Clocks screen show a running QA clock
+     * whose Met/Pause buttons answered 404: the tenancy guard resolved the entity,
+     * found nothing, and reported "not found" for a timer the list had just shown.
+     */
+    let firstQaId: string | null = null;
     for (let i = 0; i < 22; i++) {
       const [sev, kind, title] = qaTitles[i % qaTitles.length];
       const project = pick(['pr_northwind', 'pr_veer', 'pr_lumen', 'pr_tide', 'pr_sentinel']);
       const status = pick(['open', 'open', 'triaged', 'in_progress', 'fixed', 'verified', 'verified', 'wont_fix']);
       const submitted = daysAgo(Math.floor(rnd() * 9));
+      const qaId = id('qa');
+      if (!firstQaId) firstQaId = qaId;
       await db.run(
         `INSERT INTO qa_reports (id,project_id,kind,severity,title,body,status,reproduction,evidence_url,reporter_id,assignee_id,due_at,submitted_at,resolved_at)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id('qa'), project, kind, sev, title,
+        [qaId, project, kind, sev, title,
           'Reported during the scheduled QA pass. Full log, HAR and screen recording attached to the ticket.',
           status, pick(['Open in a clean session, complete step 2, then hard-refresh.', 'Throttle to Slow 3G and retry the submit 3×.', 'Two tabs, same user, act within 2 seconds of each other.']),
           'https://evidence.relayoss.studio/' + id('ev'),
@@ -808,7 +819,7 @@ export async function seed(db: Db, log: (m: string) => void = console.log): Prom
       ['module-turnover', 'task', 'NRTH-102', 'Module turnover: handoff queue', 9, 6, 'running', ''],
       ['first-demo', 'project', 'pr_tide', 'First demo from kickoff', 22, 190, 'running', ''],
       ['exec-summary', 'release', 'v3.1.0', 'Exec summary before ship', 8, 60, 'missed', 'Summary drafted late after the client moved the ship date.'],
-      ['qa-report', 'qa', 'QA-2201', 'QA report turnaround', 1, 9, 'running', ''],
+      ['qa-report', 'qa', firstQaId ?? '', 'QA report turnaround', 1, 9, 'running', ''],
       ['client-turnover', 'project', 'pr_veer', 'Client turnover: Kafka topology', 40, 260, 'running', 'Client review requested with their network team.'],
       ['milestone-turnover', 'phase', 'ph_build', 'Build milestone turnover', 2, 150, 'running', ''],
       ['ship-after-approval', 'release', 'v2.4.0', 'Ship after demo approval', 6, 100, 'running', ''],

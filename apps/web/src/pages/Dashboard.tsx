@@ -9,21 +9,44 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { clockLabel, inr, relTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { QueryFailure, StaleNotice } from '../components/QueryFailure';
+import { hasFailed, useQueryState } from '../lib/query-state';
 import {
   Avatar, Badge, Button, Card, Dot, Empty, HEALTH_TONE, PRIORITY_TONE, Progress, Ring, RISK_TONE, SectionHeader, Skeleton, STATUS_LABEL, STATUS_TONE,
 } from '../components/ui';
 
 const CHART = {
-  grid: '#1f232d',
-  axis: '#6b7382',
+  grid: '#221d17',
+  axis: '#8a8378',
 };
 
 export default function Dashboard() {
-  const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard, refetchInterval: 60_000 });
-  const { data: insights } = useQuery({ queryKey: ['insights'], queryFn: api.insights });
-  const { data: activity } = useQuery({ queryKey: ['activity'], queryFn: () => api.activity(14) });
+  const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard, refetchInterval: 60_000 });
+  const insightsQuery = useQuery({ queryKey: ['insights'], queryFn: api.insights });
+  const activityQuery = useQuery({ queryKey: ['activity'], queryFn: () => api.activity(14) });
 
-  if (isLoading || !data) {
+  const q = useQueryState(dashboard);
+  const insights = insightsQuery.data;
+  const activity = activityQuery.data;
+
+  /*
+   * All three queries feed this screen, so its failure state watches all three.
+   * Previously only the dashboard query gated the skeleton — `insights` and
+   * `activity` were read with a `?? []` fallback, which meant a broken panel
+   * silently rendered as "nothing happened today" instead of as a fault.
+   */
+  const failed = [dashboard, insightsQuery, activityQuery].find((x) => hasFailed(x));
+
+  if (failed) {
+    return (
+      <>
+        <PageHeader eyebrow={<><Icons.LayoutDashboard size={11} /> Command deck</>} title="Command Deck" />
+        <QueryFailure error={failed.error} what="the command deck" retry={() => { void dashboard.refetch(); }} />
+      </>
+    );
+  }
+
+  if (q.state !== 'ready') {
     return (
       <div className="grid gap-3 p-5">
         <Skeleton className="h-8 w-64" />
@@ -33,12 +56,18 @@ export default function Dashboard() {
     );
   }
 
+  const data = q.data;
   const k = data.kpis;
   const maxStatus = Math.max(...Object.values(data.byStatus), 1);
   const topInsights = (insights?.insights ?? []).slice(0, 3);
 
   return (
     <div className="pb-10">
+      {(dashboard.isError || insightsQuery.isError || activityQuery.isError) && (
+        <div className="px-5 pt-3">
+          <StaleNotice error={dashboard.error ?? insightsQuery.error ?? activityQuery.error} retry={q.refetch} />
+        </div>
+      )}
       {/* ------------------------------------------------------------ hero */}
       <div className="relative overflow-hidden border-b border-ink-700/70">
         <div className="pointer-events-none absolute inset-0 aurora opacity-90" />
@@ -98,8 +127,8 @@ export default function Dashboard() {
                 <AreaChart data={data.throughput} margin={{ top: 4, right: 4, left: -26, bottom: 0 }}>
                   <defs>
                     <linearGradient id="gCreate" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#7c5cff" stopOpacity={0.45} />
-                      <stop offset="100%" stopColor="#7c5cff" stopOpacity={0} />
+                      <stop offset="0%" stopColor="#d4a44c" stopOpacity={0.45} />
+                      <stop offset="100%" stopColor="#d4a44c" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="gShip" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#22c98a" stopOpacity={0.4} />
@@ -110,10 +139,10 @@ export default function Dashboard() {
                   <XAxis dataKey="day" tick={{ fill: CHART.axis, fontSize: 9.5 }} tickFormatter={(d) => String(d).slice(8)} axisLine={false} tickLine={false} interval={1} />
                   <YAxis tick={{ fill: CHART.axis, fontSize: 9.5 }} axisLine={false} tickLine={false} width={34} />
                   <RTooltip
-                    contentStyle={{ background: '#11131a', border: '1px solid #2e3340', borderRadius: 8, fontSize: 11 }}
-                    labelStyle={{ color: '#b4bccb' }}
+                    contentStyle={{ background: '#0e0c0a', border: '1px solid #3a3128', borderRadius: 8, fontSize: 11 }}
+                    labelStyle={{ color: '#ded9d0' }}
                   />
-                  <Area type="monotone" dataKey="created" stroke="#7c5cff" strokeWidth={1.6} fill="url(#gCreate)" />
+                  <Area type="monotone" dataKey="created" stroke="#d4a44c" strokeWidth={1.6} fill="url(#gCreate)" />
                   <Area type="monotone" dataKey="completed" stroke="#22c98a" strokeWidth={1.6} fill="url(#gShip)" />
                 </AreaChart>
               </ResponsiveContainer>
@@ -275,11 +304,11 @@ export default function Dashboard() {
                   <YAxis tick={{ fill: CHART.axis, fontSize: 9 }} axisLine={false} tickLine={false} width={34} tickFormatter={(v) => `${Math.round(Number(v) / 1e7)}Cr`} />
                   <RTooltip
                     formatter={(v) => inr(Number(v ?? 0), { compact: true })}
-                    contentStyle={{ background: '#11131a', border: '1px solid #2e3340', borderRadius: 8, fontSize: 11 }}
+                    contentStyle={{ background: '#0e0c0a', border: '1px solid #3a3128', borderRadius: 8, fontSize: 11 }}
                   />
                   <Bar dataKey="valueCents" radius={[3, 3, 0, 0]} maxBarSize={30}>
                     {data.pipelineByPhase.map((_, i) => (
-                      <Cell key={i} fill={['#6b7382', '#7c5cff', '#22a8f5', '#22c98a', '#f5a524'][i]} />
+                      <Cell key={i} fill={['#8a8378', '#d4a44c', '#22a8f5', '#22c98a', '#f5a524'][i]} />
                     ))}
                   </Bar>
                 </BarChart>
