@@ -702,6 +702,13 @@ test('vercel: a deployment with no database configures itself and serves a real 
     delete process.env.ALLOW_DEV_AUTH_IN_PRODUCTION;
     delete process.env.SEED_DEMO_DATA;
     delete process.env.FORCE;
+    /**
+     * CI exports `AUTH_MODE=dev` for the whole workflow, and an explicit mode wins
+     * over `auto` — which would bypass the credential this test exists to prove was
+     * provisioned. The scenario under test is a deployment that specifies no mode,
+     * so the variable has to be absent, not merely defaulted.
+     */
+    delete process.env.AUTH_MODE;
     process.env.NODE_ENV = 'production';
     process.env.VERCEL = '1';
     process.env.SESSION_SECRET = 'cold-start-secret-value-0123456789';
