@@ -30,9 +30,7 @@ import { buildApp } from '../src/app.ts';
 import { SqliteDb } from '../src/db/sqlite.ts';
 import { setDb } from '../src/db/index.ts';
 import { migrate } from '../src/db/migrate.ts';
-import { authMode, resetResolvedAuthMode } from '../src/auth/index.ts';
-import { hashPassword } from '../src/auth/password.ts';
-import { provisionLoginFromEnv } from '../src/auth/provision.ts';
+import { resetOperatorIdentity } from '../src/auth/operator-middleware.ts';
 
 /**
  * A migrated in-memory database.
@@ -47,19 +45,19 @@ async function freshDb() {
   return db;
 }
 
-/** A migrated database seeded with one provisioned shared credential. */
-async function provisionedApp(username = 'shared user') {
+/**
+ * A migrated database with an operator, so requests can be attributed.
+ *
+ * It used to seed a `local_credentials` row via `hashPassword`, because the app
+ * resolved a login from it. Nothing reads that table now, so seeding it would be
+ * arranging scenery: the only thing a request needs is a `users` row to name.
+ */
+async function provisionedApp() {
   const db = await freshDb();
-  const { app } = await buildApp({ db, logger: false });
   await db.run(
     `INSERT INTO users (id,email,full_name,role,is_active) VALUES ('usr_shared','shared@relay.local','Shared User','admin',1)`,
   );
-  const hash = await hashPassword('correct horse battery');
-  await db.run(
-    `INSERT INTO local_credentials (id,user_id,username,password_hash,version,disabled_at,created_at,updated_at)
-     VALUES ('cred_1','usr_shared',?,?,1,NULL,?,?)`,
-    [username, hash, '2026-01-01 00:00:00', '2026-01-01 00:00:00'],
-  );
+  const { app } = await buildApp({ db, logger: false });
   return { app, db };
 }
 
@@ -78,13 +76,31 @@ test('vercel: the handler serves requests without binding a port itself', async 
   await app.close();
 });
 
-test('vercel: an anonymous request cannot read data', async () => {
+test('vercel: an unseeded database names its cause instead of refusing with 401', async () => {
+  /**
+   * A migrated but empty database cannot attribute a request, because `users` is
+   * empty and every mutation has a foreign key to it. That is a *seeding* problem
+   * and must say so.
+   *
+   * The previous behaviour — which this test used to assert as correct — was a bare
+   * `401 unauthorized` for every route with no data in the tables. That is the worst
+   * possible answer: it names no cause, suggests no fix, and looks identical to an
+   * expired session, which is how a deployment mistake gets diagnosed as an auth
+   * bug for a week.
+   */
   const { app } = await buildApp({ db: await freshDb(), logger: false });
-  for (const url of ['/api/projects', '/api/tasks', '/api/dashboard', '/api/clients', '/api/partners']) {
+
+  const read = await app.inject({ method: 'GET', url: '/api/projects' });
+  assert.equal(read.statusCode, 503, `expected a diagnosable 503, got ${read.statusCode}`);
+  assert.equal(read.json().error.code, 'misconfigured');
+  assert.match(read.json().error.message, /seed|OPERATOR_USER_ID/i, 'the message must name the remedy');
+
+  // The probes still work, and they are how an operator finds out in the first place.
+  for (const url of ['/api/live', '/api/health']) {
     const res = await app.inject({ method: 'GET', url });
-    assert.equal(res.statusCode, 401, `${url} must require authentication`);
-    assert.equal(res.json().error.code, 'unauthorized');
+    assert.equal(res.statusCode, 200, `${url} must survive an empty database`);
   }
+
   await app.close();
 });
 
@@ -100,7 +116,7 @@ test('vercel: health endpoints stay reachable without a session', async () => {
 test('vercel: /api 404s are JSON, never the SPA document', async () => {
   const { app } = await buildApp({ db: await freshDb(), logger: false, serveStatic: false });
   const res = await app.inject({ method: 'GET', url: '/api/there-is-no-such-route' });
-  assert.equal(res.statusCode, 401, 'unauthenticated unknown API routes are refused first');
+  assert.equal(res.statusCode, 404, 'an unknown API route is a 404, not a refusal');
   assert.match(res.headers['content-type'], /application\/json/);
   await app.close();
 });
@@ -161,97 +177,118 @@ test('vercel: cron is idempotent — a second run sweeps nothing new', async () 
   await app.close();
 });
 
-test('vercel: cron is not reachable with a session cookie alone', async () => {
+test('vercel: cron is reachable only with the bearer secret, not with a cookie', async () => {
+  /**
+   * The cron endpoint has its own authentication — an `Authorization: Bearer`
+   * shared secret — and that is *not* user authentication, so it stays. Removing
+   * it would leave an open endpoint that mutates SLA state on demand, which is
+   * strictly worse than an endpoint nobody can reach.
+   *
+   * The original test signed in and showed a session cookie did not grant access.
+   * With no sessions, the equivalent — and stronger — statement is that no cookie
+   * of any value grants access, and that the secret itself still does.
+   */
   process.env.CRON_SECRET = 'cookie-must-not-work';
   const { app } = await provisionedApp();
-  const login = await app.inject({
-    method: 'POST',
-    url: '/api/auth/login',
-    payload: { username: 'shared user', password: 'correct horse battery' },
-  });
-  assert.equal(login.statusCode, 200);
-  const cookie = String(login.headers['set-cookie']).split(';')[0];
-  const res = await app.inject({ method: 'GET', url: '/api/cron/sweep', headers: { cookie } });
-  // A human session must not trigger scheduled work. Only the bearer secret does.
-  assert.equal(res.statusCode, 401);
+
+  for (const cookie of ['relay_session=forged', 'relay_session=' + 'a'.repeat(64)]) {
+    const res = await app.inject({ method: 'GET', url: '/api/cron/sweep', headers: { cookie } });
+    assert.equal(res.statusCode, 401, `a cookie (${cookie.slice(0, 20)}…) must not trigger scheduled work`);
+  }
+
+  const unauth = await app.inject({ method: 'GET', url: '/api/cron/sweep' });
+  assert.equal(unauth.statusCode, 401, 'no credential at all must be refused');
+
+  const wrong = await app.inject({ method: 'GET', url: '/api/cron/sweep', headers: { authorization: 'Bearer wrong-secret' } });
+  assert.equal(wrong.statusCode, 401, 'a wrong secret must be refused');
+
+  const right = await app.inject({ method: 'GET', url: '/api/cron/sweep', headers: { authorization: 'Bearer cookie-must-not-work' } });
+  assert.equal(right.statusCode, 200, `the real secret must still work: ${right.body}`);
+
   delete process.env.CRON_SECRET;
   await app.close();
 });
 
-test('vercel: a provisioned credential selects password mode, not dev', async () => {
-  /*
-   * This test is about the *automatic* resolution, so it must control AUTH_MODE
-   * itself rather than inherit it. CI exports AUTH_MODE=dev for the whole workflow,
-   * which is correct there and would make this assertion test the wrong thing — an
-   * explicit mode overrides resolution by design, so the test would fail for a
-   * reason unrelated to the behaviour under test.
+test('vercel: a provisioned credential no longer selects any mode, because there is none', async () => {
+  /**
+   * This asserted that setting `RELAY_ADMIN_PASSWORD_HASH` made the deployment
+   * resolve to `password` mode rather than `dev`. Neither mode exists. What matters
+   * now is the inverse and stronger property: the *presence* of credential
+   * environment variables changes nothing, so an operator cannot accidentally
+   * reintroduce a gate by leaving a stale secret in the dashboard.
    */
-  const declared = process.env.AUTH_MODE;
-  delete process.env.AUTH_MODE;
+  const saved = {
+    hash: process.env.RELAY_ADMIN_PASSWORD_HASH,
+    mode: process.env.AUTH_MODE,
+    secret: process.env.SESSION_SECRET,
+  };
+  process.env.RELAY_ADMIN_PASSWORD_HASH = '$argon2id$v=19$m=65536,t=3,p=1$c2FsdA$aGFzaA';
+  process.env.AUTH_MODE = 'password';
+  process.env.SESSION_SECRET = 'a'.repeat(48);
   try {
-    await provisionedCredentialResolution();
+    const { app } = await buildApp({ db: await freshDb(), logger: false });
+    const res = await app.inject({ method: 'GET', url: '/api/auth/session' });
+    assert.equal(res.json().data.authMode, 'none', 'a stale credential must not re-enable a mode');
+    const read = await app.inject({ method: 'GET', url: '/api/projects' });
+    assert.equal(read.statusCode, 200, 'a stale credential must not gate reads');
+    await app.close();
   } finally {
-    if (declared === undefined) delete process.env.AUTH_MODE;
-    else process.env.AUTH_MODE = declared;
-    resetResolvedAuthMode();
+    for (const [k, v] of [['RELAY_ADMIN_PASSWORD_HASH', saved.hash], ['AUTH_MODE', saved.mode], ['SESSION_SECRET', saved.secret]]) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   }
 });
 
-async function provisionedCredentialResolution() {
+
+test('vercel: AUTH_MODE has no effect, because no mode is resolved', async () => {
+  /**
+   * This asserted that an explicit `AUTH_MODE` overrode automatic detection. There
+   * is no detection and no mode: the variable is inert.
+   *
+   * Asserting its inertness is not pedantry. A stale `AUTH_MODE` left in a
+   * deployment's environment is exactly how a gate gets reintroduced by accident,
+   * and the test states that it cannot change behaviour.
+   */
   const db = await freshDb();
-  const { app } = await buildApp({ db, logger: false });
-  // No credential yet: a fresh clone must work without configuration.
-  assert.equal(authMode(), 'dev');
-
-  await db.run(
-    `INSERT INTO users (id,email,full_name,role,is_active) VALUES ('usr_shared','s@relay.local','S','admin',1)`,
-  );
-  await db.run(
-    `INSERT INTO local_credentials (id,user_id,username,password_hash,version,disabled_at,created_at,updated_at)
-     VALUES ('cred_x','usr_shared','someone',?,1,NULL,'2026-01-01 00:00:00','2026-01-01 00:00:00')`,
-    [await hashPassword('a-long-enough-password')],
-  );
-  resetResolvedAuthMode();
-  const rebuilt = await buildApp({ db, logger: false });
-  // The credential must win over the demo mode, or the demo identities would
-  // remain a second way in.
-  assert.equal(authMode(), 'password');
-
-  // And the demo login must now be refused outright.
-  const bypass = await rebuilt.app.inject({
-    method: 'POST',
-    url: '/api/auth/dev-login',
-    payload: { userId: 'usr_shared' },
-  });
-  assert.equal(bypass.statusCode, 403);
-  await rebuilt.app.close();
-  await app.close();
-}
-
-test('vercel: an explicit AUTH_MODE wins over the automatic choice', async () => {
-  const db = await freshDb();
+  await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('usr_maya','m@x.io','Maya','admin','MI')");
   const previous = process.env.AUTH_MODE;
-  process.env.AUTH_MODE = 'dev';
   try {
-    const { app } = await buildApp({ db, logger: false });
-    assert.equal(authMode(), 'dev');
-    await app.close();
+    for (const mode of ['dev', 'password', 'oidc', 'auto']) {
+      process.env.AUTH_MODE = mode;
+      resetOperatorIdentity();
+      const { app } = await buildApp({ db, logger: false });
+      const res = await app.inject({ method: 'GET', url: '/api/auth/session' });
+      assert.equal(res.statusCode, 200, `AUTH_MODE=${mode} changed the answer: ${res.body}`);
+      assert.equal(res.json().data.authMode, 'none', `AUTH_MODE=${mode} re-enabled a mode`);
+      await app.close();
+    }
   } finally {
     if (previous === undefined) delete process.env.AUTH_MODE;
     else process.env.AUTH_MODE = previous;
-    resetResolvedAuthMode();
+    resetOperatorIdentity();
+    await db.close();
   }
 });
 
-test('vercel: a malformed hash is refused at boot', async () => {
+test('vercel: a malformed credential does not prevent boot, and is not used', async () => {
+  /**
+   * Previously a malformed `RELAY_ADMIN_PASSWORD_HASH` threw at boot. That was
+   * right while the hash was a login credential; now nothing reads it, so refusing
+   * to start over it would be a self-inflicted outage — precisely the failure mode
+   * this change removes. The assertion is that boot succeeds and the API serves.
+   */
   const previous = process.env.RELAY_ADMIN_PASSWORD_HASH;
   process.env.RELAY_ADMIN_PASSWORD_HASH = 'not-a-hash';
   try {
-    await assert.rejects(
-      () => buildApp({ db: new SqliteDb(':memory:'), logger: false }),
-      /Argon2id/,
-      'a plaintext or truncated value must not be accepted as a hash',
-    );
+    const db = new SqliteDb(':memory:');
+    await migrate(db, { log: () => {} });
+    await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u1','u1@x.io','U One','admin','U1')");
+    const { app } = await buildApp({ db, logger: false });
+    const res = await app.inject({ method: 'GET', url: '/api/live' });
+    assert.equal(res.statusCode, 200, 'a junk credential must not stop the service');
+    await app.close();
+    await db.close();
   } finally {
     if (previous === undefined) delete process.env.RELAY_ADMIN_PASSWORD_HASH;
     else process.env.RELAY_ADMIN_PASSWORD_HASH = previous;
@@ -375,18 +412,26 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
     assert.equal((await live.json()).data.live, true);
     assert.ok(sawRequest > 0, 'the handler was never invoked');
 
-    // 2. Auth is enforced through the adapter, not only through inject().
-    const denied = await fetch(`${base}/api/projects`);
-    assert.equal(denied.status, 401, 'an anonymous request through the adapter was not refused');
+    /*
+     * 2. A business read works through the adapter, not only through inject().
+     *
+     * This assertion used to be that the same request was refused with 401. The
+     * adapter was never the problem — the gate was — so the check that survives is
+     * that the wrapper does not add one: the request goes in with no credential and
+     * comes back with data, over a real socket.
+     */
+    const readable = await fetch(`${base}/api/projects`);
+    assert.equal(readable.status, 200, `an anonymous request through the adapter got ${readable.status}`);
+    assert.match(String(readable.headers.get('content-type')), /application\/json/i);
+    assert.ok(Array.isArray((await readable.json()).data), 'the adapter must return the payload, not a shell');
 
     // 3. An unknown /api path is JSON, never the SPA document. The fallback
     //    swallowing /api is the failure mode that makes a broken API look like a
     //    working app: the browser would receive HTML and fail to parse it.
     //
-    //    The status here is 401 rather than 404 because authentication precedes
-    //    routing — an unauthenticated caller learns nothing about which endpoints
-    //    exist, which is the correct order. What is asserted is the content type
-    //    and the error envelope, because those are what the fallback would break.
+    //    The status is 404 now that no authentication runs before routing. What is
+    //    asserted is the content type and the error envelope, because those are what
+    //    the SPA fallback would break.
     const missing = await fetch(`${base}/api/no-such-endpoint`);
     assert.match(String(missing.headers.get('content-type')), /application\/json/i,
       'the SPA fallback swallowed an /api path');
@@ -413,14 +458,22 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
     assert.match(String(spa.headers.get('content-type')), /application\/json/i,
       'a browser route reaching the API must not be answered with a document');
 
-    // 5. A request with a body reaches the handler intact — the adapter must not
-    //    depend on the body having been pre-parsed.
-    const posted = await fetch(`${base}/api/auth/login`, {
+    /*
+     * 5. A request with a body reaches the handler intact — the adapter must not
+     *    depend on the body having been pre-parsed.
+     *
+     *    This posted to `/api/auth/login`. That endpoint is gone, so the body is now
+     *    exercised against a real mutation instead, which is a better test: the
+     *    payload has to survive the adapter *and* be accepted by a handler that
+     *    reads it.
+     */
+    const posted = await fetch(`${base}/api/clients`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'nobody', password: 'nothing' }),
+      body: JSON.stringify({ name: 'Adapter Postcheck Ltd', tier: 'growth' }),
     });
-    assert.ok([400, 401, 403, 429].includes(posted.status), `login through the adapter returned ${posted.status}`);
+    assert.equal(posted.status, 201, `a POST with a body through the adapter returned ${posted.status}`);
+    assert.equal((await posted.json()).data.name, 'Adapter Postcheck Ltd', 'the body did not survive the adapter');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await app.close();
@@ -441,124 +494,103 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
  * The assertions are deliberately about *actionability*, not about wording: the
  * response must name the missing variable and must not leak a value.
  */
-test('vercel: an unprovisioned instance reports what is missing instead of an opaque 500', async () => {
+/**
+ * A deployment with no environment at all still boots and serves.
+ *
+ * This is the single most important assertion in this file, because it is the
+ * inverse of the failure that reached production. There, `SESSION_SECRET` was
+ * unset, `buildApp` refused to start, and every request got a non-JSON 500 — so a
+ * working frontend showed a blank page and could only say "the API is not
+ * reachable", which was false.
+ *
+ * The instance below is deliberately starved: no `SESSION_SECRET`, no
+ * `DATABASE_URL`, no credential, `NODE_ENV=production`, on Vercel. It must answer.
+ */
+/**
+ * A deployment with no authentication environment still boots and serves.
+ *
+ * This is the most important assertion in this file, because it is the inverse of
+ * the failure that reached production. There, `SESSION_SECRET` was unset,
+ * `buildApp` refused to start, and every request got a non-JSON 500 — so a working
+ * frontend showed a blank page and could only report "the API is not reachable",
+ * which was false.
+ *
+ * The instance below is deliberately starved: no `SESSION_SECRET`, no
+ * `DATABASE_URL`, no `AUTH_MODE`, no credential, `NODE_ENV=production`, on Vercel.
+ *
+ * It drives the real exported entrypoint — `getApp()` is the same app the HTTP
+ * adapter serves — and uses `inject`, so the assertions are about the application
+ * rather than about a hand-built simulation of `IncomingMessage`.
+ */
+test('vercel: an instance with no authentication environment still boots and serves', async () => {
   const saved = { ...process.env };
   delete process.env.SESSION_SECRET;
   delete process.env.DATABASE_URL;
+  delete process.env.AUTH_MODE;
+  delete process.env.RELAY_ADMIN_PASSWORD_HASH;
   process.env.NODE_ENV = 'production';
 
   const entry = await import('../src/entrypoints/vercel.ts');
   entry.resetBootState();
 
-  const responses = [];
-  const call = async (url) => {
-    const headers = {};
-    const chunks = [];
-    const res = {
-      statusCode: 200,
-      setHeader: (k, v) => { headers[k.toLowerCase()] = v; },
-      end: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
-      write: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
-    };
-    await entry.default({ method: 'GET', url, headers: { host: 'relay.example' } }, res);
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-    responses.push({ url, status: res.statusCode, headers, body });
-    return body;
-  };
-
   try {
-    const me = await call('/api/auth/me');
-    assert.equal(responses[0].status, 503, 'an instance that cannot boot is unavailable, not OK');
+    const { app } = await entry.getApp();
 
-    assert.equal(me.error.code, 'misconfigured', 'the failure must be identifiable by code');
-    assert.equal(me.error.stage, 'configuration', 'a refused boot is a configuration failure');
-    assert.ok(
-      me.error.missing.includes('SESSION_SECRET'),
-      `the response must name the missing variable, got ${JSON.stringify(me.error.missing)}`,
-    );
+    const live = await app.inject({ method: 'GET', url: '/api/live' });
+    assert.equal(live.statusCode, 200, `a starved instance refused /api/live: ${live.body}`);
+    assert.equal(live.json().data.live, true);
+
+    const health = await app.inject({ method: 'GET', url: '/api/health' });
+    assert.equal(health.statusCode, 200, `health failed on a starved instance: ${health.body}`);
+    assert.equal(health.json().data.authMode, 'none', 'the probe must report that nothing authenticates');
+
     /**
-     * `DATABASE_URL` is optional, and the difference is not cosmetic: without it the
-     * API falls back to SQLite in the instance temp directory and runs. Reporting it
-     * as *missing* would send an operator to provision a database before finding out
-     * whether they needed one. Its absence is still stated, as a cost.
+     * A business read on an empty database. SQLite is used because no
+     * `DATABASE_URL` is set, and it is unseeded — so no user exists to attribute a
+     * request to. That must be a *diagnosable* JSON answer naming the remedy, never
+     * a blank failure and never an authentication error.
      */
-    assert.ok(
-      !me.error.missing.includes('DATABASE_URL'),
-      'DATABASE_URL must not be reported as required — the API runs without it',
-    );
-    assert.ok(
-      me.error.optional.some((o) => o.name === 'DATABASE_URL' && /ephemeral/i.test(o.consequence)),
-      'its absence must still be stated, with the cost (data is not durable)',
-    );
-    assert.ok(
-      Array.isArray(me.error.remedy) && me.error.remedy.length > 0,
-      'a report that names no remedy leaves the operator where they started',
-    );
-    assert.match(me.error.summary, /SESSION_SECRET is required/, 'the boot check\'s own explanation must survive');
-
-    // No value may be echoed. The endpoint is unauthenticated.
-    const serialised = JSON.stringify(me);
-    for (const name of ['SESSION_SECRET', 'DATABASE_URL']) {
-      const value = process.env[name];
-      if (value) assert.ok(!serialised.includes(value), `${name}'s value leaked into the report`);
+    const read = await app.inject({ method: 'GET', url: '/api/projects' });
+    assert.notEqual(read.statusCode, 500, `an empty database must not produce a blank failure: ${read.body}`);
+    assert.notEqual(read.statusCode, 401, 'and it must not be reported as an authentication problem');
+    if (read.statusCode !== 200) {
+      assert.equal(read.statusCode, 503);
+      assert.equal(read.json().error.code, 'misconfigured');
+      assert.match(read.json().error.message, /seed|OPERATOR_USER_ID/i, 'the message must name the remedy');
     }
-    assert.ok(!/\$argon2id\$/.test(serialised), 'no hash may appear in a public report');
 
-    assert.equal(
-      responses[0].headers['cache-control'],
-      'no-store, max-age=0',
-      'a provisioning failure must never be cached — the deployment would look broken after it is fixed',
-    );
-
-    // Every route, not just the failed one: the whole instance is down.
-    await call('/api/live');
-    assert.equal(responses[1].status, 503, 'a liveness probe must not claim success on an instance that cannot serve');
+    // Nothing may be cached as broken, and no secret may be echoed.
+    const rendered = live.body + health.body + read.body;
+    assert.ok(!/SESSION_SECRET is required/.test(rendered), 'a removed dependency must not be demanded');
+    assert.ok(!/\$argon2id\$/.test(rendered), 'no hash may appear in a public response');
   } finally {
     process.env = saved;
     entry.resetBootState();
   }
 });
 
-test('vercel: a misconfigured instance recovers once the environment is provisioned', async () => {
+test('vercel: each boot resolves the operator afresh, and a cold start always succeeds', async () => {
+  /**
+   * The original proved that a *refused boot* un-stuck itself once `SESSION_SECRET`
+   * appeared. There is no refused boot to recover from now, so the property shifts
+   * to the one that still matters: boot is not a one-shot latch. A fresh instance
+   * (which is what `resetBootState` models) must serve every time, because Vercel
+   * starts one per cold start and a latched failure would be permanent.
+   */
   const saved = { ...process.env };
-  delete process.env.SESSION_SECRET;
   process.env.NODE_ENV = 'production';
 
   const entry = await import('../src/entrypoints/vercel.ts');
-  entry.resetBootState();
-
-  const call = async () => {
-    const chunks = [];
-    const res = {
-      statusCode: 200,
-      setHeader: () => {},
-      end: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
-      write: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
-    };
-    await entry.default({ method: 'GET', url: '/api/auth/me', headers: { host: 'relay.example' } }, res);
-    const text = Buffer.concat(chunks).toString();
-    return { status: res.statusCode, body: text ? JSON.parse(text) : null };
-  };
-
   try {
-    const before = await call();
-    assert.equal(before.status, 503, 'the instance must start out unavailable');
-
-    // Provisioning the variable is exactly what an operator does. The next boot
-    // must pick it up — a recorded failure that outlives its cause is a worse bug
-    // than the original 500, because the instance never recovers and reports a
-    // stale reason while doing it.
-    process.env.SESSION_SECRET = 'a'.repeat(48);
-    // No database is reachable here, so the second boot still fails — but for a
-    // *different* reason. That difference is what proves the failure was re-derived
-    // rather than replayed from the cached first attempt.
-    entry.resetBootState();
-    const after = await call();
-    assert.equal(after.status, 503, 'a boot with no database still cannot serve');
-    assert.ok(
-      !JSON.stringify(after.body).includes('SESSION_SECRET'),
-      'the SESSION_SECRET complaint must disappear once it is set — a stale reason is misleading',
-    );
+    for (let boot = 0; boot < 3; boot += 1) {
+      entry.resetBootState();
+      const { app } = await entry.getApp();
+      const res = await app.inject({ method: 'GET', url: '/api/live' });
+      assert.equal(res.statusCode, 200, `boot ${boot} failed to serve`);
+      const session = await app.inject({ method: 'GET', url: '/api/auth/session' });
+      // 200 when the database is seeded; a diagnosable 503 when it is not — never 500.
+      assert.notEqual(session.statusCode, 500, `boot ${boot} produced an opaque failure`);
+    }
   } finally {
     process.env = saved;
     entry.resetBootState();
@@ -575,41 +607,42 @@ test('vercel: a misconfigured instance recovers once the environment is provisio
  * message invites the operator to go configure an identity provider they do not
  * need.
  */
-test('vercel: a missing database is named as the cause of the auth refusal it produces', async () => {
+test('vercel: a missing database is named as the cause, with its real cost', async () => {
+  /**
+   * Previously this asserted a 503 whose remedy explained that an auth refusal was
+   * caused by an unprovisioned login. There is no login, so that causal chain is
+   * gone — and with it went the deployment's worst failure mode: a missing
+   * credential no longer refuses anything.
+   *
+   * What must survive is honesty about durability. Without `DATABASE_URL` the API
+   * runs on SQLite in the instance's temp directory, which means data is lost on
+   * every cold start and is unsafe across concurrent instances. The readiness probe
+   * has to say so rather than reporting a cheerful `ready: true`.
+   */
   const saved = { ...process.env };
   delete process.env.DATABASE_URL;
-  delete process.env.RELAY_ADMIN_PASSWORD_HASH;
-  process.env.SESSION_SECRET = 'a'.repeat(48);
   process.env.NODE_ENV = 'production';
 
   const entry = await import('../src/entrypoints/vercel.ts');
   entry.resetBootState();
 
   try {
-    const chunks = [];
-    const res = {
-      statusCode: 200,
-      setHeader: () => {},
-      end: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
-      write: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
-    };
-    await entry.default({ method: 'GET', url: '/api/users', headers: { host: 'relay.example' } }, res);
-    const body = JSON.parse(Buffer.concat(chunks).toString());
+    const { app } = await entry.getApp();
 
-    assert.equal(res.statusCode, 503);
-    assert.deepEqual(
-      body.error.missing,
-      [],
-      'nothing required is absent — SESSION_SECRET is set and DATABASE_URL is optional',
-    );
-    assert.ok(
-      body.error.remedy.some((step) => /No shared login credential is provisioned.*AUTH_MODE=auto resolved to/i.test(step)),
-      'the report must connect the missing credential to the auth refusal it causes',
-    );
-    assert.ok(
-      /DATABASE_URL/.test(body.error.remedy[0]) && /RELAY_ADMIN_PASSWORD_HASH/.test(body.error.remedy[0]),
-      'the causal note must offer both paths: a database, or a credential from configuration',
-    );
+    // The instance serves — that is the whole point of the change.
+    const projects = await app.inject({ method: 'GET', url: '/api/projects' });
+    assert.notEqual(projects.statusCode, 401, 'a missing database is not an authentication problem');
+
+    const ready = await app.inject({ method: 'GET', url: '/api/ready' });
+    const body = ready.json();
+    assert.equal(ready.statusCode, 200, `readiness failed on SQLite: ${ready.body}`);
+    assert.equal(body.data.engine, 'sqlite', 'the engine must be reported, not hidden');
+    /**
+     * The configuration must not claim a required variable is missing. `DATABASE_URL`
+     * is optional; reporting it as required would send an operator to provision a
+     * database before learning whether they need one.
+     */
+    assert.ok(!JSON.stringify(body).includes('SESSION_SECRET'), 'a removed dependency must not be reported');
   } finally {
     process.env = saved;
     entry.resetBootState();
@@ -693,106 +726,123 @@ test('vercel: an in-process failure still answers with JSON, not a blank 500', a
  * with it. This asserts the whole path instead: writable location, schema, demo
  * data, credential from the environment, and a real login.
  */
-test('vercel: a deployment with no database configures itself and serves a real login', async () => {
+test('vercel: a deployment with no database and no environment configures itself and serves data', async () => {
+  /**
+   * The end-to-end cold-start scenario, and the closest possible reproduction of
+   * the production failure: nothing set but `NODE_ENV`, on Vercel, with no
+   * database. The old version of this test proved that a *shared login* was
+   * provisioned from the environment and worked. There is no login, so what it
+   * proves now is the stronger thing the brief actually asked for — that this
+   * configuration boots, creates its own SQLite store, seeds it, and serves real
+   * data to a request carrying no credential at all.
+   */
   const saved = { ...process.env };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-cold-'));
 
   try {
     delete process.env.DATABASE_URL;
+    delete process.env.SESSION_SECRET;
+    delete process.env.AUTH_MODE;
     delete process.env.ALLOW_DEV_AUTH_IN_PRODUCTION;
+    delete process.env.RELAY_ADMIN_PASSWORD_HASH;
     delete process.env.SEED_DEMO_DATA;
     delete process.env.FORCE;
-    /**
-     * CI exports `AUTH_MODE=dev` for the whole workflow, and an explicit mode wins
-     * over `auto` — which would bypass the credential this test exists to prove was
-     * provisioned. The scenario under test is a deployment that specifies no mode,
-     * so the variable has to be absent, not merely defaulted.
-     */
-    delete process.env.AUTH_MODE;
     process.env.NODE_ENV = 'production';
     process.env.VERCEL = '1';
-    process.env.SESSION_SECRET = 'cold-start-secret-value-0123456789';
     process.env.DB_PATH = path.join(dir, 'relay.sqlite');
-    process.env.RELAY_LOGIN_USERNAME = 'cold start user';
-    process.env.RELAY_ADMIN_PASSWORD_HASH = await hashPassword('cold-start-password');
 
-    // Fresh process-level state: no cached app, no cached database handle, no
-    // resolved auth mode. The handle matters — a singleton left over from an
-    // earlier test points at that test's database.
+    // Fresh process-level state: no cached app, no cached database handle.
     setDb(null);
+    resetOperatorIdentity();
     const entry = await import('../src/entrypoints/vercel.ts');
     entry.resetBootState();
-    resetResolvedAuthMode();
 
     const { app } = await buildApp({ serveStatic: false, logger: false });
     try {
       assert.ok(fs.existsSync(process.env.DB_PATH), 'the SQLite file must be created where it was configured');
-      assert.equal(
-        (await app.inject({ method: 'GET', url: '/api/ready' })).statusCode,
-        200,
-        'a deployment with no DATABASE_URL must be ready',
-      );
 
-      const login = await app.inject({
+      const ready = await app.inject({ method: 'GET', url: '/api/ready' });
+      assert.equal(ready.statusCode, 200, 'a deployment with no DATABASE_URL must still be ready');
+      assert.equal(ready.json().data.engine, 'sqlite');
+
+      // The startup probe the frontend makes, with no cookie and no token.
+      const session = await app.inject({ method: 'GET', url: '/api/auth/session' });
+      assert.equal(session.statusCode, 200, `the startup probe failed: ${session.body}`);
+      assert.equal(session.json().data.authMode, 'none');
+
+      // Real seeded data, not an empty shell — and no credential of any kind.
+      const projects = await app.inject({ method: 'GET', url: '/api/projects' });
+      assert.equal(projects.statusCode, 200, projects.body);
+      assert.ok(projects.json().data.length > 0, 'the seeded projects must be visible without signing in');
+
+      const dashboard = await app.inject({ method: 'GET', url: '/api/dashboard' });
+      assert.equal(dashboard.statusCode, 200);
+      assert.ok(dashboard.json().data.kpis, 'the dashboard aggregates must be present');
+
+      // A write, unauthenticated, landing in the database it just created.
+      const created = await app.inject({
         method: 'POST',
-        url: '/api/auth/login',
+        url: '/api/clients',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({ username: 'cold start user', password: 'cold-start-password' }),
+        payload: JSON.stringify({ name: 'Cold Start Client' }),
       });
-      assert.equal(login.statusCode, 200, `the configured shared login must work, got ${login.statusCode}`);
-      const cookie = String(login.headers['set-cookie'] ?? '').split(';')[0];
-      assert.ok(cookie, 'a session cookie must be issued');
+      assert.equal(created.statusCode, 201, created.body);
 
-      // Usable behind the login — real seeded data, not an empty shell.
-      const projects = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
-      assert.equal(projects.statusCode, 200);
-      assert.ok(JSON.parse(projects.body).data.length > 0, 'the seeded projects must be visible');
-
-      // Development identities stay closed: this is a password deployment now.
-      assert.equal(
-        (await app.inject({ method: 'GET', url: '/api/auth/dev-users' })).statusCode,
-        403,
-        'provisioning a credential must close the demo picker',
-      );
+      // The retired login endpoints must be unmistakably gone, not merely quiet.
+      for (const url of ['/api/auth/login', '/api/auth/dev-login']) {
+        const res = await app.inject({
+          method: 'POST',
+          url,
+          headers: { 'content-type': 'application/json' },
+          payload: JSON.stringify({ username: 'x', password: 'y' }),
+        });
+        assert.equal(res.statusCode, 410, `${url} must be Gone`);
+        assert.equal(res.json().error.code, 'auth_removed');
+      }
     } finally {
       await app.close();
     }
   } finally {
     process.env = saved;
     setDb(null);
-    resetResolvedAuthMode();
+    resetOperatorIdentity();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('vercel: the credential is not rewritten when it has not changed', async () => {
+test('vercel: boot is idempotent and never rewrites data', async () => {
+  /**
+   * This asserted that `provisionLoginFromEnv` did not rotate an unchanged password
+   * hash on every boot, because rotation bumped `version` and invalidated live
+   * sessions. Credential provisioning is gone.
+   *
+   * The property is kept, generalised to what still boots: repeated boots must be
+   * idempotent. Nothing should be re-seeded, rewritten or migrated twice, because a
+   * deploy-time write that runs once per instance would corrupt data under
+   * concurrent cold starts — which is exactly the hazard the original was guarding.
+   */
   const saved = { ...process.env };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-idem-'));
 
   try {
     process.env.NODE_ENV = 'production';
-    const db = new SqliteDb(path.join(dir, 'idem.sqlite'));
+    const dbPath = path.join(dir, 'idem.sqlite');
+    const db = new SqliteDb(dbPath);
     await migrate(db, { log: () => {} });
 
-    process.env.RELAY_LOGIN_USERNAME = 'idem user';
-    process.env.RELAY_ADMIN_PASSWORD_HASH = await hashPassword('idempotent-password');
+    const tables = async () => (await db.all("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).map((r) => r.name).join(',');
+    const schemaBefore = await tables();
 
-    const first = await provisionLoginFromEnv(db);
-    assert.equal(first.action, 'created');
+    // A third boot must not add, drop or rewrite anything.
+    for (let i = 0; i < 3; i += 1) await migrate(db, { log: () => {} });
+    assert.equal(await tables(), schemaBefore, 'migrating repeatedly must converge, not churn');
 
-    // A restart must not rotate: rotation bumps `version` and invalidates every
-    // live session, so doing it per boot would sign the whole studio out whenever
-    // an instance recycled.
-    const second = await provisionLoginFromEnv(db);
-    assert.equal(second.action, 'unchanged', 'an unchanged hash must not bump the version');
+    // A user written by one boot is untouched by the next.
+    await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_idem','idem@x.io','Idem User','admin','IU')");
+    await migrate(db, { log: () => {} });
+    const row = await db.get("SELECT full_name FROM users WHERE id = 'u_idem'");
+    assert.equal(row.full_name, 'Idem User', 'a later migration must not rewrite existing rows');
 
-    const row = await db.get('SELECT version FROM local_credentials WHERE username = ?', ['idem user']);
-    assert.equal(Number(row?.version), 1, 'the version must still be 1 after a no-op boot');
-
-    process.env.RELAY_ADMIN_PASSWORD_HASH = await hashPassword('rotated-password');
-    assert.equal((await provisionLoginFromEnv(db)).action, 'rotated');
-    const after = await db.get('SELECT version FROM local_credentials WHERE username = ?', ['idem user']);
-    assert.equal(Number(after?.version), 2, 'rotation must invalidate prior sessions');
     await db.close();
   } finally {
     process.env = saved;
@@ -848,14 +898,22 @@ test('vercel: the entry module does not require node:sqlite to load', async () =
     'the driver must be imported dynamically, inside the SQLite branch',
   );
 
-  // And the same must hold for argon2, for the identical reason.
-  const passwordSource = fs.readFileSync(
-    new URL('../src/auth/password.ts', import.meta.url).pathname,
-    'utf8',
-  );
+  /**
+   * And the argon2 hazard is gone at the source.
+   *
+   * Argon2 was the first instance of the same bug class: a static native import
+   * that, where it could not load, took the whole function with it. With
+   * authentication removed nothing hashes a password, so the guarantee is stronger
+   * than laziness — the binding must not be referenced anywhere in `auth/`.
+   */
+  const authDir = new URL('../src/auth/', import.meta.url).pathname;
+  const authSources = fs
+    .readdirSync(authDir)
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => fs.readFileSync(authDir + f, 'utf8'))
+    .join('\n');
   assert.ok(
-    !/^import\s+argon2\s+from/m.test(passwordSource),
-    'password.ts must not statically import the native argon2 binding',
+    !/from\s+['"]argon2['"]|import\(['"]argon2['"]\)|require\(['"]argon2['"]\)/.test(authSources),
+    'nothing in auth/ may import argon2 — the native binding is no longer needed',
   );
-  assert.match(passwordSource, /await\s+import\(['"]argon2['"]\)/);
 });

@@ -6,8 +6,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getDb, type Db } from '../db/index.ts';
 import { config } from '../config.ts';
-import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized, optionalString, optionalNumber } from '../lib/http.ts';
-import { authMode, type Identity } from '../auth/index.ts';
+import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized, conflict, serviceUnavailable, optionalString, optionalNumber } from '../lib/http.ts';
+import type { Identity } from '../auth/index.ts';
+import { resolveOperator } from '../auth/operator-middleware.ts';
 import { requireProjectAccess } from '../auth/middleware.ts';
 import {
   resolveReadScope,
@@ -60,44 +61,55 @@ const db = () => getDb();
  * `assertAuthConfiguration()`.
  */
 async function actor(req: FastifyRequest): Promise<string> {
-  const identity = req.identity ?? (await resolveFallbackIdentity());
+  const identity = await currentIdentity(req);
   return identity.userId;
 }
 
+/**
+ * The identity a request is attributed to.
+ *
+ * One path, not three. Previously this consulted `req.identity`, then a test-only
+ * fallback set by `setFallbackIdentity`, then a `demoUserId` lookup that threw
+ * `401 unauthorized` when the row was absent. The last of those is why an
+ * unseeded database answered every request with "unauthorized" — a refusal that
+ * names no cause and suggests no fix.
+ *
+ * It now delegates to the operator resolver, which tries `OPERATOR_USER_ID`, then
+ * any administrator, then anyone at all, and only fails when the `users` table is
+ * genuinely empty. Even then it fails as `503 misconfigured` carrying the remedy,
+ * because an empty database is a deployment problem, not a credential problem.
+ */
 async function currentIdentity(req: FastifyRequest): Promise<Identity> {
   if (req.identity) return req.identity;
-  return resolveFallbackIdentity();
+  try {
+    return await resolveOperator(await db());
+  } catch (err) {
+    throw serviceUnavailable(
+      err instanceof Error ? err.message : 'No identity is available to attribute this request to.',
+      { stage: 'identity' },
+    );
+  }
 }
 
 /**
- * Used only when the auth hook was not installed (unit tests that inject a
- * database but no auth boundary). Production registers the hook unconditionally.
+ * Attribute a mutation to the operator.
+ *
+ * This used to enforce a role and could reject the request with `403`. There is no
+ * boundary to enforce now, so the *decision* is gone while the *attribution* stays:
+ * every call site still receives the acting user id, which is what the caller
+ * actually needed. `roles` is kept as documentation of the capability the route
+ * exercises, and because deleting the argument from nine call sites would obscure
+ * which operations were once privileged.
  */
-let fallbackIdentity: Identity | null = null;
-export function setFallbackIdentity(identity: Identity | null) {
-  fallbackIdentity = identity;
-}
-async function resolveFallbackIdentity(): Promise<Identity> {
-  if (fallbackIdentity) return fallbackIdentity;
-  const user = await (await db()).get<{ id: string; email: string; role: Identity['role']; full_name: string }>(
-    'SELECT id,email,role,full_name FROM users WHERE id = ?',
-    [config.demoUserId],
-  );
-  if (!user) throw unauthorized('No identity available');
-  return { userId: user.id, email: user.email, role: user.role, name: user.full_name, method: 'dev', expiresAt: Date.now() + 60_000, claims: {} };
-}
-
-async function requireRole(req: FastifyRequest, roles: Identity['role'][]): Promise<string> {
+async function requireRole(req: FastifyRequest, roles?: Identity['role'][]): Promise<string> {
+  void roles;
   const identity = await currentIdentity(req);
-  if (!roles.includes(identity.role)) {
-    throw forbidden(`Requires role: ${roles.join(' | ')} (you are ${identity.role})`);
-  }
   return identity.userId;
 }
 
 export async function registerRoutes(
   app: FastifyInstance,
-  opts: { auth?: import('../auth/middleware.ts').AuthApi } = {},
+  opts: { auth?: import('../auth/operator-middleware.ts').OperatorApi } = {},
 ) {
   /* ------------------------------------------------------------- health -- */
   app.get('/api/health', async (_req, reply) => {
@@ -124,7 +136,7 @@ export async function registerRoutes(
       database: { ok: dbOk, engine, latencyMs },
       worker: { name: 'clock-sweeper', intervalMs: config.sweepIntervalMs },
       memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
-      authMode: authMode(),
+      authMode: 'none',
     };
     // No secrets, no connection strings, no user data — safe for an
     // unauthenticated probe to read.
@@ -792,6 +804,59 @@ export async function registerRoutes(
   });
 
   /* ------------------------------------------------------------ projects -- */
+  /**
+   * Create a project.
+   *
+   * Also did not exist: projects could be read, opened, and their tasks worked,
+   * but no route created one. Implemented against the real `projects` table with
+   * the schema's own constraints — `key` is UNIQUE, `client_id` is a foreign key,
+   * `status` and `health` are CHECK-constrained.
+   *
+   * `key` is the human prefix tasks are numbered with (`NRTH-101`), so it is
+   * normalised to the uppercase 2–5 letter form the seed uses, and a collision is
+   * reported as a conflict rather than surfacing as a constraint error.
+   */
+  app.post('/api/projects', async (req, reply) => {
+    const parsed = z.object({
+      name: z.string().min(1, 'a project needs a name'),
+      key: z.string().min(2).max(5).regex(/^[A-Za-z][A-Za-z0-9]*$/, 'a key is 2–5 letters or digits, starting with a letter').optional(),
+      clientId: z.string().min(1, 'a project belongs to a client'),
+      status: z.enum(['discovery', 'active', 'review', 'blocked', 'launched', 'archived']).optional(),
+      health: z.enum(['on_track', 'watch', 'at_risk', 'critical']).optional(),
+      ownerId: z.string().nullable().optional(),
+      description: z.string().optional(),
+      targetEndAt: z.string().nullable().optional(),
+      budgetCents: z.number().int().nonnegative().optional(),
+      hoursBudget: z.number().nonnegative().optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) throw badRequest('Invalid project payload', parsed.error.issues);
+
+    const input = parsed.data;
+    const client = await (await db()).get<{ id: string }>('SELECT id FROM clients WHERE id = ?', [input.clientId]);
+    if (!client) throw badRequest(`No client with id "${input.clientId}"`);
+
+    const key = (input.key ?? input.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 4)).toUpperCase();
+    if (key.length < 2) throw badRequest('a key could not be derived from that name — supply one');
+    const clash = await (await db()).get<{ id: string }>('SELECT id FROM projects WHERE key = ?', [key]);
+    if (clash) throw conflict(`A project with key "${key}" already exists`);
+
+    const id = `pr_${Math.random().toString(36).slice(2, 10)}`;
+    await (await db()).run(
+      `INSERT INTO projects (id,key,name,client_id,owner_id,status,health,description,target_end_at,budget_cents,hours_budget)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        id, key, input.name, input.clientId, input.ownerId ?? null,
+        input.status ?? 'active', input.health ?? 'on_track',
+        input.description ?? '', input.targetEndAt ?? null,
+        input.budgetCents ?? 0, input.hoursBudget ?? 0,
+      ],
+    );
+    const row = await (await db()).get<Record<string, any>>('SELECT * FROM projects WHERE id = ?', [id]);
+    if (!row) throw notFound('The project was written but could not be read back');
+    reply.code(201);
+    return ok(mapProject(row));
+  });
+
   app.get('/api/projects', async (req) => {
     const identity = await currentIdentity(req);
     const rows = await (await db()).all<Record<string, any>>(
@@ -1142,6 +1207,58 @@ export async function registerRoutes(
   });
 
   /* ------------------------------------------------------------- clients -- */
+  /**
+   * Create a client.
+   *
+   * This endpoint did not exist. The Clients screen could list and open clients,
+   * and the lifecycle workflow could move one between stages, but nothing could
+   * create one — the seeded roster was the only way data ever appeared. The
+   * deployment brief requires client creation, so it is implemented here against
+   * the real `clients` table rather than simulated in the UI.
+   *
+   * Validation is the table's own: `slug` is UNIQUE, `tier` and `health` are
+   * CHECK-constrained. The schema-level zod below rejects the two mistakes a form
+   * makes predictably — a missing name, and a slug that cannot be a URL segment —
+   * and lets the database enforce the rest, so the two can never disagree.
+   */
+  app.post('/api/clients', async (req, reply) => {
+    const parsed = z.object({
+      name: z.string().min(1, 'a client needs a name'),
+      slug: z.string().min(1).regex(/^[a-z0-9-]+$/, 'a slug is lowercase letters, digits and hyphens').optional(),
+      industry: z.string().optional(),
+      initials: z.string().max(3).optional(),
+      accentColor: z.string().optional(),
+      tier: z.enum(['strategic', 'enterprise', 'growth', 'starter']).optional(),
+      health: z.enum(['healthy', 'watch', 'at_risk', 'churn']).optional(),
+      primaryContactName: z.string().optional(),
+      primaryContactEmail: z.string().optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) throw badRequest('Invalid client payload', parsed.error.issues);
+
+    const input = parsed.data;
+    const slug = input.slug ?? input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+    if (!slug) throw badRequest('a slug could not be derived from that name — supply one');
+
+    const clash = await (await db()).get<{ id: string }>('SELECT id FROM clients WHERE slug = ?', [slug]);
+    if (clash) throw conflict(`A client with slug "${slug}" already exists`);
+
+    const id = `cl_${Math.random().toString(36).slice(2, 10)}`;
+    const initials = (input.initials ?? input.name.split(/\s+/).map((w) => w[0]).join('').toUpperCase()).slice(0, 3);
+    await (await db()).run(
+      `INSERT INTO clients (id,name,slug,industry,initials,accent_color,tier,health,primary_contact_name,primary_contact_email)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [
+        id, input.name, slug, input.industry ?? '', initials, input.accentColor ?? '#7c8cff',
+        input.tier ?? 'growth', input.health ?? 'healthy',
+        input.primaryContactName ?? '', input.primaryContactEmail ?? '',
+      ],
+    );
+    const row = await (await db()).get<Record<string, any>>('SELECT * FROM clients WHERE id = ?', [id]);
+    if (!row) throw notFound('The client was written but could not be read back');
+    reply.code(201);
+    return ok(mapClient(row));
+  });
+
   app.get('/api/clients', async () => {
     const clients = (await (await db()).all<Record<string, any>>('SELECT * FROM clients ORDER BY name')).map(mapClient);
     const deals = await (await db()).all<Record<string, any>>('SELECT client_id, value_cents, status FROM deals');

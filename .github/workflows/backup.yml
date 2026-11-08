@@ -19,9 +19,7 @@ on:
 permissions:
   contents: read
 
-env:
-  SESSION_SECRET: ci-session-secret-not-a-production-value
-  AUTH_MODE: dev
+# No `env:` block: no authentication variables are needed by this drill.
 
 jobs:
   drill:

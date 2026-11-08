@@ -55,48 +55,41 @@ import { Shell } from ${JSON.stringify(path.join(ROOT, 'apps/web/src/components/
 ${PAGES.map(([name, file]) => `import ${name} from ${JSON.stringify(path.join(ROOT, `apps/web/src/pages/${file}`))};`).join('\n')}
 
 const BASE = ${JSON.stringify(API)};
-let COOKIE = '';
-let CSRF = '';
 async function get(p) {
-  const r = await fetch(BASE + p, { headers: { cookie: COOKIE } });
+  const r = await fetch(BASE + p);
   const j = await r.json();
   if (!r.ok) throw new Error(p + ' → ' + r.status);
   return j?.data ?? j;
 }
 
 /*
- * Authenticate the way a real user does.
+ * No sign-in.
  *
- * If the shared credential is provisioned, the demo login is refused — correctly —
- * and the smoke run must sign in with it. It is provisioned here from the
- * environment, never hardcoded: the smoke script is committed, and a password in
- * a committed script is a leaked password.
+ * This used to authenticate the way a real user did — the shared credential when
+ * one was provisioned, the demo login otherwise — and carried the cookie and CSRF
+ * token through every request. Both endpoints are gone, so the smoke run now does
+ * what a browser does on a cold start: it requests the deployment description with
+ * no credential, and asserts that it got one.
+ *
+ * That check is worth keeping rather than deleting. It is the one place in the
+ * suite that verifies the *running server* answers the startup probe, and its
+ * failure was previously the first sign that a deployment was unprovisioned.
  */
-const SHARED_USER = process.env.SMOKE_LOGIN_USERNAME ?? '';
-const SHARED_PASS = process.env.SMOKE_LOGIN_PASSWORD ?? '';
-let login;
-if (SHARED_USER && SHARED_PASS) {
-  login = await fetch(BASE + '/auth/login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: SHARED_USER, password: SHARED_PASS }),
-  });
-} else {
-  login = await fetch(BASE + '/auth/dev-login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ userId: 'usr_maya' }),
-  });
+const sessionRes = await fetch(BASE + '/auth/session');
+if (!sessionRes.ok) {
+  console.error('the deployment description failed:', sessionRes.status, await sessionRes.text());
+  process.exit(2);
 }
-if (!login.ok) { console.error('login failed', login.status); process.exit(2); }
-COOKIE = String(login.headers.get('set-cookie') ?? '').split(';')[0];
-// Read the body exactly once: a Response body is a stream, and cloning after
-// reading throws.
-const loginBody = await login.json().catch(() => ({}));
-CSRF = loginBody?.data?.csrfToken ?? '';
-const sessionUser = loginBody?.data?.user
-  ?? { id: 'usr_maya', name: 'Maya Iyer', email: 'maya@relayoss.studio', role: 'admin' };
-const session = { user: sessionUser, method: SHARED_USER ? 'password' : 'dev', authMode: SHARED_USER ? 'password' : 'dev', expiresAt: '', csrfToken: CSRF, permissions: {} };
+const sessionBody = await sessionRes.json().catch(() => ({}));
+const session = sessionBody?.data;
+if (!session?.user?.id) {
+  console.error('the deployment description carried no operator identity:', JSON.stringify(sessionBody).slice(0, 200));
+  process.exit(2);
+}
+if (session.authMode !== 'none') {
+  console.error('expected authMode "none", got', session.authMode);
+  process.exit(2);
+}
 
 const pages = ${JSON.stringify(PAGES)};
 let failed = 0;
@@ -258,46 +251,45 @@ execFileSync(
 execFileSync(process.execPath, ['--no-warnings', OUT], { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' });
 
 /**
- * The sign-in screen must describe a deployment failure accurately.
+ * A failure must be described accurately, wherever it surfaces.
  *
- * This is checked separately from the screen renders because it is the one screen
- * a broken deployment ever shows, and it was wrong in the most expensive way: a
- * 503 from an unprovisioned API was reported as "Is the API running on :4000?",
- * which is false on every deployed host and points at the wrong problem.
+ * There is no sign-in screen any more, so this check moved to `ApiFailure` — the
+ * component every page now renders in place of its content when a request fails.
+ * That move matters: previously a broken API produced a sign-in screen that
+ * explained the problem, and the dashboard was never reached. Now a broken API
+ * produces the dashboard shell with an inline explanation, so *this* is the text a
+ * person actually reads when a deployment is wrong.
  *
- * The check renders the screen with the three errors it can actually receive and
- * asserts that each is distinguishable. It is a render assertion, not a browser
- * test — see docs/REQUIREMENT-TRACEABILITY.md for what that leaves unproven.
+ * The three distinguishable cases are unchanged, and so is why they matter. The
+ * original bug reported "Is the API running on :4000?" for a 503, which is false on
+ * every deployed host and sent the reader after a server that was running fine.
+ *
+ * It is a render assertion, not a browser test — see
+ * docs/REQUIREMENT-TRACEABILITY.md for what that leaves unproven.
  */
-const signInCheck = `
+const failureCheck = `
 import { renderToStaticMarkup } from 'react-dom/server';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SignIn } from ${JSON.stringify(path.join(ROOT, 'apps/web/src/pages/SignIn'))};
+import { ApiFailure } from ${JSON.stringify(path.join(ROOT, 'apps/web/src/components/ApiFailure'))};
 import { ApiError } from ${JSON.stringify(path.join(ROOT, 'apps/web/src/lib/api'))};
 
 function render(error) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderToStaticMarkup(
-    <QueryClientProvider client={qc}>
-      <SignIn info={null} probeError={error} onSignedIn={() => {}} />
-    </QueryClientProvider>,
-  );
+  return renderToStaticMarkup(<ApiFailure error={error} what="the dashboard" />);
 }
 
-const misconfigured = new ApiError(503, 'misconfigured', 'SESSION_SECRET is required', {
+const misconfigured = new ApiError(503, 'misconfigured', 'The database is not configured', {
   code: 'misconfigured',
-  stage: 'configuration',
-  summary: 'SESSION_SECRET is required (used to sign CSRF tokens and cookie sessions)',
-  missing: ['SESSION_SECRET', 'DATABASE_URL'],
+  stage: 'database',
+  summary: 'No DATABASE_URL is set and SQLite is unavailable in this runtime',
+  missing: ['DATABASE_URL'],
   invalid: [],
-  remedy: ['Set SESSION_SECRET to 32+ random bytes'],
+  optional: [],
+  remedy: ['Set DATABASE_URL to a PostgreSQL connection string'],
 });
 
 const cases = [
   ['misconfigured', misconfigured, [
     (h) => /not configured yet/i.test(h), 'names the real problem',
-    (h) => h.includes('SESSION_SECRET'), 'names the missing variable',
-    (h) => h.includes('DATABASE_URL'), 'names every missing variable',
+    (h) => h.includes('DATABASE_URL'), 'names the missing variable',
     (h) => !/running on\\s*:?4000/i.test(h), 'does not blame a missing local server',
   ]],
   ['unreachable', new TypeError('Failed to fetch'), [
@@ -313,25 +305,24 @@ let bad = 0;
 for (const [label, err, checks] of cases) {
   const html = render(err);
   // The check list is flat pairs: [predicate, explanation, predicate, ...].
-  // Paired here rather than nested at each call site.
   for (let i = 0; i < checks.length; i += 2) {
     const fn = checks[i];
     const why = checks[i + 1];
     const verified = fn(html);
     if (!verified) bad++;
-    console.log((verified ? 'ok  ' : 'FAIL') + ' sign-in/' + label.padEnd(13) + ' ' + why);
+    console.log((verified ? 'ok  ' : 'FAIL') + ' failure/' + label.padEnd(13) + ' ' + why);
   }
 }
-if (bad) { console.error('\\n' + bad + ' sign-in failure assertion(s) failed'); process.exit(1); }
+if (bad) { console.error('\\n' + bad + ' failure-message assertion(s) failed'); process.exit(1); }
 `;
 
-fs.writeFileSync(path.join(WORK, 'signin.mtsx'), signInCheck, 'utf8');
-const SIGNIN_OUT = path.join(WORK, 'signin.mjs');
+fs.writeFileSync(path.join(WORK, 'failure.mtsx'), failureCheck, 'utf8');
+const FAILURE_OUT = path.join(WORK, 'failure.mjs');
 execFileSync(
   fs.existsSync(ESBUILD) ? ESBUILD : 'esbuild',
   [
-    path.join(WORK, 'signin.mtsx'),
-    '--bundle', '--platform=node', '--format=esm', `--outfile=${SIGNIN_OUT}`,
+    path.join(WORK, 'failure.mtsx'),
+    '--bundle', '--platform=node', '--format=esm', `--outfile=${FAILURE_OUT}`,
     '--loader:.mtsx=tsx', '--jsx=automatic', '--log-level=error',
     '--external:react', '--external:react-dom', '--external:react-dom/server',
     '--external:react-router-dom', '--external:@tanstack/react-query',
@@ -339,8 +330,8 @@ execFileSync(
   ],
   { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' },
 );
-execFileSync(process.execPath, ['--no-warnings', SIGNIN_OUT], { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' });
+execFileSync(process.execPath, ['--no-warnings', FAILURE_OUT], { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' });
 
 console.log('\n✓ all screens render with real API data');
-console.log('✓ the sign-in screen reports deployment failures accurately');
+console.log('✓ API failures are described accurately in the dashboard');
 stopApi();

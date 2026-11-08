@@ -1,8 +1,7 @@
-import { Suspense, lazy, useEffect, useState, type ReactElement } from 'react';
+import { Suspense, lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, auth, AUTH_EXPIRED_EVENT, type SessionInfo } from './lib/api';
-import { SignIn } from './pages/SignIn';
+import { useQuery } from '@tanstack/react-query';
+import { auth, type SessionInfo } from './lib/api';
 import { Shell } from './components/Shell';
 import { Skeleton } from './components/ui';
 import Dashboard from './pages/Dashboard';
@@ -33,75 +32,41 @@ function Loading() {
 }
 
 /**
- * Session gate. The shell never renders before we know who the user is, so no
- * screen can flash data that the API would refuse — and permission-gated controls
- * are decided from server-verified claims, not optimistic client state.
+ * The deployment description, fetched once.
+ *
+ * This is **not** a guard. Nothing is withheld while it loads, nothing redirects
+ * when it fails, and there is no branch in which the application refuses to show
+ * itself. It answers one question — who is this workspace operating as — so the
+ * shell can greet them and show a role. If the request fails, the shell falls back
+ * to the values `/api/meta` already returns, and the dashboard still renders.
+ *
+ * The previous `SessionGate` was the opposite: it rendered nothing until
+ * `GET /api/auth/session` succeeded, and on failure it rendered a sign-in screen.
+ * That is why an API that could not boot produced a login page instead of the
+ * product.
  */
-function SessionGate({ children }: { children: (session: SessionInfo) => ReactElement }) {
-  const [expired, setExpired] = useState(false);
-
-  const session = useQuery({
+function useSession() {
+  const { data } = useQuery({
     queryKey: ['session'],
     queryFn: () => auth.me(),
     retry: false,
-    staleTime: 60_000,
+    staleTime: Infinity,
   });
-
-  useEffect(() => {
-    const onExpired = () => setExpired(true);
-    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
-    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
-  }, []);
-
-  if (session.isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-ink-950">
-        <Loading />
-      </div>
-    );
-  }
-
-  if (session.isError || expired) {
-    /**
-     * Pass the failure through.
-     *
-     * It used to be dropped on the floor (`info={null}`), which left the sign-in
-     * screen unable to distinguish "nobody is signed in" from "this deployment is
-     * broken" — and the screen then guessed, wrongly, that the API was not running.
-     * A session probe that failed for a reason other than 401 means the app itself
-     * cannot work, and that belongs on screen before a password is ever typed.
-     *
-     * A 401 is the normal, expected answer for an anonymous visitor, so it is not
-     * surfaced: `expired` already covers the transition, and the refetch path
-     * covers recovery.
-     */
-    const probeError = session.isError ? session.error : null;
-    const isAnonymous = probeError instanceof ApiError && probeError.status === 401;
-
-    return (
-      <SignIn
-        info={null}
-        probeError={isAnonymous ? null : probeError}
-        onSignedIn={() => {
-          setExpired(false);
-          void session.refetch();
-        }}
-      />
-    );
-  }
-
-  return children(session.data!);
+  return data;
 }
 
+/**
+ * The application.
+ *
+ * `/` is the dashboard. Every route is reachable directly, with no gate, no
+ * sign-in screen, and no loading state that can become a dead end.
+ */
 export default function App() {
+  const session = useSession();
   return (
-    <SessionGate>
-      {(session) => (
-        <Shell session={session}>
-          <AppRoutes />
-        </Shell>
-      )}
-    </SessionGate>
+    <Shell session={session}>
+      <AppRoutes />
+    </Shell>
   );
 }
 
@@ -123,6 +88,21 @@ function AppRoutes() {
           <Route path="/partners" element={<Partners />} />
           <Route path="/intel" element={<Intelligence />} />
           <Route path="/docs" element={<Docs />} />
+
+          {/*
+            Retired URLs, redirected rather than 404'd.
+
+            `/login` and `/signin` were real addresses in earlier deployments, so
+            bookmarks and pasted links to them exist. The catch-all below would
+            already send them to the dashboard, but naming them explicitly means
+            the intent is readable here and survives a future narrowing of the
+            catch-all.
+          */}
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="/signin" element={<Navigate to="/" replace />} />
+          <Route path="/sign-in" element={<Navigate to="/" replace />} />
+
+          {/* Any other URL shows the dashboard instead of a dead end. */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

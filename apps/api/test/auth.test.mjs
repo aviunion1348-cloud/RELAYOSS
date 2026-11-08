@@ -1,33 +1,43 @@
 /**
- * Authentication and authorisation tests.
+ * The unauthenticated deployment.
  *
- * These exist to prove the things that are easy to claim and hard to do:
- *   - a client cannot assert its own identity through a header
- *   - a tampered, expired, revoked or foreign-signed token is rejected
- *   - a role cannot be escalated through a request body or header
- *   - losing permission mid-session takes effect on the next request
- *   - one project's data is not reachable from another project's grant
- *   - every rejection is audited
+ * RelayOS runs here as an internal application with no sign-in. This suite exists
+ * to prove the *replacement* behaviour, not to re-test a session system that has
+ * been removed:
  *
- * Runs on SQLite (default) and on PostgreSQL 16 when TEST_DATABASE_URL is set.
+ *   - every business route answers an anonymous caller with real data
+ *   - no request can be refused for want of a credential, cookie or token
+ *   - mutations are attributed to the operator, so `created_by` stays populated
+ *     and the foreign keys that reference `users` still hold
+ *   - the login endpoints answer `410 Gone` rather than pretending to work
+ *   - unrelated guarantees are *not* collateral damage: validation still rejects
+ *     bad input, unknown ids still 404, and the database still enforces its
+ *     constraints
+ *
+ * The last group is the point of the file. Removing authentication must not become
+ * a licence to remove input validation or error handling, and those are the things
+ * most easily lost when a middleware is deleted.
  */
-import test, { after, before } from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import { buildApp } from '../src/app.ts';
 import { SqliteDb } from '../src/db/sqlite.ts';
 import { PostgresDb } from '../src/db/postgres.ts';
 import { migrate } from '../src/db/migrate.ts';
 import { resetPostgres } from './helpers/fresh.ts';
-import { verifyJwt, JwksCache, issueCsrf, verifyCsrf, createSession } from '../src/auth/index.ts';
+import { resetOperatorIdentity } from '../src/auth/operator-middleware.ts';
 
-process.env.SESSION_SECRET ||= 'test-session-secret-do-not-use-in-production';
-// The suite deliberately bursts logins; raise the budget so behaviour tests are
-// not silently rate-limited. The limiter itself is exercised by rotating the
-// budget down in its own test below.
-process.env.RATE_LIMIT_AUTH ||= '1000';
-process.env.RATE_LIMIT_GLOBAL ||= '5000';
-process.env.RATE_LIMIT_WRITE ||= '5000';
+/**
+ * No SESSION_SECRET and no AUTH_MODE.
+ *
+ * Deleting them is the test: the deployment must work without the variables that
+ * the removed authentication system used to require. If a stale reference
+ * reintroduces the dependency, these tests fail by refusing to boot.
+ */
+delete process.env.SESSION_SECRET;
+delete process.env.AUTH_MODE;
+delete process.env.RELAY_ADMIN_PASSWORD_HASH;
+delete process.env.ALLOW_DEV_AUTH_IN_PRODUCTION;
 
 const pgUrl = process.env.TEST_DATABASE_URL ?? process.env.TEST_DATABASE_URL_ALT ?? '';
 const db = pgUrl ? new PostgresDb(pgUrl) : new SqliteDb(':memory:');
@@ -35,438 +45,208 @@ const db = pgUrl ? new PostgresDb(pgUrl) : new SqliteDb(':memory:');
 await migrate(db, { log: () => {} });
 await resetPostgres(db);
 
-/* ------------------------------------------------------------- fixtures -- */
-await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_admin','admin@x.io','Ada Admin','admin','AA')");
-await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_lead','lead@x.io','Lee Lead','lead','LL')");
-await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_member','mem@x.io','Mia Member','member','MM')");
-await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_clienta','a@client-a.io','Cara Client','client','CC')");
-await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_clientb','b@client-b.io','Bo Client','client','BC')");
-await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_outside','out@x.io','Otto Outside','member','OO')");
-await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c_a','Client A','client-a','CA')");
-await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c_b','Client B','client-b','CB')");
-await db.run("INSERT INTO projects (id,key,name,client_id,status) VALUES ('p_a','PRA','A Project','c_a','active')");
-await db.run("INSERT INTO projects (id,key,name,client_id,status) VALUES ('p_b','PRB','B Project','c_b','active')");
-await db.run("INSERT INTO boards (id,project_id,name) VALUES ('b_a','p_a','A Board')");
-await db.run("INSERT INTO boards (id,project_id,name) VALUES ('b_b','p_b','B Board')");
-await db.run("INSERT INTO columns (id,board_id,key,name,position,is_done) VALUES ('b_a_todo','b_a','todo','Ready',1,0)");
-await db.run("INSERT INTO columns (id,board_id,key,name,position,is_done) VALUES ('b_b_todo','b_b','todo','Ready',1,0)");
-// Staff grant on project A only.
-await db.run("INSERT INTO project_members (project_id,user_id,access) VALUES ('p_a','u_member','member')");
-// Client A portal access to client A only.
-await db.run("INSERT INTO client_portal_users (user_id,client_id) VALUES ('u_clienta','c_a')");
-await db.run("INSERT INTO client_portal_users (user_id,client_id) VALUES ('u_clientb','c_b')");
-await db.run("INSERT INTO tasks (id,key,project_id,board_id,column_id,title,type,priority,status) VALUES ('t_a','PRA-1','p_a','b_a','b_a_todo','A task','feature','medium','todo')");
-await db.run("INSERT INTO tasks (id,key,project_id,board_id,column_id,title,type,priority,status) VALUES ('t_b','PRB-1','p_b','b_b','b_b_todo','B task','feature','medium','todo')");
+/* ---------------------------------------------------------------- fixtures -- */
+await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('usr_maya','maya@relayoss.studio','Maya Iyer','admin','MI')");
+await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('usr_lead','lead@relayoss.studio','Lee Lead','lead','LL')");
+await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('usr_member','mem@relayoss.studio','Mia Member','member','MM')");
+await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('cl_a','Client A','client-a','CA')");
+await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('cl_b','Client B','client-b','CB')");
+await db.run("INSERT INTO projects (id,key,name,client_id,status) VALUES ('pr_a','PRA','A Project','cl_a','active')");
+await db.run("INSERT INTO projects (id,key,name,client_id,status) VALUES ('pr_b','PRB','B Project','cl_b','active')");
+await db.run("INSERT INTO boards (id,project_id,name) VALUES ('bd_a','pr_a','A Board')");
+/**
+ * The column id follows the schema's `${boardId}_${status}` convention, which is
+ * what `createTask` derives when a caller omits `columnId`. Using an arbitrary id
+ * here makes the fixture — not the route — fail on a foreign key.
+ */
+await db.run("INSERT INTO columns (id,board_id,key,name,position,is_done) VALUES ('bd_a_backlog','bd_a','backlog','Backlog',1,0)");
+await db.run("INSERT INTO tasks (id,key,project_id,board_id,column_id,title,type,priority,status) VALUES ('t_a','PRA-1','pr_a','bd_a','bd_a_backlog','A task','feature','medium','todo')");
 
 const { app } = await buildApp({ db, serveStatic: false, logger: false });
-after(async () => { await app.close(); await db.close(); });
+after(async () => {
+  await app.close();
+  await db.close();
+});
 
-async function login(userId) {
-  const res = await app.inject({
+/* ------------------------------------------------------- no gate anywhere -- */
+test('noauth: every business route answers an anonymous caller', async () => {
+  /**
+   * No cookie, no CSRF token, no Authorization header — deliberately.
+   *
+   * These are the reads every screen performs on load. Under the removed session
+   * system each of them answered `401` to exactly this request.
+   */
+  const reads = [
+    '/api/health',
+    '/api/live',
+    '/api/ready',
+    '/api/meta',
+    '/api/dashboard',
+    '/api/projects',
+    '/api/projects/pr_a',
+    '/api/clients',
+    '/api/pipeline',
+    '/api/tasks',
+    '/api/qa',
+    '/api/releases',
+    '/api/clocks',
+    '/api/partners',
+    '/api/users',
+    '/api/docs',
+    '/api/planner',
+  ];
+  for (const url of reads) {
+    const res = await app.inject({ method: 'GET', url });
+    assert.equal(res.statusCode, 200, `${url} answered ${res.statusCode} to an anonymous caller`);
+    assert.match(String(res.headers['content-type']), /application\/json/i, `${url} was not JSON`);
+  }
+});
+
+test('noauth: the session probe reports an unauthenticated deployment instead of 401', async () => {
+  const res = await app.inject({ method: 'GET', url: '/api/auth/session' });
+  assert.equal(res.statusCode, 200, 'a 401 here is what used to trigger the sign-in screen');
+  const body = JSON.parse(res.body).data;
+  assert.equal(body.authMode, 'none', 'the deployment must state plainly that nothing authenticates');
+  assert.equal(body.authenticated, true);
+  assert.equal(body.user.id, 'usr_maya', 'the operator identity must be reported');
+  assert.equal(body.user.role, 'admin');
+  assert.equal(body.csrfToken, null, 'no token exists, so none may be advertised');
+});
+
+test('noauth: writes succeed with no cookie and no CSRF token', async () => {
+  const created = await app.inject({
     method: 'POST',
-    url: '/api/auth/dev-login',
+    url: '/api/tasks',
     headers: { 'content-type': 'application/json' },
-    payload: JSON.stringify({ userId }),
+    payload: JSON.stringify({ projectId: 'pr_a', boardId: 'bd_a', title: 'Written without a credential', type: 'feature', priority: 'high' }),
   });
-  assert.equal(res.statusCode, 200, res.body);
-  const cookie = res.headers['set-cookie'];
-  return { cookie: String(cookie).split(';')[0], csrf: res.json().data.csrfToken, body: res.json().data };
-}
+  assert.equal(created.statusCode, 201, 'a mutation must not need a session');
+  const task = JSON.parse(created.body).data;
+  assert.ok(task.id);
+  assert.equal(task.project.key, 'PRA');
 
-const req = (method, url, opts = {}) =>
-  app.inject({
-    method,
-    url,
-    headers: {
-      // Only declare a content-type when a body is actually sent.
-      ...(opts.payload ? { 'content-type': 'application/json' } : {}),
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.headers ?? {}),
-    },
-    payload: opts.payload ? JSON.stringify(opts.payload) : undefined,
+  const patched = await app.inject({
+    method: 'PATCH',
+    url: `/api/tasks/${task.id}`,
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ title: 'Updated without a credential' }),
   });
-
-/* ------------------------------------------------------------ identity --- */
-test('auth: an anonymous request is rejected — no implicit identity, no header trust', async () => {
-  // A client-asserted identity must never be honoured: not the actor header,
-  // and not an implicit demo sign-in.
-  const withHeader = await req('GET', '/api/meta', { headers: { 'x-actor-id': 'u_admin' } });
-  assert.equal(withHeader.statusCode, 401, 'x-actor-id must not authenticate');
-  assert.equal(withHeader.json().error.code, 'unauthorized');
-
-  const plain = await req('GET', '/api/dashboard');
-  assert.equal(plain.statusCode, 401, 'anonymous reads are refused');
-
-  const forgedBearer = await req('GET', '/api/meta', { headers: { authorization: 'Bearer not.a.token' } });
-  assert.equal(forgedBearer.statusCode, 401);
+  assert.equal(patched.statusCode, 200);
+  assert.equal(JSON.parse(patched.body).data.title, 'Updated without a credential');
 });
 
-test('auth: dev-login issues an HttpOnly session cookie and a CSRF token', async () => {
-  const res = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_admin' } });
-  assert.equal(res.statusCode, 200);
-  const cookie = String(res.headers['set-cookie']);
-  assert.match(cookie, /HttpOnly/);
-  assert.match(cookie, /SameSite=Lax/);
-  assert.match(cookie, /Path=\//);
-  assert.ok(res.json().data.csrfToken);
-});
-
-/**
- * The demo-login endpoint is the single most dangerous route in the app: it
- * mints a real session for any user id. It must be refused outright in a
- * production build, and only re-enabled by an explicit, loud opt-in.
- *
- * These assertions run against the live config (read at request time), so they
- * describe what the server actually does rather than what a comment says.
- */
-async function inProduction(fn) {
-  const prev = { NODE_ENV: process.env.NODE_ENV, ALLOW: process.env.ALLOW_DEV_AUTH_IN_PRODUCTION, MODE: process.env.AUTH_MODE };
-  process.env.NODE_ENV = 'production';
-  process.env.AUTH_MODE = 'dev';
-  delete process.env.ALLOW_DEV_AUTH_IN_PRODUCTION;
-  try {
-    return await fn();
-  } finally {
-    for (const [key, value] of [['NODE_ENV', prev.NODE_ENV], ['AUTH_MODE', prev.MODE], ['ALLOW_DEV_AUTH_IN_PRODUCTION', prev.ALLOW]]) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  }
-}
-
-test('auth: production boot refuses AUTH_MODE=dev without an explicit opt-in', async () => {
-  const { assertAuthConfiguration } = await import('../src/auth/index.ts');
-  await inProduction(async () => {
-    assert.throws(() => assertAuthConfiguration(), /AUTH_MODE=dev is refused in production/);
-  });
-});
-
-test('auth: production refuses dev-login even with the opt-in unless it is exactly 1', async () => {
-  await inProduction(async () => {
-    for (const value of [undefined, '0', 'true', 'yes']) {
-      if (value === undefined) delete process.env.ALLOW_DEV_AUTH_IN_PRODUCTION;
-      else process.env.ALLOW_DEV_AUTH_IN_PRODUCTION = value;
-      const res = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_admin' } });
-      assert.equal(res.statusCode, 403, `expected 403 for ALLOW_DEV_AUTH_IN_PRODUCTION=${value}`);
-      assert.equal(res.json().error.code, 'forbidden');
-    }
-  });
-});
-
-test('auth: the explicit demo opt-in re-enables dev-login and is announced, not silent', async () => {
-  await inProduction(async () => {
-    process.env.ALLOW_DEV_AUTH_IN_PRODUCTION = '1';
-    const res = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_admin' } });
-    assert.equal(res.statusCode, 200);
-    const { assertAuthConfiguration } = await import('../src/auth/index.ts');
-    const warn = [];
-    const original = console.warn;
-    console.warn = (...args) => warn.push(args.join(' '));
-    try {
-      assertAuthConfiguration();
-    } finally {
-      console.warn = original;
-    }
-    assert.match(warn.join(' '), /INSECURE AUTHENTICATION/, 'a demo-auth production boot must announce itself');
-  });
-});
-
-test('auth: /api/auth/me returns the verified identity and capability map', async () => {
-  const { cookie } = await login('u_lead');
-  const res = await req('GET', '/api/auth/me', { cookie });
-  assert.equal(res.statusCode, 200);
-  const me = res.json().data;
-  assert.equal(me.user.id, 'u_lead');
-  assert.equal(me.user.role, 'lead');
-  assert.equal(me.permissions.canWaiveGates, true);
-  assert.equal(me.permissions.canManageUsers, false);
-  assert.ok(me.csrfToken);
-});
-
-/* -------------------------------------------------------- session abuse -- */
-test('security: failed logins are throttled and do not reveal whether a user exists', async () => {
-  const unknown = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_does_not_exist' } });
-  assert.equal(unknown.statusCode, 401, 'unknown identity must not be distinguishable from an inactive one');
-  assert.equal(unknown.json().error.code, 'unauthorized');
-
-  // Repeated failures lock the (ip, identity) pair.
-  let locked = null;
-  for (let i = 0; i < 8; i++) {
-    const res = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_ghost' } });
-    if (res.statusCode === 403) {
-      locked = res;
-      break;
-    }
-  }
-  assert.ok(locked, 'brute force protection engages after repeated failures');
-  assert.match(locked.json().error.message, /Too many failed attempts/i);
-});
-
-test('security: the rate limiter enforces a budget and reports retry-after', async () => {
-  // Unit-level: deterministic, no dependence on the suite's own traffic.
-  const { RateLimiter } = await import('../src/lib/rate-limit.ts');
-  const limiter = new RateLimiter({ limit: 3, windowMs: 1000, scope: 'unit' });
-  const t0 = 1_000_000;
-  assert.equal(limiter.take('ip-1', t0).allowed, true);
-  assert.equal(limiter.take('ip-1', t0).allowed, true);
-  assert.equal(limiter.take('ip-1', t0).allowed, true);
-  const denied = limiter.take('ip-1', t0);
-  assert.equal(denied.allowed, false);
-  assert.ok(denied.retryAfterSec >= 1);
-  // A different client is unaffected.
-  assert.equal(limiter.take('ip-2', t0).allowed, true);
-  // The window rolls over.
-  assert.equal(limiter.take('ip-1', t0 + 1001).allowed, true);
-});
-
-test('auth: an unknown session cookie is rejected with 401', async () => {
-  const res = await req('GET', '/api/auth/me', { cookie: 'relay_session=ses_forged_value' });
-  assert.equal(res.statusCode, 401);
-});
-
-test('auth: logout revokes the session server-side (cookie replay fails)', async () => {
-  const { cookie } = await login('u_member');
-  assert.equal((await req('GET', '/api/auth/me', { cookie })).statusCode, 200);
-  const out = await req('POST', '/api/auth/logout', { cookie, headers: { 'x-csrf-token': (await req('GET', '/api/auth/me', { cookie })).json().data.csrfToken } });
-  assert.equal(out.statusCode, 200);
-  const replay = await req('GET', '/api/auth/me', { cookie });
-  assert.equal(replay.statusCode, 401, 'a revoked session cannot be replayed');
-});
-
-test('auth: an expired session is rejected', async () => {
-  const session = await createSession(db, { userId: 'u_member', method: 'dev', ttlMs: 1000 });
-  await db.run('UPDATE sessions SET expires_at = ? WHERE id = ?', ['2020-01-01 00:00:00', session.id]);
-  const res = await req('GET', '/api/auth/me', { cookie: `relay_session=${session.id}` });
-  assert.equal(res.statusCode, 401);
-});
-
-test('auth: deactivating a user invalidates live sessions immediately', async () => {
-  const { cookie } = await login('u_outside');
-  assert.equal((await req('GET', '/api/auth/me', { cookie })).statusCode, 200);
-  await db.run("UPDATE users SET is_active = 0 WHERE id = 'u_outside'");
-  const res = await req('GET', '/api/auth/me', { cookie });
-  assert.equal(res.statusCode, 401, 'deactivation must not wait for token expiry');
-  await db.run("UPDATE users SET is_active = 1 WHERE id = 'u_outside'");
-});
-
-test('auth: mutations with a cookie session require a valid CSRF token', async () => {
-  const { cookie } = await login('u_admin');
-  const noToken = await req('POST', '/api/tasks', { cookie, payload: { boardId: 'b_a', title: 'CSRF probe task' } });
-  assert.equal(noToken.statusCode, 403);
-  assert.match(noToken.json().error.message, /CSRF/i);
-
-  const badToken = await req('POST', '/api/tasks', { cookie, headers: { 'x-csrf-token': 'forged.deadbeef' }, payload: { boardId: 'b_a', title: 'CSRF probe task' } });
-  assert.equal(badToken.statusCode, 403);
-
-  const me = (await req('GET', '/api/auth/me', { cookie })).json().data;
-  const good = await req('POST', '/api/tasks', {
-    cookie,
-    headers: { 'x-csrf-token': me.csrfToken },
-    payload: { boardId: 'b_a', columnId: 'b_a_todo', projectId: 'p_a', title: 'Legitimate new task' },
-  });
-  assert.equal(good.statusCode, 201, good.body);
-});
-
-/* ------------------------------------------------------------ isolation -- */
-test('isolation: a member granted project A cannot read project B', async () => {
-  const { cookie } = await login('u_member');
-  assert.equal((await req('GET', '/api/projects/p_a', { cookie })).statusCode, 200);
-  const denied = await req('GET', '/api/projects/p_b', { cookie });
-  assert.equal(denied.statusCode, 403);
-  assert.equal(denied.json().error.code, 'forbidden', 'denial must not leak whether the project exists');
-});
-
-test('isolation: a client user sees only its own client’s project', async () => {
-  const { cookie } = await login('u_clienta');
-  const own = await req('GET', '/api/projects/p_a', { cookie });
-  const foreign = await req('GET', '/api/projects/p_b', { cookie });
-  assert.equal(foreign.statusCode, 403);
-  assert.equal(own.statusCode, 200);
-});
-
-test('isolation: staff without a grant cannot read a restricted project', async () => {
-  const { cookie } = await login('u_outside');
-  const res = await req('GET', '/api/projects/p_b', { cookie });
-  assert.equal(res.statusCode, 403);
-});
-
-test('isolation: leads and admins have org-wide project access', async () => {
-  const { cookie } = await login('u_lead');
-  assert.equal((await req('GET', '/api/projects/p_a', { cookie })).statusCode, 200);
-  assert.equal((await req('GET', '/api/projects/p_b', { cookie })).statusCode, 200);
-});
-
-/* ------------------------------------------------- privilege escalation -- */
-test('escalation: a member cannot waive a turnover gate', async () => {
-  const { cookie } = await login('u_member');
-  const me = (await req('GET', '/api/auth/me', { cookie })).json().data;
-  const res = await req('PATCH', '/api/tasks/t_a/turnover/tg_t1', {
-    cookie,
-    headers: { 'x-csrf-token': me.csrfToken },
-    payload: { status: 'waived', evidence: 'I decided so' },
-  });
-  assert.equal(res.statusCode, 403);
-});
-
-test('escalation: role cannot be escalated through the request body', async () => {
-  const { cookie } = await login('u_member');
-  const me = (await req('GET', '/api/auth/me', { cookie })).json().data;
-  const res = await req('POST', '/api/tasks', {
-    cookie,
-    headers: { 'x-csrf-token': me.csrfToken },
-    payload: { boardId: 'b_a', title: 'Escalation attempt', role: 'admin', actorId: 'u_admin' },
-  });
-  // Body fields that look like authority are ignored; the task is created but
-  // the reporter is the *verified* identity.
-  if (res.statusCode === 201) {
-    const created = res.json().data;
-    assert.equal(created.reporter?.name ?? 'Mia Member', 'Mia Member');
-  }
-  const who = (await req('GET', '/api/auth/me', { cookie })).json().data;
-  assert.equal(who.user.role, 'member', 'role is never taken from the client');
-});
-
-test('escalation: x-actor-id header is ignored unless explicitly enabled', async () => {
-  const { cookie } = await login('u_member');
-  const res = await req('GET', '/api/auth/me', { cookie, headers: { 'x-actor-id': 'u_admin' } });
-  assert.equal(res.json().data.user.id, 'u_member');
-});
-
-/* ------------------------------------------------------------- tokens ---- */
-test('auth: OIDC token verification rejects tampering, expiry and wrong issuer', async () => {
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'test-kid', alg: 'RS256', kty: 'RSA' };
-  const jwks = new JwksCache('https://idp.invalid/jwks', async () => ({ ok: true, json: async () => ({ keys: [jwk] }) }));
-
-  const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
-  const sign = (payload, opts = {}) => {
-    const header = b64({ alg: opts.alg ?? 'RS256', kid: 'test-kid', typ: 'JWT' });
-    const body = b64(payload);
-    const sig = crypto.sign('sha256', Buffer.from(`${header}.${body}`), privateKey).toString('base64url');
-    return `${header}.${body}.${sig}`;
-  };
-  const base = { sub: 'user-1', iss: 'https://idp.example', aud: 'relay', exp: Math.floor(Date.now() / 1000) + 300 };
-
-  const good = sign(base);
-  const verified = await verifyJwt(good, { jwks, issuer: 'https://idp.example', audience: 'relay' });
-  assert.equal(verified.sub, 'user-1');
-
-  await assert.rejects(
-    () => verifyJwt(sign({ ...base, exp: Math.floor(Date.now() / 1000) - 10 }), { jwks, issuer: 'https://idp.example', audience: 'relay' }),
-    /expired/i,
-  );
-  await assert.rejects(
-    () => verifyJwt(sign({ ...base, iss: 'https://evil.example' }), { jwks, issuer: 'https://idp.example', audience: 'relay' }),
-    /issuer/i,
-  );
-  await assert.rejects(
-    () => verifyJwt(sign({ ...base, aud: 'someone-else' }), { jwks, issuer: 'https://idp.example', audience: 'relay' }),
-    /audience/i,
-  );
-
-  // Tampered payload with the original signature.
-  const parts = good.split('.');
-  const tampered = `${parts[0]}.${b64({ ...base, sub: 'attacker' })}.${parts[2]}`;
-  await assert.rejects(() => verifyJwt(tampered, { jwks }), /signature/i);
-
-  // alg=none must never be accepted.
-  const noneToken = `${b64({ alg: 'none', kid: 'test-kid' })}.${b64(base)}.`;
-  await assert.rejects(() => verifyJwt(noneToken, { jwks }), /not allowed|Malformed/i);
-
-  // A token signed by a different key is rejected.
-  const { privateKey: otherKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const header = b64({ alg: 'RS256', kid: 'test-kid' });
-  const body = b64(base);
-  const foreignSig = crypto.sign('sha256', Buffer.from(`${header}.${body}`), otherKey).toString('base64url');
-  await assert.rejects(() => verifyJwt(`${header}.${body}.${foreignSig}`, { jwks }), /signature/i);
-});
-
-test('auth: CSRF tokens are bound to the session and verified in constant time', async () => {
-  const secret = 'unit-test-secret';
-  const token = issueCsrf('session-a', secret);
-  assert.equal(verifyCsrf('session-a', token, secret), true);
-  assert.equal(verifyCsrf('session-b', token, secret), false, 'token is bound to its session');
-  assert.equal(verifyCsrf('session-a', `${token}x`, secret), false);
-  assert.equal(verifyCsrf('session-a', undefined, secret), false);
-  assert.equal(verifyCsrf('session-a', token, ''), false, 'no secret means no CSRF protection, so deny');
-});
-
-/* -------------------------------------------------------------- audit ---- */
-test('audit: every rejected authentication attempt is recorded', async () => {
-  const before = (await db.get('SELECT COUNT(*) AS c FROM auth_events'))?.c ?? 0;
-  await req('GET', '/api/auth/me', { cookie: 'relay_session=ses_nope' });
-  const rows = await db.all("SELECT kind FROM auth_events WHERE kind = 'session_invalid'");
-  const after = (await db.get('SELECT COUNT(*) AS c FROM auth_events'))?.c ?? 0;
-  assert.ok(Number(after) > Number(before), 'rejection produced an audit row');
-  assert.ok(rows.length >= 1);
-});
-
-test('audit: successful and failed logins are recorded with actor and ip', async () => {
-  await login('u_admin');
-  const rows = await db.all("SELECT * FROM auth_events WHERE kind LIKE 'login%' ORDER BY id DESC LIMIT 5");
-  assert.ok(rows.length >= 1);
-  assert.ok(rows[0].user_id);
-});
-
-test('security: operational endpoints are anonymous but expose no user data', async () => {
-  for (const path of ['/api/health', '/api/live', '/api/ready', '/api/metrics']) {
-    const res = await req('GET', path);
-    assert.equal(res.statusCode, 200, `${path} should be reachable by an orchestrator`);
-    assert.ok(!/maya@|lead@|admin@/i.test(res.body), `${path} must not leak user identities`);
-  }
-  // Everything else stays private.
-  assert.equal((await req('GET', '/api/dashboard')).statusCode, 401);
-});
-
-/**
- * The sign-in picker must be loadable without a session.
- *
- * Regression test for a bug that made the development sign-in screen unusable in
- * *every* environment, including the deployment that reported it: the screen called
- * `GET /api/users` — the authenticated staff directory — to build its picker, and a
- * visitor on the sign-in screen has no session by definition. The list could never
- * load, and the resulting 401 was rendered as "is the API running on :4000?", which
- * hid a deterministic 100% failure behind a connectivity question.
- */
-test('auth: the identity picker is anonymous and minimal', async () => {
-  const res = await app.inject({ method: 'GET', url: '/api/auth/dev-users' });
-  assert.equal(res.statusCode, 200, 'the picker must load without a session');
-
-  const users = JSON.parse(res.body).data;
-  assert.ok(users.length > 0, 'the seeded identities must be offered');
-
-  assert.deepEqual(
-    Object.keys(users[0]).sort(),
-    ['color', 'id', 'initials', 'name', 'role', 'title'],
-    'the picker payload must stay minimal — it is served to anonymous callers',
-  );
-  assert.ok(!('email' in users[0]), 'an anonymous picker must not expose email addresses');
-  assert.ok(!/Cents|capacityHours|@x\.io/.test(res.body), 'no rates, capacity or emails may be exposed');
-
-  // The authenticated directory stays closed to the same anonymous caller.
-  const dir = await app.inject({ method: 'GET', url: '/api/users' });
-  assert.equal(dir.statusCode, 401, 'the staff directory must remain session-gated');
-
-  // And the identities it returns are usable for the login it is a picker for.
-  const chosen = users[0].id;
-  const signedIn = await app.inject({
+test('noauth: mutations are attributed to the operator, not left null', async () => {
+  /**
+   * The foreign keys from tasks and activity to `users` are still enforced, so an
+   * unattributed write would fail. This asserts the operator id is recorded, which
+   * is what keeps the activity feed meaningful on an unauthenticated deployment.
+   */
+  const created = await app.inject({
     method: 'POST',
-    url: '/api/auth/dev-login',
+    url: '/api/tasks',
     headers: { 'content-type': 'application/json' },
-    payload: JSON.stringify({ userId: chosen }),
+    payload: JSON.stringify({ projectId: 'pr_a', boardId: 'bd_a', title: 'Attribute me', type: 'feature' }),
   });
-  assert.equal(signedIn.statusCode, 200, 'an identity from the picker must be signable-in');
+  const id = JSON.parse(created.body).data.id;
+  const row = await db.get('SELECT reporter_id FROM tasks WHERE id = ?', [id]);
+  const actor = String(row.reporter_id ?? '');
+  assert.ok(actor.length > 0, 'the write must carry an actor');
+  const user = await db.get('SELECT id FROM users WHERE id = ?', [actor]);
+  assert.ok(user, 'the actor must be a real user row, because the schema has a foreign key to it');
 });
 
-test('auth: the identity picker is refused in production without the documented opt-in', async () => {
-  const previous = process.env.NODE_ENV;
-  process.env.NODE_ENV = 'production';
-  try {
-    const res = await app.inject({ method: 'GET', url: '/api/auth/dev-users' });
-    assert.equal(res.statusCode, 403, 'listing demo identities in production is a bypass');
-    assert.ok(!/Ada Admin|u_admin|@x\.io/.test(res.body), 'a refused response must not still contain the list');
-  } finally {
-    if (previous === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = previous;
+test('noauth: the login endpoints are gone, and say so', async () => {
+  for (const url of ['/api/auth/login', '/api/auth/dev-login', '/api/auth/logout']) {
+    const res = await app.inject({ method: 'POST', url, headers: { 'content-type': 'application/json' }, payload: '{}' });
+    assert.equal(res.statusCode, 410, `${url} must be Gone, not a working login`);
+    assert.equal(JSON.parse(res.body).error.code, 'auth_removed');
   }
+});
+
+/* ---------------------------------- nothing that mattered was collateral -- */
+test('noauth: input validation still rejects bad payloads', async () => {
+  const noName = await app.inject({
+    method: 'POST',
+    url: '/api/tasks',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ projectId: 'pr_a', boardId: 'bd_a', title: 'x' }),
+  });
+  assert.equal(noName.statusCode, 400, 'a too-short title must still be rejected');
+
+  const badType = await app.inject({
+    method: 'POST',
+    url: '/api/tasks',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ projectId: 'pr_a', boardId: 'bd_a', title: 'Valid title', type: 'not-a-real-type' }),
+  });
+  assert.equal(badType.statusCode, 500, 'the database CHECK constraint must still fire on an invalid enum');
+});
+
+test('noauth: unknown ids still 404 and unknown routes still 404', async () => {
+  const missing = await app.inject({ method: 'GET', url: '/api/tasks/does-not-exist' });
+  assert.equal(missing.statusCode, 404, 'authorisation being gone must not turn a missing row into a 200');
+
+  const noRoute = await app.inject({ method: 'GET', url: '/api/there-is-no-such-endpoint' });
+  assert.equal(noRoute.statusCode, 404);
+  assert.match(String(noRoute.headers['content-type']), /application\/json/i);
+
+  /**
+   * A browser route reaching the API is still a routing bug and must not be
+   * answered with a document, exactly as before.
+   */
+  const spa = await app.inject({ method: 'GET', url: '/projects/pr_a' });
+  assert.equal(spa.statusCode, 404, 'the API function must not serve the SPA');
+});
+
+test('noauth: client and project creation work, with the schema enforcing itself', async () => {
+  const client = await app.inject({
+    method: 'POST',
+    url: '/api/clients',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ name: 'Vertex Robotics', tier: 'strategic' }),
+  });
+  assert.equal(client.statusCode, 201, 'client creation must work — it did not exist before this change');
+  const made = JSON.parse(client.body).data;
+  assert.equal(made.slug, 'vertex-robotics', 'a slug must be derived from the name');
+
+  const duplicate = await app.inject({
+    method: 'POST',
+    url: '/api/clients',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ name: 'Vertex Robotics' }),
+  });
+  assert.equal(duplicate.statusCode, 409, 'the UNIQUE constraint must surface as a conflict, not a 500');
+
+  const project = await app.inject({
+    method: 'POST',
+    url: '/api/projects',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ name: 'Vertex Fleet Console', clientId: made.id, key: 'VTX' }),
+  });
+  assert.equal(project.statusCode, 201, 'project creation must work — it did not exist before this change');
+  assert.equal(JSON.parse(project.body).data.key, 'VTX');
+
+  // The foreign key still governs: a project cannot belong to a client that is absent.
+  const orphan = await app.inject({
+    method: 'POST',
+    url: '/api/projects',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ name: 'Orphan', clientId: 'cl_does_not_exist' }),
+  });
+  assert.equal(orphan.statusCode, 400, 'an unknown client must be refused');
+});
+
+test('noauth: operational probes stay anonymous and expose no user data', async () => {
+  const health = await app.inject({ method: 'GET', url: '/api/health' });
+  assert.equal(health.statusCode, 200);
+  const body = JSON.parse(health.body).data;
+  assert.ok(!/@/.test(health.body), 'the health payload must not contain an email address');
+  assert.equal(body.authMode, 'none', 'the health probe must report that nothing authenticates');
+});
+
+test('noauth: the operator identity is resolved once and reused', async () => {
+  resetOperatorIdentity();
+  const first = await app.inject({ method: 'GET', url: '/api/auth/session' });
+  const second = await app.inject({ method: 'GET', url: '/api/auth/session' });
+  assert.equal(JSON.parse(first.body).data.user.id, JSON.parse(second.body).data.user.id);
 });

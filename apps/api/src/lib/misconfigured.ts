@@ -22,7 +22,6 @@
  *   - **Recorded, not re-thrown.** A serverless instance that re-throws on every
  *     request would turn one deployment mistake into a log flood.
  */
-import { looksLikeArgon2id } from '../auth/index.ts';
 
 interface BootFailure {
   /** Boot stage that failed. Ordered: nothing after it could have run. */
@@ -75,20 +74,19 @@ export interface BootFailureBody {
 /**
  * Variables and what they cost when absent.
  *
- * `required: true` means the API cannot run at all without it.
- * `required: false` means it runs, but with a limitation worth stating — the
- * distinction matters because reporting a genuinely optional variable as "missing"
- * sends an operator to provision something they do not need. `DATABASE_URL` is the
- * case in point: without it the API falls back to SQLite in the instance's temp
- * directory, which is a working deployment (and enough to sign in and evaluate),
- * just not a durable one.
+ * `required: true` means the API cannot run at all without it — and the list is
+ * now empty, because nothing is required. That is the change this deployment
+ * needed: `SESSION_SECRET` used to be required to sign cookie sessions, and its
+ * absence stopped the API from booting at all, which produced a blank dashboard and
+ * an operator with no way to tell why.
+ *
+ * `required: false` means the API runs, with a limitation worth stating. Reporting
+ * an optional variable as "missing" sends someone to provision something they do
+ * not need, so the distinction is load-bearing: `DATABASE_URL` is genuinely
+ * optional — without it the API uses SQLite in the instance's temp directory, which
+ * is a working deployment, just not a durable one.
  */
 const SETTINGS = [
-  {
-    name: 'SESSION_SECRET',
-    required: true,
-    purpose: 'signs CSRF tokens and session cookies',
-  },
   {
     name: 'DATABASE_URL',
     required: false,
@@ -97,46 +95,56 @@ const SETTINGS = [
 ] as const;
 
 export function bootFailureBody(err: BootFailure): BootFailureBody {
-  const missing = SETTINGS.filter((s) => s.required && !process.env[s.name]).map((s) => s.name);
+  /**
+   * Nothing is required, so this is empty by construction rather than by luck.
+   * Kept as a list because the response shape is part of the contract and a
+   * consumer should not have to special-case an absent field.
+   */
+  const missing: string[] = SETTINGS.filter((s) => s.required && !process.env[s.name]).map((s) => s.name);
   const optional = SETTINGS.filter((s) => !s.required && !process.env[s.name])
     .map((s) => ({ name: s.name, consequence: s.purpose }));
 
+  /**
+   * No credential is validated, because none is used.
+   *
+   * A malformed `RELAY_ADMIN_PASSWORD_HASH` used to be reported here and refused at
+   * boot. It is now inert — nothing reads it — so reporting it as a problem would
+   * be worse than silence: it would tell an operator to fix a variable that cannot
+   * affect the deployment.
+   */
   const invalid: Array<{ name: string; problem: string }> = [];
-  const hash = process.env.RELAY_ADMIN_PASSWORD_HASH ?? '';
-  if (hash && !looksLikeArgon2id(hash)) {
-    invalid.push({
-      name: 'RELAY_ADMIN_PASSWORD_HASH',
-      problem: 'not a complete Argon2id PHC hash — likely truncated on paste or expanded by the shell; single-quote it',
-    });
-  }
 
   /**
    * Explain the causal chain when the surface error blames something else.
    *
-   * With no `DATABASE_URL` the boot falls back to local SQLite, which starts
-   * empty — so no shared credential exists, so `AUTH_MODE=auto` resolves to `dev`,
-   * so the production guard refuses. The *first* thing to fix is therefore the
-   * database, but the message an operator sees is about authentication. Stating the
-   * chain is the difference between "why is it complaining about auth?" and knowing
-   * that one variable is responsible for both symptoms.
+   * The chain that used to be explained here — no database, therefore no shared
+   * credential, therefore `AUTH_MODE=dev`, therefore a production refusal — no
+   * longer exists. What remains is its residual cost: without `DATABASE_URL` the
+   * instance runs on SQLite in its own temp directory, so anything written is lost
+   * when it recycles. That is worth saying plainly, because it is the difference
+   * between a deployment that works and one that appears to forget its data.
    */
-  const causal =
-    /AUTH_MODE=dev is refused/.test(err.error.message)
-      ? [
-          'No shared login credential is provisioned, so AUTH_MODE=auto resolved to `dev`, which a production deployment refuses. Fix it either way: set DATABASE_URL (durable storage, then run the migration and assign-login commands below) OR set RELAY_LOGIN_USERNAME and RELAY_ADMIN_PASSWORD_HASH (the credential is written on boot, and SQLite in the instance temp directory is used until you add a database).',
-        ]
-      : [];
+  const causal = !process.env.DATABASE_URL
+    ? [
+        'No DATABASE_URL is set, so this instance is using SQLite in its temporary directory. Reads and writes work, but the file is per-instance and is lost on the next cold start or redeploy, and concurrent instances will not see each other\'s data. Set DATABASE_URL to a PostgreSQL connection string for durable storage.',
+      ]
+    : [];
 
   const remedy = [
     ...causal,
     ...missing.map((name) => {
       const purpose = SETTINGS.find((s) => s.name === name)!.purpose;
-      return name === 'SESSION_SECRET'
-        ? 'Set SESSION_SECRET to 32+ random bytes: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64url\'))"'
-        : `Set DATABASE_URL to your provider's pooled PostgreSQL connection string (${purpose})`;
+      return `Set ${name} (${purpose})`;
     }),
-    'Run the schema migration: DATABASE_URL=… npm run db:migrate:prod',
-    'Provision the shared login: npm run set-password, then npm run db:pg:assign-login',
+    /**
+     * Only offer a database remedy when there is no database. An unseeded database
+     * and a missing one are different problems with different fixes, and this
+     * function is only reached when the *boot* failed — so the conditional keeps the
+     * advice from contradicting the error it accompanies.
+     */
+    ...(process.env.DATABASE_URL
+      ? ['Run the schema migration: npm run db:migrate:prod']
+      : ['Set DATABASE_URL to a PostgreSQL connection string for durable storage', 'Then run: npm run db:migrate:prod']),
     'Redeploy and confirm GET /api/ready returns 200',
   ];
 

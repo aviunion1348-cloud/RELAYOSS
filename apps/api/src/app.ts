@@ -15,18 +15,9 @@ import { config } from './config.ts';
 import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
 import { seed } from './db/seed.ts';
-import { provisionLoginFromEnv } from './auth/provision.ts';
 import { registerRoutes } from './routes/index.ts';
-import { registerAuthRoutes } from './routes/auth.ts';
-import { registerPasswordLogin } from './routes/password-login.ts';
-import { createAuth } from './auth/middleware.ts';
-import {
-  assertAuthConfiguration,
-  assertStaticAuthConfiguration,
-  resetResolvedAuthMode,
-  setResolvedAuthMode,
-} from './auth/index.ts';
-import { hasProvisionedCredential } from './auth/password.ts';
+import { createOperatorAuth, registerOperatorHook, resolveOperator } from './auth/operator-middleware.ts';
+import { registerOperatorRoutes } from './routes/operator.ts';
 import { DbLoginThrottle, consumeRateLimit } from './lib/rate-limit-store.ts';
 import { RateLimiter, LoginThrottle } from './lib/rate-limit.ts';
 import { tooMany } from './lib/http.ts';
@@ -61,12 +52,15 @@ export interface BuildOptions {
 
 export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyInstance; db: Db }> {
   /*
-   * Static configuration first — before any connection is opened.
+   * No authentication configuration is validated, because there is none.
    *
-   * An unreachable database must not be able to masquerade as (or hide) a
-   * misconfigured deployment: the two problems have completely different fixes.
+   * This used to throw before the first connection was opened if `SESSION_SECRET`
+   * was absent or the password hash was malformed — a deliberate fail-fast, which
+   * was correct while the API had a session boundary. With no sessions there is no
+   * secret to sign, so requiring one would mean a deployment could not start over
+   * a variable that no longer does anything. That is the exact class of failure
+   * this change exists to remove.
    */
-  assertStaticAuthConfiguration();
 
   const db = opts.db ?? (await getDb());
   if (opts.db) setDb(opts.db);
@@ -78,9 +72,14 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
      *
      * Without a PostgreSQL instance the API falls back to SQLite, and on Vercel
      * that file starts empty on every cold start. An empty database is not merely
-     * sparse: there is no user to sign in as, so `AUTH_MODE=auto` finds no
-     * provisioned credential, resolves to `dev`, and a production deployment
-     * refuses to boot. The result was a sign-in screen that could never work.
+     * sparse: `users` is a foreign key target for every attribution column, so
+     * there is nobody to attribute a request to and every write would fail.
+     *
+     * The failure this replaced was worse and less obvious: the same empty database
+     * used to resolve no credential, fall back to `dev` mode, and be refused at boot
+     * in production — so the deployment answered nothing, and the frontend showed a
+     * sign-in screen that could never work. Seeding is what makes the no-database
+     * configuration genuinely usable rather than nominally supported.
      *
      * Seeding is gated three ways so it cannot touch real data:
      *
@@ -134,63 +133,32 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     bodyLimit: 2 * 1024 * 1024,
   });
 
-  /**
-   * Resolve the effective authentication mode before any route exists.
+  /*
+   * No authentication mode is resolved, and nothing is provisioned.
    *
-   * `AUTH_MODE=auto` (the default) means: use the shared login if a credential has
-   * been provisioned, otherwise fall back to whatever the environment says. This
-   * is what makes the repository work unchanged in three settings — a developer
-   * laptop with demo identities, a deployment with one shared password, and a
-   * deployment behind an IdP — without anyone editing source.
+   * This deployment is an internal, unauthenticated application: there is no
+   * sign-in, no session and no credential. The block that used to live here —
+   * copying a password hash from the environment, deciding between `password`,
+   * `oidc` and `dev`, and refusing to boot in production when none was
+   * configured — is the machinery that turned a missing environment variable into
+   * an API that answered *every* request with a refusal. It is gone.
    *
-   * A provisioned credential wins over `dev` because leaving demo identities
-   * reachable on a deployment that has a real password would be a bypass.
+   * What remains is an identity for attribution and scoping (see
+   * `auth/operator-middleware.ts`). It is resolved lazily, so a database problem
+   * reports itself on the request that needs it instead of preventing boot.
    */
-  /**
-   * Provision the shared login from the environment before the mode is resolved.
-   *
-   * Ordering is the whole point. `AUTH_MODE=auto` chooses `password` only if a
-   * credential row exists, so a credential supplied purely by configuration has to
-   * be in the database *before* that decision, or a correctly configured deployment
-   * still resolves to `dev` and refuses to boot in production.
-   *
-   * Only when this boot created the schema: a database that already existed is
-   * somebody's installation, and boot must not rewrite their credential.
-   */
-  if (migrated) {
-    try {
-      await provisionLoginFromEnv(db);
-    } catch (err) {
-      // A malformed hash is already refused by `assertStaticAuthConfiguration`
-      // above; anything reaching here is a storage problem, and it must be visible
-      // rather than quietly leaving the deployment un-signable.
-      // eslint-disable-next-line no-console
-      console.error(
-        JSON.stringify({
-          level: 50,
-          msg: 'Could not provision the shared login from the environment.',
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    }
-  }
-
-  resetResolvedAuthMode();
-  const declared = config.authMode;
-  const effective =
-    declared === 'oidc' || declared === 'password' || declared === 'dev'
-      ? declared
-      : (await hasProvisionedCredential(db))
-        ? 'password'
-        : 'dev';
-  setResolvedAuthMode(effective);
-  assertAuthConfiguration(effective);
 
   await app.register(helmet, { contentSecurityPolicy: false, crossOriginEmbedderPolicy: false });
+  /*
+   * No `credentials: true`, and no `x-csrf-token` in the allowlist.
+   *
+   * There is no cookie to send cross-origin and no CSRF token to carry. Leaving
+   * the header advertised would suggest a token is required and invite a future
+   * client to implement one that nothing checks.
+   */
   await app.register(cors, {
     origin: config.corsOrigin.includes('*') ? true : config.corsOrigin,
-    credentials: true,
-    allowedHeaders: ['content-type', 'x-request-id', 'x-csrf-token', 'authorization'],
+    allowedHeaders: ['content-type', 'x-request-id', 'authorization'],
   });
 
   /**
@@ -411,19 +379,13 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   const globalLimiter = budgetFor('global', config.rateLimit.global);
   const authLimiter = budgetFor('auth', config.rateLimit.auth);
   const writeLimiter = budgetFor('write', config.rateLimit.write);
-  /**
-   * Login lockout storage.
+  /*
+   * Login lockout storage — retained, though nothing writes to it now.
    *
-   * Order: an injected throttle (tests must control it), then the database when the
-   * database is shared, then the in-process map.
-   *
-   * The database is chosen whenever PostgreSQL is configured, because that is
-   * exactly the case where more than one process exists. An in-process lockout on a
-   * serverless deployment is not a lockout: each instance keeps its own counter, so
-   * five failures spread across five cold starts produce five fresh allowances.
-   *
-   * SQLite stays in-process: a single file-backed database means a single process,
-   * so a shared table would add a write per attempt and buy nothing.
+   * The store is still constructed because `DbLoginThrottle` also backs the shared
+   * rate-limit counters, and because `buildApp` accepts an injected throttle that
+   * the rate-limit tests drive directly. What disappeared is the *login* that used
+   * to consume the auth budget.
    */
   const loginThrottle =
     opts.throttle ??
@@ -432,11 +394,15 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   app.addHook('onRequest', async (req, reply) => {
     const identityKey = (req.headers.cookie ? 'cookie' : req.ip) ?? 'anon';
     const key = `${req.ip}|${identityKey}`;
-    // Login attempts draw on the stricter auth budget, whether they use the shared
-    // credential, the demo login or OIDC.
-    const budget = req.url.startsWith('/api/auth/dev-login')
-      || req.url.startsWith('/api/auth/oidc')
-      || req.url.startsWith('/api/auth/login')
+    /*
+     * No auth budget any more: the endpoints that used it are gone.
+     *
+     * The retired login paths still draw the stricter `authLimiter` in case anything
+     * probes them — they answer `410 Gone`, and having that be rate-limited is
+     * cheaper than having it be a free way to make the server allocate a response.
+     * Everything else uses the global (read) or write budget, unchanged.
+     */
+    const budget = req.url.startsWith('/api/auth/')
       ? authLimiter
       : req.method === 'GET' || req.method === 'HEAD'
         ? globalLimiter
@@ -452,12 +418,17 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     }
   });
 
-  // Authentication runs before any business route can observe a request.
-  const auth = createAuth({ db });
-  app.addHook('onRequest', auth.authenticate);
-
-  await app.register(registerAuthRoutes, { throttle: loginThrottle });
-  await app.register(registerPasswordLogin, { throttle: loginThrottle });
+  /*
+   * Attach the operator to every request. This hook cannot refuse one.
+   *
+   * `registerAuthRoutes` and `registerPasswordLogin` are no longer mounted: there
+   * is no login, so there are no login endpoints. `/api/auth/session` survives as
+   * a small route that reports the deployment's mode, because the frontend asks
+   * for it during startup and needs an answer rather than a 404.
+   */
+  registerOperatorHook(app, db);
+  const auth = createOperatorAuth({ db });
+  await app.register(registerOperatorRoutes);
   await registerRoutes(app, { auth });
 
   const webDist = opts.webDist ?? config.webDist;

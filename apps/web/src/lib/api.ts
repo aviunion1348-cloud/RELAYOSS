@@ -19,27 +19,27 @@ export class ApiError extends Error {
 }
 
 /**
- * CSRF token for cookie-authenticated mutations.
+ * No CSRF token, and no session-expiry signal.
  *
- * Sessions live in an HttpOnly cookie (not readable by JS, by design), so the
- * token arrives from /api/auth/me and is cached in memory only — never
- * localStorage, so a successful XSS cannot lift a long-lived credential.
+ * CSRF protection exists to stop a third-party page from riding a *victim's
+ * ambient cookie*. This deployment sets no cookie, so there is no ambient
+ * authority to ride and nothing for a token to bind to. The token cache, the
+ * `x-csrf-token` header and the `relay:auth-expired` event that navigated back to
+ * a sign-in screen are all gone rather than left as dead code that implies a
+ * security property which no longer exists.
  */
-let csrfToken: string | null = null;
-export function setCsrfToken(token: string | null) {
-  csrfToken = token;
-}
-
-/** Fired when the session is gone, so the app can return to the sign-in screen. */
-export const AUTH_EXPIRED_EVENT = 'relay:auth-expired';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
   if (init?.body) headers['content-type'] = 'application/json';
-  if (method !== 'GET' && method !== 'HEAD' && csrfToken) headers['x-csrf-token'] = csrfToken;
 
-  const res = await fetch(BASE + path, { ...init, headers, credentials: 'same-origin' });
+  /*
+   * `credentials: 'omit'` states the intent: no cookie is sent, because the API
+   * authenticates nothing by cookie. Leaving `same-origin` would keep working, but
+   * it would also quietly re-enable cookie semantics if one were ever set.
+   */
+  const res = await fetch(BASE + path, { ...init, headers, credentials: 'omit' });
 
   /**
    * Parse defensively.
@@ -62,9 +62,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = body?.error ?? {};
-    if (res.status === 401 && !path.startsWith('/auth/')) {
-      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
-    }
+    /*
+     * A 401 is no longer a navigation instruction. Previously it fired an event
+     * that returned the whole application to the sign-in screen; with no sign-in
+     * screen there is nowhere to return to, and the correct behaviour is to report
+     * the failure to the component that asked and let it show what it can.
+     */
     throw new ApiError(
       res.status,
       err.code ?? 'unknown',
@@ -111,48 +114,45 @@ export interface SessionUser {
   role: 'admin' | 'lead' | 'member' | 'client' | 'bot';
 }
 
+/**
+ * What the API reports about this deployment.
+ *
+ * Not a session. There is no session. It carries the operator's name and role so
+ * the shell can display them, and `authMode: 'none'` states plainly that nothing
+ * authenticates.
+ */
 export interface SessionInfo {
   user: SessionUser;
-  method: string;
-  authMode: 'oidc' | 'dev' | 'password';
-  expiresAt: string;
-  csrfToken: string | null;
-  permissions: Record<string, boolean>;
+  authMode: 'none' | 'oidc' | 'dev' | 'password';
+  method?: string;
+  expiresAt?: string | null;
+  csrfToken?: string | null;
+  permissions?: Record<string, boolean>;
 }
 
 export const auth = {
+  /**
+   * Deployment description. Called once at startup, and never used to gate
+   * anything: the dashboard renders whether or not this succeeds.
+   */
   async me(): Promise<SessionInfo> {
-    const me = await request<SessionInfo>('/auth/me');
-    setCsrfToken(me.csrfToken);
-    return me;
+    return request<SessionInfo>('/auth/session');
   },
   /**
-   * The shared-credential login. This is the primary sign-in for this deployment:
-   * one username and one password, no registration and no guest path.
+   * Signing in and out is gone.
+   *
+   * These remain as explicit failures rather than being deleted, so that any
+   * component still wired to them fails loudly during development instead of
+   * appearing to work. `410 Gone` is what the API answers too.
    */
-  async login(username: string, password: string): Promise<SessionInfo> {
-    const out = await request<{ user: SessionUser; csrfToken: string }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    });
-    setCsrfToken(out.csrfToken);
-    return this.me();
+  async login(): Promise<never> {
+    throw new ApiError(410, 'auth_removed', 'Authentication has been removed from this deployment.');
   },
-  /** Local development only — refused once a shared credential exists, and in production. */
-  async devLogin(userId?: string): Promise<SessionInfo> {
-    const out = await request<{ user: SessionUser; csrfToken: string }>('/auth/dev-login', {
-      method: 'POST',
-      body: JSON.stringify(userId ? { userId } : {}),
-    });
-    setCsrfToken(out.csrfToken);
-    return this.me();
+  async devLogin(): Promise<never> {
+    throw new ApiError(410, 'auth_removed', 'Authentication has been removed from this deployment.');
   },
   async logout(): Promise<void> {
-    try {
-      await request('/auth/logout', { method: 'POST' });
-    } finally {
-      setCsrfToken(null);
-    }
+    /* Nothing to end. */
   },
   /**
    * The demo identities offered by the local sign-in screen.
