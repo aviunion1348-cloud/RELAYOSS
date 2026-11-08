@@ -9,7 +9,15 @@ import { config } from '../config.ts';
 import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized, optionalString, optionalNumber } from '../lib/http.ts';
 import { authMode, type Identity } from '../auth/index.ts';
 import { requireProjectAccess } from '../auth/middleware.ts';
-import { resolveReadScope, tasksWhere, projectsWhere, docsWhere, clientsWhere, dealsWhere, assertProjectInScope } from '../auth/scope.ts';
+import {
+  resolveReadScope,
+  tasksWhere,
+  projectsWhere,
+  docsWhere,
+  clientsWhere,
+  dealsWhere,
+  assertProjectInScope,
+} from '../auth/scope.ts';
 import { id, nowIso } from '../lib/ids.ts';
 import { toDate } from '../lib/dates.ts';
 import { TASK_SELECT, mapTask, mapUser, mapClient, mapProject, mapDeal } from '../repositories/query.ts';
@@ -383,8 +391,14 @@ export async function registerRoutes(
 
   app.patch('/api/tasks/:id', async (req) => {
     const { id: taskId } = req.params as { id: string };
-    const row = await db().get<{ id: string }>('SELECT id FROM tasks WHERE id = ? OR key = ?', [taskId, taskId]);
+    const row = await db().get<{ id: string; project_id: string }>(
+      'SELECT id, project_id FROM tasks WHERE id = ? OR key = ?',
+      [taskId, taskId],
+    );
     if (!row) throw notFound('Task not found');
+    // Scope before the update: a task id or key from another tenant must not be writable.
+    await assertProjectInScope(await resolveReadScope(db(), await currentIdentity(req)), row.project_id);
+    await requireProjectAccess(db(), await currentIdentity(req), row.project_id, 'write');
     await updateTask(db(), row.id, req.body as Record<string, any>, await actor(req as never));
     return ok(await taskDetail(db(), row.id));
   });
@@ -392,6 +406,18 @@ export async function registerRoutes(
   app.delete('/api/tasks/:id', async (req, reply) => {
     const actorId = await requireRole(req, ['admin', 'lead']);
     const { id: taskId } = req.params as { id: string };
+    /*
+     * The role check is not a scope check: a lead of one project could cancel a task in
+     * another tenant. Tenancy is asserted separately, and 404 rather than 403 keeps the
+     * denial indistinguishable from absence.
+     */
+    const doomed = await db().get<{ id: string; project_id: string }>(
+      'SELECT id, project_id FROM tasks WHERE id = ?',
+      [taskId],
+    );
+    await assertProjectInScope(await resolveReadScope(db(), await currentIdentity(req)), doomed?.project_id ?? null);
+    if (!doomed) throw notFound('Task not found');
+    await requireProjectAccess(db(), await currentIdentity(req), doomed.project_id, 'write');
     await db().run("UPDATE tasks SET status='cancelled', updated_at=? WHERE id=?", [nowIso(), taskId]);
     await db().run('INSERT INTO audit_log (actor_id,action,entity_type,entity_id) VALUES (?,?,?,?)', [actorId, 'task.cancelled', 'task', taskId]);
     reply.code(204);
@@ -952,6 +978,17 @@ export async function registerRoutes(
     const body = req.body as { stageId?: string; stageKey?: string; status?: string; nextStep?: string; probability?: number; ownerId?: string };
     const deal = await db().get<Record<string, any>>('SELECT * FROM deals WHERE id = ?', [dealId]);
     if (!deal) throw notFound('Deal not found');
+    /*
+     * A deal belongs to a client, and changing its stage starts a clock and rewrites
+     * the pipeline — both of which belong to that client's relationship. Without this
+     * check any authenticated identity could move another tenant's deal.
+     */
+    const dealIdentity = await currentIdentity(req);
+    await assertClientInScope(db(), dealIdentity, deal.client_id);
+    // Changing a deal's stage starts a clock and rewrites the pipeline: staff only.
+    if (!['admin', 'lead'].includes(dealIdentity.role)) {
+      throw forbidden('Only an admin or lead may change a deal');
+    }
     if (body.stageId || body.stageKey) {
       const stage = body.stageId
         ? await db().get<Record<string, any>>('SELECT * FROM pipeline_stages WHERE id = ?', [body.stageId])
@@ -2099,6 +2136,17 @@ export async function registerRoutes(
     if (!['admin', 'lead'].includes(identity.role)) throw forbidden('Only an admin or lead may change a legal document status.');
     const body = req.body as { status?: string; reason?: string };
     if (!body.status) throw badRequest('status is required');
+    /*
+     * Role is not scope. A lead of one client could change another client's contract
+     * status — approving, rejecting or expiring a document they have no relationship
+     * with. The document's client decides; the scope answers for the caller.
+     */
+    const doc = await db().get<{ client_id: string | null }>(
+      'SELECT client_id FROM legal_documents WHERE id = ?',
+      [documentId],
+    );
+    if (!doc) throw notFound('Legal document not found');
+    if (doc.client_id) await assertClientInScope(db(), identity, doc.client_id);
     return ok(await setDocumentStatus(db(), { documentId, status: body.status, reason: body.reason, actorId: identity.userId }));
   });
 
