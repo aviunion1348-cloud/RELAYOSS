@@ -202,3 +202,70 @@ The four highest-consequence control families — the acceptance ladder (R9–R1
 the ten clocks (R18–R22), the ship gate (R26–R32) and auth/isolation (R45–R52) —
 remain Verified with adversarial tests, and each now has additional coverage from
 the executed edge-case registry.
+
+---
+
+## Fresh-clone verification (Phase 12)
+
+Executed in a separate directory — `git clone` of this branch, not the working
+tree — with no reused `node_modules`, no reused build output and no inherited
+state. Every command below was run and its exit code recorded.
+
+```
+$ git clone <repo> /tmp/clean && cd /tmp/clean && git log --oneline -1
+b161787 docs(trace): re-audit every row against the code — 53 verified
+
+$ node -v
+v22.22.3
+
+$ npm ci --no-audit --no-fund
+added 251 packages in 7s                                        exit 0
+
+$ npm run guard
+✓ SQL portability guard passed
+✓ Dependency guard passed — 12 runtime packages imported, all declared
+✓ PostgreSQL migrations in sync (13 files)
+✓ Traceability: 68 requirements — Verified 53, Partial 14, Incomplete 1
+                                                                exit 0
+
+$ npx tsc -p apps/api/tsconfig.json --noEmit                     exit 0
+$ npm run typecheck          (API strict + web strict)           exit 0
+
+$ npm test
+# pass 196  # fail 0  # cancelled 0  # skipped 0
+                                                                exit 0
+
+$ npm run pg:start && npm run pg:reset
+✓ seeded 8 people, 6 clients, 12 deals, 6 projects, 89 tasks     exit 0
+
+$ npm run test:pg
+# pass 15  # fail 0
+✓ PostgreSQL 16 conformance: migrations, seed, governance and HTTP contract all pass.
+                                                                exit 0
+
+$ npm run build
+✓ built in 6.27s                                                 exit 0
+
+$ npm run smoke:web
+✓ all screens render with real API data                          exit 0
+
+$ npm run backup:verify
+✓ backup .../relay-2026-11-08T11-03-49-904Z.sqlite (1568 kB, integrity ok)
+✓ restore drill: 76 tables and 2318 rows identical, integrity ok, 31ms
+                                                                exit 0
+
+$ NODE_ENV=production AUTH_MODE=dev SESSION_SECRET=x node apps/api/dist/index.js
+AUTH_MODE=dev is refused in production                           exit 1 (correct)
+
+$ NODE_ENV=production node apps/api/dist/index.js   (no SESSION_SECRET)
+boot refused                                                     exit 1 (correct)
+```
+
+Two rows are honest about what this run does *not* prove:
+
+- **Docker and compose** cannot be executed here — there is no Docker daemon in
+  this sandbox. Both are proven in CI, where the daemon exists (CI run
+  42469354957 passed `docker build` and a fresh-start with PostgreSQL 16).
+- **Browser E2E** cannot be executed here — the Chromium binary CDN is blocked.
+  The suite is committed and is a required CI step; locally it exits 3, meaning
+  "not run", which is deliberately distinguishable from a pass.
