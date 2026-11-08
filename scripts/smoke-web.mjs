@@ -553,6 +553,48 @@ for (const [name, , route, endpoints] of SCREENS) {
 }
 
 /*
+ * An older browser must still be able to make a request.
+ *
+ * AbortSignal.timeout is Safari 16+ / Chrome 103+ and AbortSignal.any is newer.
+ * The client used both unconditionally, outside its try/catch — so on an older
+ * browser calling them threw a TypeError before the fetch was even attempted, and
+ * every panel in the product failed at once with "the request never reached the
+ * server". Deleting the two statics here reproduces that browser exactly: a server
+ * is listening and reachable, so a working client must get its response.
+ */
+{
+  const http = await import('node:http');
+  const stub = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ data: { ok: true } }));
+  });
+  await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+  const base = 'http://127.0.0.1:' + stub.address().port;
+
+  const savedTimeout = AbortSignal.timeout;
+  const savedAny = AbortSignal.any;
+  // A browser from before these existed: the properties are simply absent.
+  delete AbortSignal.timeout;
+  delete AbortSignal.any;
+  let result = null;
+  let failure = null;
+  try {
+    result = await requestWithDeadline('/api/meta', { base, deadlineMs: 5000 });
+  } catch (e) {
+    failure = e;
+  } finally {
+    AbortSignal.timeout = savedTimeout;
+    AbortSignal.any = savedAny;
+    stub.close();
+  }
+  const ok = !failure && result && result.ok === true;
+  check('no-abortsignal', Boolean(ok), ok
+    ? 'a browser without AbortSignal.timeout/any can still load data'
+    : 'a browser without AbortSignal.timeout/any cannot make a request: ' +
+      (failure ? failure.name + ': ' + failure.message : 'no data returned'));
+}
+
+/*
  * The timeout must render as a timeout, not as a generic network fault: the two
  * have different remedies, and conflating them is the mistake ApiFailure was
  * written to stop.
