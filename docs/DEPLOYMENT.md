@@ -189,6 +189,27 @@ suppressed, and the `.npmrc` deliberately does **not** use `ignore-scripts` — 
 would silently disable every dependency lifecycle script, which is precisely what
 `allowScripts` exists to decide per package.
 
+### 1.2.5 The `.npmrc` fallback, and why it is not redundant
+
+`.npmrc` also carries `include=dev`:
+
+```
+cache=~/.npm
+include=dev
+```
+
+The service `installCommand`s already pass `--include=dev`, and the guard enforces
+that. This setting exists because the failing deployment ran the **root**
+`npm run build` — not a service build — so the production install that starved it did
+not come from a service `installCommand` at all. With `include=dev` at the project
+level, a plain `npm ci` installs the build toolchain regardless of which command,
+which directory, or which config path drives it.
+
+That is deliberately belt-and-braces rather than the primary fix: the per-service
+commands state the requirement where a reader looks for it, and the `.npmrc` line
+means an unanticipated install path cannot reintroduce `vite: command not found`.
+Both are asserted by the guard.
+
 ### 1.3 Environment variables
 
 Set these in **Project → Settings → Environment Variables** for *Production* (and

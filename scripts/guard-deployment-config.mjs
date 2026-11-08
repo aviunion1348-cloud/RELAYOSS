@@ -260,6 +260,37 @@ if (cfg) {
       }
     }
 
+    /*
+     * The .npmrc fallback.
+     *
+     * The service installCommands are the primary fix, but the failing deployment ran
+     * the *root* `npm run build` — not a service build — which means the install that
+     * starved the build did not come from a service installCommand. `include=dev` in
+     * .npmrc makes every install include the build toolchain regardless of which
+     * command or directory drives it, so a config path we have not anticipated cannot
+     * reintroduce `vite: command not found`.
+     */
+    if (!exists('.npmrc')) {
+      fail('.npmrc is missing; it carries `include=dev`, the fallback that keeps a plain production install from omitting the build toolchain');
+    } else {
+      const npmrc = read('.npmrc')
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('#'))
+        .join('\n');
+      if (!/^\s*include\s*=\s*dev\s*$/m.test(npmrc)) {
+        fail('.npmrc must set `include=dev`; without it a production install omits vite and tsc');
+      }
+      if (/^\s*ignore-scripts\s*=/m.test(npmrc)) {
+        fail(
+          '.npmrc sets `ignore-scripts`, which disables every dependency lifecycle script. ' +
+            'Approve the scripts that are needed via `allowScripts` in package.json instead',
+        );
+      }
+      if (/^\s*cache-dir\s*=/m.test(npmrc)) {
+        fail('.npmrc sets `cache-dir`, which npm no longer recognises; use `cache`');
+      }
+    }
+
     // The API must build only the API, and the web service only the web.
     if (api?.buildCommand && !String(api.buildCommand).includes('-w @relay/api')) {
       fail(
