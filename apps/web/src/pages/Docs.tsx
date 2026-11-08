@@ -6,6 +6,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { relTime } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { QueryFailure } from '../components/QueryFailure';
+import { useQueryState } from '../lib/query-state';
 import { Badge, Button, Card, Input, Skeleton } from '../components/ui';
 
 const KIND_ICON: Record<string, keyof typeof Icons> = {
@@ -13,11 +15,15 @@ const KIND_ICON: Record<string, keyof typeof Icons> = {
 };
 
 export default function Docs() {
-  const { data, isLoading } = useQuery({ queryKey: ['docs'], queryFn: () => api.docs() });
+  const docs = useQuery({ queryKey: ['docs'], queryFn: () => api.docs() });
+  const docState = useQueryState(docs);
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
 
-  if (isLoading || !data) return <div className="p-5"><Skeleton className="h-8 w-44" /><Skeleton className="mt-4 h-72" /></div>;
+  if (docState.state === 'failed') return <QueryFailure error={docState.error} what="the knowledge base" retry={docState.refetch} />;
+  if (docState.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-44" /><Skeleton className="mt-4 h-72" /></div>;
+
+  const data = docState.data;
 
   const filtered = data.filter((d) => !q || d.title.toLowerCase().includes(q.toLowerCase()) || d.body.toLowerCase().includes(q.toLowerCase()));
   const active = data.find((d) => d.id === selected) ?? filtered[0];

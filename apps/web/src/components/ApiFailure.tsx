@@ -15,7 +15,7 @@
  * hunting for a missing server that was running the whole time.
  */
 import type { ReactNode } from 'react';
-import { ApiError, isMisconfigured, type MisconfiguredDetail } from '../lib/api';
+import { ApiError, NetworkError, isMisconfigured, type MisconfiguredDetail } from '../lib/api';
 import { Icons } from './icons';
 
 function Shell({ children }: { children: ReactNode }) {
@@ -31,9 +31,16 @@ function Line({ children }: { children: ReactNode }) {
   return <p className="text-[11.5px] leading-relaxed text-rose-200/90">{children}</p>;
 }
 
-/** `fetch` rejects with a TypeError when the request never completed. */
-function isNetworkFailure(error: unknown): boolean {
-  return error instanceof TypeError || (error instanceof Error && /fetch|network/i.test(error.message));
+/**
+ * The request never produced a response.
+ *
+ * `NetworkError` is raised by the client itself, so it is authoritative — it
+ * already says whether the deadline fired or the transport failed. The `TypeError`
+ * branch stays for anything thrown by a `fetch` that did not go through
+ * `request()` (and for React Query's own serialized copies in devtools).
+ */
+function isNetworkFailure(error: unknown): error is NetworkError | TypeError {
+  return error instanceof NetworkError || error instanceof TypeError;
 }
 
 export function ApiFailure({ error, what }: { error: unknown; what: string }) {
@@ -90,11 +97,27 @@ export function ApiFailure({ error, what }: { error: unknown; what: string }) {
   }
 
   if (isNetworkFailure(error)) {
+    /*
+     * A timeout and a transport failure are different faults with different
+     * fixes, so they get different sentences. Collapsing them into "could not
+     * reach the API" sent people to check connectivity for a request that had
+     * reached the API and was simply never answered.
+     */
+    const timedOut = error instanceof NetworkError && error.code === 'timeout';
     return (
       <Shell>
         <Line>
-          <span className="font-medium">Could not reach the API.</span> {what} The request never
-          completed, so this is a network or routing fault rather than a rejected request.
+          <span className="font-medium">
+            {timedOut ? 'The server did not answer in time.' : 'Could not reach the API.'}
+          </span>{' '}
+          {error instanceof NetworkError ? error.message : `${what} The request never completed, so this is a network or routing fault rather than a rejected request.`}
+        </Line>
+        <Line>
+          <span className="text-rose-300/70">
+            {timedOut
+              ? 'A request that is still running after 20 seconds is not slow, it is stuck. Retrying is safe.'
+              : 'Nothing was changed. If this is a deployment, check that the API service is built and routable.'}
+          </span>
         </Line>
       </Shell>
     );

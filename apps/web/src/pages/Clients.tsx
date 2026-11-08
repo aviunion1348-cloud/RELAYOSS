@@ -5,13 +5,20 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { inr } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { QueryFailure } from '../components/QueryFailure';
+import { useQueryState } from '../lib/query-state';
 import { Avatar, Badge, Card, HEALTH_TONE, Progress, SectionHeader, Skeleton } from '../components/ui';
 
 export default function Clients() {
-  const { data, isLoading } = useQuery({ queryKey: ['clients'], queryFn: api.clients });
-  const { data: pipeline } = useQuery({ queryKey: ['pipeline'], queryFn: api.pipeline });
+  const clients = useQuery({ queryKey: ['clients'], queryFn: api.clients });
+  const pipelineQuery = useQuery({ queryKey: ['pipeline'], queryFn: api.pipeline });
+  const q = useQueryState(clients);
 
-  if (isLoading || !data) return <div className="p-5"><Skeleton className="h-8 w-40" /><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44" />)}</div></div>;
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the client list" retry={q.refetch} />;
+  if (q.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-40" /><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44" />)}</div></div>;
+
+  const data = q.data;
+  const pipeline = pipelineQuery.data;
 
   const totalMrr = data.reduce((a, c) => a + c.mrrCents, 0);
   const atRisk = data.filter((c) => c.health === 'at_risk' || c.health === 'churn');

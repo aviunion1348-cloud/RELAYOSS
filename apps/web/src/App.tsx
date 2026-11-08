@@ -1,8 +1,9 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { auth, type SessionInfo } from './lib/api';
 import { Shell } from './components/Shell';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Skeleton } from './components/ui';
 import Dashboard from './pages/Dashboard';
 import Board from './pages/Board';
@@ -70,24 +71,47 @@ export default function App() {
   );
 }
 
+/**
+ * Every routed screen runs inside its own boundary.
+ *
+ * Written as a function rather than repeated JSX so a future route cannot be
+ * added without one: `<Screen>` is the only shape used below.
+ */
+function Screen({ name, children }: { name: string; children: ReactNode }) {
+  return <ErrorBoundary what={name}>{children}</ErrorBoundary>;
+}
+
 function AppRoutes() {
   return (
     <>
+      {/*
+        Two boundaries, both scoped to content.
+
+        The inner one wraps the routed screen: a render crash in one page leaves
+        the shell intact, so the reader can navigate away instead of staring at a
+        blank tab. The outer one wraps the lazy chunks — a failed dynamic import
+        (a stale deployment, an asset 404 after a redeploy) rejects during the
+        Suspense boundary's render, and without a boundary above it that rejection
+        unmounts the application.
+
+        `resetKeys`-style behaviour is not needed because the boundary remounts:
+        the key is the pathname, so navigating to another route clears the error.
+      */}
       <Suspense fallback={<Loading />}>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/board" element={<Board />} />
-          <Route path="/pipeline" element={<Pipeline />} />
-          <Route path="/clocks" element={<Clocks />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/projects/:id" element={<ProjectDetail />} />
-          <Route path="/workload" element={<Workload />} />
-          <Route path="/qa" element={<QACentre />} />
-          <Route path="/releases" element={<Releases />} />
-          <Route path="/clients" element={<Clients />} />
-          <Route path="/partners" element={<Partners />} />
-          <Route path="/intel" element={<Intelligence />} />
-          <Route path="/docs" element={<Docs />} />
+          <Route path="/" element={<Screen name="Dashboard"><Dashboard /></Screen>} />
+          <Route path="/board" element={<Screen name="Board"><Board /></Screen>} />
+          <Route path="/pipeline" element={<Screen name="Pipeline"><Pipeline /></Screen>} />
+          <Route path="/clocks" element={<Screen name="Clocks"><Clocks /></Screen>} />
+          <Route path="/projects" element={<Screen name="Projects"><Projects /></Screen>} />
+          <Route path="/projects/:id" element={<Screen name="ProjectDetail"><ProjectDetail /></Screen>} />
+          <Route path="/workload" element={<Screen name="Workload"><Workload /></Screen>} />
+          <Route path="/qa" element={<Screen name="QACentre"><QACentre /></Screen>} />
+          <Route path="/releases" element={<Screen name="Releases"><Releases /></Screen>} />
+          <Route path="/clients" element={<Screen name="Clients"><Clients /></Screen>} />
+          <Route path="/partners" element={<Screen name="Partners"><Partners /></Screen>} />
+          <Route path="/intel" element={<Screen name="Intelligence"><Intelligence /></Screen>} />
+          <Route path="/docs" element={<Screen name="Docs"><Docs /></Screen>} />
 
           {/*
             Retired URLs, redirected rather than 404'd.

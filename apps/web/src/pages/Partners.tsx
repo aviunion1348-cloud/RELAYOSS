@@ -5,12 +5,18 @@ import { Icons } from '../components/icons';
 import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { PageHeader } from '../components/Shell';
+import { QueryFailure } from '../components/QueryFailure';
+import { useQueryState } from '../lib/query-state';
 import { Badge, Card, Progress, Ring, SectionHeader, Skeleton } from '../components/ui';
 
 export default function Partners() {
-  const { data, isLoading } = useQuery({ queryKey: ['partners'], queryFn: api.partners });
+  const partners = useQuery({ queryKey: ['partners'], queryFn: api.partners });
+  const q = useQueryState(partners);
 
-  if (isLoading || !data) return <div className="p-5"><Skeleton className="h-8 w-48" /><div className="mt-4 grid gap-3 lg:grid-cols-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-56" />)}</div></div>;
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the partner consoles" retry={q.refetch} />;
+  if (q.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-48" /><div className="mt-4 grid gap-3 lg:grid-cols-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-56" />)}</div></div>;
+
+  const data = q.data;
 
   return (
     <div className="pb-8">
@@ -96,15 +102,15 @@ export default function Partners() {
                   <AreaChart data={p.usage} margin={{ top: 2, right: 0, left: -34, bottom: 0 }}>
                     <defs>
                       <linearGradient id={`gu-${p.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#7c5cff" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="#7c5cff" stopOpacity={0} />
+                        <stop offset="0%" stopColor="#d4a44c" stopOpacity={0.35} />
+                        <stop offset="100%" stopColor="#d4a44c" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid stroke="#1f232d" strokeDasharray="3 3" vertical={false} />
+                    <CartesianGrid stroke="#221d17" strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="day" hide />
-                    <YAxis tick={{ fill: '#6b7382', fontSize: 8.5 }} axisLine={false} tickLine={false} width={34} />
-                    <RTooltip contentStyle={{ background: '#11131a', border: '1px solid #2e3340', borderRadius: 8, fontSize: 10.5 }} labelStyle={{ color: '#b4bccb' }} />
-                    <Area type="monotone" dataKey="apiCalls" stroke="#7c5cff" strokeWidth={1.4} fill={`url(#gu-${p.id})`} />
+                    <YAxis tick={{ fill: '#8a8378', fontSize: 8.5 }} axisLine={false} tickLine={false} width={34} />
+                    <RTooltip contentStyle={{ background: '#0e0c0a', border: '1px solid #3a3128', borderRadius: 8, fontSize: 10.5 }} labelStyle={{ color: '#ded9d0' }} />
+                    <Area type="monotone" dataKey="apiCalls" stroke="#d4a44c" strokeWidth={1.4} fill={`url(#gu-${p.id})`} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

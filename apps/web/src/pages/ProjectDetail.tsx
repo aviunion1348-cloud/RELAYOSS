@@ -6,6 +6,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { clockLabel, inr, relTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { MutationFailure, QueryFailure } from '../components/QueryFailure';
+import { useMutationFailure, useQueryState } from '../lib/query-state';
 import { Avatar, Badge, Button, Card, HEALTH_TONE, Progress, Ring, SectionHeader, Skeleton, Tooltip } from '../components/ui';
 
 const PHASE_STATUS_TONE: Record<string, string> = { done: 'mint', active: 'iris', blocked: 'rose', locked: 'neutral' };
@@ -13,9 +15,23 @@ const PHASE_STATUS_TONE: Record<string, string> = { done: 'mint', active: 'iris'
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
-  const { data: p, isLoading } = useQuery({ queryKey: ['project', id], queryFn: () => api.project(id!), enabled: !!id });
+  /*
+   * No `enabled: !!id`.
+   *
+   * The route is `/projects/:id`, so `id` is always present here; the guard was
+   * defensive but had a cost — a disabled query is pending forever, and a screen
+   * that waits on a query that will never run is the same dead end as one waiting
+   * on a query that failed. If `id` were ever missing, asking the API is the
+   * better answer: it returns 404 and the screen shows that, rather than
+   * shimmering indefinitely.
+   */
+  const projectQuery = useQuery({ queryKey: ['project', id ?? ''], queryFn: () => api.project(id ?? '') });
+  const q = useQueryState(projectQuery);
 
+  const phaseError = useMutationFailure();
   const updatePhase = useMutation({
+    onMutate: () => phaseError.clear(),
+    onError: (e: unknown) => phaseError.set(e),
     mutationFn: (vars: { phaseRowId: string; patch: Record<string, unknown> }) => api.updatePhase(id!, vars.phaseRowId, vars.patch),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', id] });
@@ -23,9 +39,12 @@ export default function ProjectDetail() {
     },
   });
 
-  if (isLoading || !p) {
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="this project" retry={q.refetch} />;
+  if (q.state !== 'ready') {
     return <div className="p-5"><Skeleton className="h-8 w-64" /><div className="mt-4 grid gap-3 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-32" />)}</div></div>;
   }
+
+  const p = q.data;
 
   const gateItems = [
     { key: 'edgeCases', label: '3,500 edge cases catalogued', ok: p.shipGate.edgeCases, detail: `${p.edgeCases.total}/${p.edgeCases.target}` },
@@ -38,6 +57,12 @@ export default function ProjectDetail() {
 
   return (
     <div className="pb-8">
+      {phaseError.error !== null && (
+        <div className="px-5 pt-3">
+          <MutationFailure error={phaseError.error} what="Updating that phase" onDismiss={phaseError.clear} />
+        </div>
+      )}
+
       <PageHeader
         eyebrow={
           <>

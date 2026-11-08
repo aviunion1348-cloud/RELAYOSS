@@ -6,15 +6,22 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { inr, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { QueryFailure } from '../components/QueryFailure';
+import { useQueryState } from '../lib/query-state';
 import { Avatar, Badge, Card, HEALTH_TONE, Progress, SectionHeader, Skeleton } from '../components/ui';
 
 export default function Projects() {
-  const { data, isLoading } = useQuery({ queryKey: ['projects'], queryFn: api.projects });
-  const { data: releases } = useQuery({ queryKey: ['releases'], queryFn: api.releases });
+  const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects });
+  const releasesQuery = useQuery({ queryKey: ['releases'], queryFn: api.releases });
+  const q = useQueryState(projects);
 
-  if (isLoading || !data) {
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the project portfolio" retry={q.refetch} />;
+  if (q.state !== 'ready') {
     return <div className="p-5"><Skeleton className="h-8 w-48" /><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-52" />)}</div></div>;
   }
+
+  const data = q.data;
+  const releases = releasesQuery.data;
 
   const totalBudget = data.reduce((a, p) => a + p.budgetCents, 0);
   const totalLogged = data.reduce((a, p) => a + p.loggedHours, 0);

@@ -11,6 +11,8 @@ import { cls } from '../lib/cls';
 import { dateTime, hours, relTime, shortDate } from '../lib/format';
 import type { AcceptanceStep, TaskDetail } from '../types';
 import { Avatar, Badge, Button, Dot, Input, PRIORITY_TONE, Progress, Select, STATUS_LABEL, STATUS_TONE, Textarea, Tooltip } from './ui';
+import { QueryFailure } from './QueryFailure';
+import { useQueryState } from '../lib/query-state';
 
 const LADDER: Array<{ step: AcceptanceStep; label: string; icon: keyof typeof Icons; blurb: string; role: string }> = [
   { step: 'dev_complete', label: 'Dev complete', icon: 'Code2', blurb: 'Implementation merged behind a flag', role: 'Engineer' },
@@ -40,7 +42,9 @@ function useToast() {
 
 export function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const { data: task, isLoading } = useQuery({ queryKey: ['task', taskId], queryFn: () => api.task(taskId) });
+  const taskQuery = useQuery({ queryKey: ['task', taskId], queryFn: () => api.task(taskId) });
+  const tq = useQueryState(taskQuery);
+  const task = tq.data;
   const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: api.meta });
   const [comment, setComment] = useState('');
   const [gateDraft, setGateDraft] = useState<Record<string, string>>({});
@@ -77,18 +81,41 @@ export function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () =>
   });
   const addComment = useMutation({
     mutationFn: (body: string) => api.comment(taskId, body),
-    onSuccess: () => { setComment(''); invalidate(); },
+    onSuccess: () => { setComment(''); setErrored(null); invalidate(); },
+    onError,
   });
   const toggleCheck = useMutation({
     mutationFn: (vars: { itemId: string; done: boolean }) => api.toggleChecklist(taskId, vars.itemId, vars.done),
-    onSuccess: invalidate,
+    onSuccess: () => { setErrored(null); invalidate(); },
+    onError,
   });
 
-  if (isLoading || !task) {
+  /*
+   * The drawer is opened by clicking a specific card, so a failure here has to
+   * name the card and offer a retry. It used to render one shimmering bar inside
+   * an open drawer — indistinguishable from slow loading, on a panel the reader
+   * cannot close except by clicking outside.
+   */
+  if (tq.state === 'failed') {
     return (
       <>
         <div className="fixed inset-0 z-40 bg-ink-950/60 backdrop-blur-[2px]" onClick={onClose} />
-        <aside className="fixed right-0 top-0 z-50 h-full w-[min(760px,96vw)] border-l border-ink-600 bg-ink-900 p-6">
+        <aside className="glass-strong fixed right-0 top-0 z-50 flex h-full w-[min(760px,96vw)] flex-col border-l border-gold-600/20">
+          <div className="flex items-center justify-between border-b border-ink-600 px-4 py-3">
+            <p className="text-[13px] font-semibold text-mist-100">Task {taskId}</p>
+            <Button size="xs" variant="ghost" icon="X" onClick={onClose}>Close</Button>
+          </div>
+          <QueryFailure error={tq.error} what={`task ${taskId}`} retry={tq.refetch} />
+        </aside>
+      </>
+    );
+  }
+
+  if (tq.state !== 'ready') {
+    return (
+      <>
+        <div className="fixed inset-0 z-40 bg-ink-950/60 backdrop-blur-[2px]" onClick={onClose} />
+        <aside className="glass-strong fixed right-0 top-0 z-50 h-full w-[min(760px,96vw)] border-l border-gold-600/20 p-6">
           <div className="shimmer h-6 w-56 rounded" />
         </aside>
       </>

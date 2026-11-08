@@ -709,9 +709,18 @@ export async function registerRoutes(
         `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [timer.entity_id, ...cw.params]);
       visible = Number(row?.c ?? 0) > 0;
     } else if (timer.entity_type === 'task') {
+      /*
+       * A task timer's `entity_id` is the task's human key (`NRTH-102`), because
+       * that is the identifier a person quotes when a turnover clock is late. The
+       * guard used to compare it against `tasks.id` alone, so every seeded clock
+       * resolved to no row and every resolve attempt answered 404 for a timer the
+       * list endpoint had just displayed. Both identifiers are accepted: callers
+       * that create timers programmatically use the id.
+       */
       const tw = tasksWhere(scope, 't');
       const row = await database.get<{ c: number }>(
-        `SELECT COUNT(*) AS c FROM tasks t WHERE t.id = ? AND (${tw.sql})`, [timer.entity_id, ...tw.params]);
+        `SELECT COUNT(*) AS c FROM tasks t WHERE (t.id = ? OR t.key = ?) AND (${tw.sql})`,
+        [timer.entity_id, timer.entity_id, ...tw.params]);
       visible = Number(row?.c ?? 0) > 0;
     } else if (timer.entity_type === 'phase') {
       // A phase clock is keyed by the phase catalogue id (`ph_build`), which may
@@ -727,15 +736,39 @@ export async function registerRoutes(
         if (Number(hit?.c ?? 0) > 0) { visible = true; break; }
       }
     } else if (timer.entity_type === 'release') {
-      const row = await database.get<{ project_id: string }>('SELECT project_id FROM releases WHERE id = ?', [timer.entity_id]);
+      /*
+       * Release clocks are keyed by the version the client was promised
+       * (`v3.1.0`), not by the release row id.
+       */
+      const row = await database.get<{ project_id: string }>(
+        'SELECT project_id FROM releases WHERE id = ? OR version = ?', [timer.entity_id, timer.entity_id]);
       if (row?.project_id) {
         const pw = projectsWhere(scope, 'p');
         const hit = await database.get<{ c: number }>(
           `SELECT COUNT(*) AS c FROM projects p WHERE p.id = ? AND (${pw.sql})`, [row.project_id, ...pw.params]);
         visible = Number(hit?.c ?? 0) > 0;
       }
+    } else if (timer.entity_type === 'deal') {
+      /*
+       * Deal clocks had no branch here at all, so resolving a consultation clock
+       * or a plan-revision clock — both of which the Clocks screen offers buttons
+       * for — answered 404 unconditionally. A deal is visible when its client is.
+       */
+      const row = await database.get<{ client_id: string }>('SELECT client_id FROM deals WHERE id = ?', [timer.entity_id]);
+      if (row?.client_id) {
+        const cw = clientsWhere(scope, 'c');
+        const hit = await database.get<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [row.client_id, ...cw.params]);
+        visible = Number(hit?.c ?? 0) > 0;
+      }
     } else if (timer.entity_type === 'qa') {
-      const row = await database.get<{ project_id: string }>('SELECT project_id FROM qa_reports WHERE id = ?', [timer.entity_id]);
+      /*
+       * A QA clock is keyed by the report's id. It used to be seeded as 'QA-2201',
+       * a number this schema does not have, so the clock named a report that did
+       * not exist and its resolve buttons 404'd; the seed now uses a real id.
+       */
+      const row = await database.get<{ project_id: string }>(
+        'SELECT project_id FROM qa_reports WHERE id = ?', [timer.entity_id]);
       if (row?.project_id) {
         const pw = projectsWhere(scope, 'p');
         const hit = await database.get<{ c: number }>(

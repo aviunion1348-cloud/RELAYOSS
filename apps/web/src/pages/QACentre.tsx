@@ -6,6 +6,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { relTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { MutationFailure, QueryFailure } from '../components/QueryFailure';
+import { useMutationFailure, useQueryState } from '../lib/query-state';
 import { Badge, Button, Card, Input, SectionHeader, Segmented, Select, Skeleton } from '../components/ui';
 
 const SEV_TONE: Record<string, string> = { p0: 'rose', p1: 'rose', p2: 'amber', p3: 'sky', p4: 'neutral' };
@@ -15,24 +17,37 @@ export default function QACentre() {
   const qc = useQueryClient();
   const [status, setStatus] = useState<'all' | 'open' | 'verified'>('all');
   const [showNew, setShowNew] = useState(false);
-  const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: api.meta });
-  const { data, isLoading } = useQuery({ queryKey: ['qa'], queryFn: () => api.qa() });
+  const metaQuery = useQuery({ queryKey: ['meta'], queryFn: api.meta });
+  const meta = metaQuery.data;
+  const qa = useQuery({ queryKey: ['qa'], queryFn: () => api.qa() });
+  const q = useQueryState(qa);
 
+  const updateError = useMutationFailure();
   const update = useMutation({
+    onMutate: () => updateError.clear(),
+    onError: (e: unknown) => updateError.set(e),
     mutationFn: (vars: { id: string; patch: Record<string, unknown> }) => api.updateQA(vars.id, vars.patch),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['qa'] }); qc.invalidateQueries({ queryKey: ['clocks'] }); },
   });
 
-  if (isLoading || !data) return <div className="p-5"><Skeleton className="h-8 w-52" /><Skeleton className="mt-4 h-72" /></div>;
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the QA register" retry={q.refetch} />;
+  if (q.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-52" /><Skeleton className="mt-4 h-72" /></div>;
 
-  const filtered = data.filter((q) =>
-    status === 'all' ? true : status === 'open' ? !['verified', 'wont_fix', 'duplicate'].includes(q.status) : q.status === 'verified',
+  const data = q.data;
+  const filtered = data.filter((row) =>
+    status === 'all' ? true : status === 'open' ? !['verified', 'wont_fix', 'duplicate'].includes(row.status) : row.status === 'verified',
   );
-  const overdue = data.filter((q) => q.overdue);
-  const openP0 = data.filter((q) => ['p0', 'p1'].includes(q.severity) && !['verified', 'wont_fix', 'duplicate'].includes(q.status));
+  const overdue = data.filter((row) => row.overdue);
+  const openP0 = data.filter((row) => ['p0', 'p1'].includes(row.severity) && !['verified', 'wont_fix', 'duplicate'].includes(row.status));
 
   return (
     <div className="pb-8">
+      {updateError.error !== null && (
+        <div className="px-5 pt-3">
+          <MutationFailure error={updateError.error} what="Updating that report" onDismiss={updateError.clear} />
+        </div>
+      )}
+
       <PageHeader
         eyebrow={<><Icons.ShieldCheck size={11} /> Quality engineering</>}
         title="QA Centre"
@@ -141,6 +156,13 @@ function NewReport({
 }: { projects: Array<{ id: string; name: string }>; users: Array<{ id: string; name: string }>; onClose: () => void; onDone: () => void }) {
   const [form, setForm] = useState({ projectId: projects[0]?.id ?? '', title: '', severity: 'p2', kind: 'bug', reproduction: '', body: '', assigneeId: '' });
   const create = useMutation({ mutationFn: () => api.createQA({ ...form, assigneeId: form.assigneeId || null }), onSuccess: onDone });
+  /*
+   * A rejected submission used to leave the dialog exactly as it was: the button
+   * stopped spinning and nothing else changed, so the reader assumed a slow
+   * network and pressed it again. The reason is now shown inside the dialog,
+   * where the fix (a missing field, a bad project id) is actionable.
+   */
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm animate-fade" onClick={onClose}>
       <div className="w-full max-w-[540px] rounded-xl border border-ink-500 bg-ink-850 p-4" onClick={(e) => e.stopPropagation()}>
@@ -171,6 +193,7 @@ function NewReport({
         </div>
         <div className="mt-3 flex justify-end gap-1.5">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {create.error && <div className="pb-2"><MutationFailure error={create.error} what="Submitting that report" /></div>}
           <Button variant="primary" disabled={form.title.length < 4 || create.isPending} loading={create.isPending} onClick={() => create.mutate()}>Submit report</Button>
         </div>
       </div>

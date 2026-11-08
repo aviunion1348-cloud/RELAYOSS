@@ -9,6 +9,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { clockLabel, dateTime, relTime } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { MutationFailure, QueryFailure } from '../components/QueryFailure';
+import { useMutationFailure, useQueryState } from '../lib/query-state';
 import { Badge, Button, Card, Dot, Empty, Progress, Ring, SectionHeader, Skeleton, Tooltip } from '../components/ui';
 
 const SCOPE_ICON: Record<string, keyof typeof Icons> = {
@@ -17,25 +19,35 @@ const SCOPE_ICON: Record<string, keyof typeof Icons> = {
 
 export default function Clocks() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ['clocks'], queryFn: api.clocks, refetchInterval: 30_000 });
+  const clocks = useQuery({ queryKey: ['clocks'], queryFn: api.clocks, refetchInterval: 30_000 });
+  const q = useQueryState(clocks);
+
+  const resolveError = useMutationFailure();
+  const sweepError = useMutationFailure();
 
   const resolve = useMutation({
+    onMutate: () => resolveError.clear(),
     mutationFn: (vars: { id: string; outcome: string }) => api.resolveTimer(vars.id, vars.outcome, 'Resolved from the clocks console'),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['clocks'] });
       qc.invalidateQueries({ queryKey: ['clocks-live'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
+    onError: (e: unknown) => resolveError.set(e),
   });
 
   const sweep = useMutation({
     mutationFn: () => api.sweepClocks(),
+    onMutate: () => sweepError.clear(),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['clocks'] }),
+    onError: (e: unknown) => sweepError.set(e),
   });
 
-  if (isLoading || !data) {
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the turnover clocks" retry={q.refetch} />;
+  if (q.state !== 'ready') {
     return <div className="p-5"><Skeleton className="h-8 w-56" /><div className="mt-4 grid gap-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-16" />)}</div></div>;
   }
+  const data = q.data;
 
   const running = data.timers.filter((t) => t.outcome === 'running');
   const missed = data.timers.filter((t) => t.outcome === 'missed');
@@ -58,6 +70,17 @@ export default function Clocks() {
           </>
         }
       />
+
+      {sweepError.error !== null && (
+        <div className="px-5 pt-3">
+          <MutationFailure error={sweepError.error} what="Sweeping the clocks" onDismiss={sweepError.clear} />
+        </div>
+      )}
+      {resolveError.error !== null && (
+        <div className="px-5 pt-3">
+          <MutationFailure error={resolveError.error} what="Resolving that clock" onDismiss={resolveError.clear} />
+        </div>
+      )}
 
       <div className="grid gap-3 px-5 pt-4 xl:grid-cols-[1.2fr_1fr]">
         {/* live timers */}

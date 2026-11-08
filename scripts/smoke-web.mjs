@@ -121,6 +121,7 @@ for (const [name, , route, endpoints] of pages) {
     console.log(\`FAIL \${name.padEnd(14)} \${e.message}\`);
   }
 }
+
 process.exit(failed ? 1 : 0);
 `;
 
@@ -332,6 +333,272 @@ execFileSync(
 );
 execFileSync(process.execPath, ['--no-warnings', FAILURE_OUT], { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' });
 
+
+/**
+ * The failure pass: what a screen shows when its data does not arrive.
+ *
+ * This exists because of a real defect that every other check in this repository
+ * passed straight through. Each screen rendered its content only when a query had
+ * data, and rendered a loading skeleton otherwise:
+ *
+ *     if (isLoading || !data) return <Skeleton />;
+ *
+ * A *failed* query has no data, so the skeleton never went away. The application
+ * opened on the dashboard, the sidebar worked, every page was reachable — and
+ * every panel buffered forever with no error and no timeout. The API-level tests
+ * could not see it (they assert status codes), and the happy-path render above
+ * could not see it (it seeds the cache with successful responses first).
+ *
+ * So this pass does the opposite of the happy path: it renders each screen with
+ * its queries in an error state and asserts the reader is told, can retry, and is
+ * not shown a loading placeholder. It is a render assertion, not a browser test;
+ * it cannot prove a spinner is *animated* away, only that the markup a failed
+ * screen produces is an error rather than a skeleton.
+ */
+const failStateCheck = `
+import { renderToString } from 'react-dom/server';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Shell } from ${JSON.stringify(path.join(ROOT, 'apps/web/src/components/Shell'))};
+import { ApiError, NetworkError, requestWithDeadline } from ${JSON.stringify(path.join(ROOT, 'apps/web/src/lib/api'))};
+${PAGES.map(([name, file]) => `import ${name} from ${JSON.stringify(path.join(ROOT, `apps/web/src/pages/${file}`))};`).join('\n')}
+
+const SCREENS = ${JSON.stringify(PAGES)};
+const COMPONENTS = { Dashboard, Board, Pipeline, Clocks, Projects, ProjectDetail, Workload, QACentre, Releases, Clients, Partners, Intelligence, Docs };
+
+/*
+ * The error a real deployment produces when it has no data: a 503 whose body
+ * carries the remedy. Rendered through the actual ApiFailure component, so the
+ * text being asserted is the text a person would read.
+ */
+const dbError = new ApiError(503, 'misconfigured', 'The database is not configured', {
+  code: 'misconfigured',
+  stage: 'database',
+  summary: 'No DATABASE_URL is set',
+  missing: ['DATABASE_URL'],
+  invalid: [],
+  optional: [],
+  remedy: ['Set DATABASE_URL to a PostgreSQL connection string'],
+});
+
+let bad = 0;
+function check(label, ok, detail) {
+  if (!ok) bad++;
+  console.log((ok ? 'ok  ' : 'FAIL') + ' fail-state/' + label.padEnd(15) + ' ' + (detail ?? ''));
+}
+
+for (const [name, , route, endpoints] of SCREENS) {
+  const Page = COMPONENTS[name];
+  const qc = new QueryClient({
+    /*
+     * Hold the failure still. With a short staleTime the observer refetches on
+     * mount, which flips the entry back to 'pending' and the screen legitimately
+     * renders its skeleton again — the check would then be asserting nothing. In
+     * a browser the same refetch happens, and its *result* is what a real user
+     * sees; here the question is only what a failed query renders.
+     */
+    defaultOptions: {
+      /* Client-level refetchOnMount:false is the one that matters: it survives a
+         screen that passes its own enabled, which a per-query default does not. */
+      queries: { retry: false, staleTime: Infinity, refetchOnMount: false, refetchOnWindowFocus: false, refetchInterval: false },
+      mutations: { retry: false },
+    },
+  });
+
+  /*
+   * Put every query this screen issues into the failed state, under the key the
+   * screen actually uses. 'setQueryData(key, undefined)' first creates the entry;
+   * the state override then makes it indistinguishable from a rejection React
+   * Query produced itself.
+   */
+  const keys = [[['meta']], [['session']]];
+  for (const ep of endpoints) {
+    const p = ep.split('?')[0];
+    if (p === '/tasks') {
+      keys.push([['tasks', '', { priority: [], mine: false, labelId: '', q: '', risk: 'all' }]]);
+      keys.push([['tasks']]);
+    } else if (p === '/planner') keys.push([['planner', 21]]);
+    else if (p === '/activity') keys.push([['activity']]);
+    /*
+     * A detail screen keys its query by the route parameter, not by the resource
+     * name: '/projects/pr_northwind' is ['project', 'pr_northwind']. Registering
+     * only ['project'] left that screen pending and it failed this check for a
+     * reason that had nothing to do with the code under test.
+     */
+    else if (p.startsWith('/projects/')) keys.push([['project', p.slice('/projects/'.length)]]);
+    else keys.push([[p.replace('/', '').split('?')[0]]]);
+  }
+  for (const [key] of keys) {
+    /*
+     * Two details decide whether this check tests anything at all:
+     *
+     *  - build the entry, never setQueryData(undefined) — that DELETES the query,
+     *    and the screen then renders in its pending state for the wrong reason;
+     *  - disable the query. React Query treats "no data" as always stale
+     *    (isStaleByTime returns true when data is undefined), so a mounted
+     *    observer starts a fetch on mount and the screen reads as pending while
+     *    that fetch is in flight — which is exactly the state this check is not
+     *    about. Disabling it holds the failed result still so the render sees it.
+     */
+    /*
+     * refetchOnMount: false as a default, plus an observer-level override below:
+     * a screen is free to pass its own enabled (one does), and the observer
+     * re-resolves the mount refetch against its own options, so the default alone
+     * is not enough to hold the failed state still.
+     */
+    qc.setQueryDefaults(key, { enabled: false, refetchOnMount: false, staleTime: Infinity });
+    const entry = qc.getQueryCache().build(qc, { queryKey: key });
+    entry.setState({
+      status: 'error', data: undefined, error: dbError,
+      errorUpdateCount: 1, errorUpdatedAt: Date.now(), fetchStatus: 'idle',
+    });
+  }
+
+  let html = '';
+  let threw = null;
+  try {
+    /*
+     * Rendered through a real Route, not as a bare element: a detail screen reads
+     * its identifier from useParams, and without a matching Route that param is
+     * undefined, so the screen keys its query differently and this check would
+     * fail for a reason that has nothing to do with how it behaves.
+     */
+    html = renderToString(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={[route]}>
+          <Routes>
+            <Route
+              path={route.startsWith('/projects/') ? '/projects/:id' : route}
+              element={<Shell session={undefined}><Page /></Shell>}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  } catch (e) {
+    threw = e;
+  }
+
+  const told = /could not load|did not answer|could not reach|rejected the request|not configured yet/i.test(html);
+  const retry = /retry/i.test(html);
+  const furniture = html.length > 4000;
+  const noSkeleton = !/shimmer/.test(html);
+
+  const detail = [
+    threw ? 'threw ' + threw.message : null,
+    !told ? 'no message explaining the failure' : null,
+    !retry ? 'no retry offered' : null,
+    !furniture ? 'rendered almost nothing (' + html.length + ' bytes)' : null,
+    !noSkeleton ? 'rendered a loading skeleton for a failed query' : null,
+  ].filter(Boolean).join('; ');
+
+  check(name, !threw && told && retry && furniture && noSkeleton, detail || 'error shown, retry offered, no skeleton');
+}
+
+/*
+ * A request that never answers must not become an endless wait.
+ *
+ * The deadline in 'request()' is the only thing standing between a stuck request
+ * and the symptom this pass exists to catch, and a deadline that is never
+ * exercised is a deadline that silently stops working. TEST-NET-1 (192.0.2.0/24)
+ * is reserved and never answers, so the call can only end by the deadline.
+ */
+{
+  const started = Date.now();
+  let code = null;
+  try {
+    await requestWithDeadline('/nothing', { deadlineMs: 150, base: 'http://192.0.2.1:9' });
+  } catch (e) {
+    code = e && e.code;
+  }
+  const settled = Date.now() - started;
+  const ok = (code === 'timeout' || code === 'network') && settled < 5000;
+  check('deadline', ok, ok
+    ? 'abandoned after ' + settled + 'ms (' + code + '), so the screen cannot wait forever'
+    : 'did not give up: ' + code + ' after ' + settled + 'ms');
+}
+
+/*
+ * A 200 that is not JSON must be a failure, not data.
+ *
+ * This is the other buffering path, and on a real deployment the likeliest one:
+ * when /api is routed to the web service instead of the API service, the
+ * platform answers every API call with the index.html of the SPA and a 200. The
+ * status check passed, the body parsed to null, and the component received
+ * undefined as its data — which its data-presence check read as still loading, so
+ * the screen buffered with no error to show. Here the client is pointed at a stub
+ * server that returns exactly that, and must report a routing fault.
+ */
+{
+  const http = await import('node:http');
+  const stub = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<!doctype html><html><body><div id="root"></div></body></html>');
+  });
+  await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+  const port = stub.address().port;
+  let code = null;
+  let message = '';
+  try {
+    await requestWithDeadline('/api/dashboard', { base: 'http://127.0.0.1:' + port });
+  } catch (e) {
+    code = e && e.code;
+    message = (e && e.message) || '';
+  }
+  stub.close();
+  const ok = code === 'network' && /routing fault|HTML page/i.test(message);
+  check('html-200', ok, ok
+    ? 'an HTML page served at /api is reported as a routing fault, not accepted as data'
+    : 'a non-JSON 200 was not rejected: ' + code + ' ' + message);
+}
+
+/*
+ * The timeout must render as a timeout, not as a generic network fault: the two
+ * have different remedies, and conflating them is the mistake ApiFailure was
+ * written to stop.
+ */
+{
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnMount: false } } });
+  qc.setQueryDefaults(['dashboard'], { enabled: false });
+  const dashEntry = qc.getQueryCache().build(qc, { queryKey: ['dashboard'] });
+  dashEntry.setState({
+    status: 'error', data: undefined, error: new NetworkError('timeout', 'No response from the server within 20s.'),
+    errorUpdateCount: 1, errorUpdatedAt: Date.now(), fetchStatus: 'idle',
+  });
+  const html = renderToString(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={['/']}>
+        <Shell session={undefined}><Dashboard /></Shell>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  const saysTimeout = /did not answer in time/i.test(html);
+  check('timeout-text', saysTimeout, saysTimeout ? 'reports that the server did not answer, not that the network failed' : 'timeout was described as a network fault');
+}
+
+if (bad) {
+  console.error('\\n' + bad + ' failure-state check(s) failed — a broken screen can still look like a loading one');
+  process.exit(1);
+}
+`;
+
+fs.writeFileSync(path.join(WORK, 'failstate.mtsx'), failStateCheck, 'utf8');
+const FAILSTATE_OUT = path.join(WORK, 'failstate.mjs');
+execFileSync(
+  fs.existsSync(ESBUILD) ? ESBUILD : 'esbuild',
+  [
+    path.join(WORK, 'failstate.mtsx'),
+    '--bundle', '--platform=node', '--format=esm', `--outfile=${FAILSTATE_OUT}`,
+    '--loader:.mtsx=tsx', '--jsx=automatic', '--log-level=error',
+    '--external:react', '--external:react-dom', '--external:react-dom/server',
+    '--external:react-router-dom', '--external:@tanstack/react-query',
+    '--external:lucide-react', '--external:recharts',
+  ],
+  { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' },
+);
+execFileSync(process.execPath, ['--no-warnings', FAILSTATE_OUT], { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' });
+
 console.log('\n✓ all screens render with real API data');
 console.log('✓ API failures are described accurately in the dashboard');
+console.log('✓ every screen shows an error and a retry when its data fails to load');
 stopApi();

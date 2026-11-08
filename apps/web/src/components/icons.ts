@@ -71,6 +71,7 @@ import {
   RefreshCcw,
   RefreshCw,
   Rocket,
+  RotateCw,
   Search,
   Send,
   ShieldAlert,
@@ -185,6 +186,7 @@ export const Icons = {
   Wrench,
   X,
   XCircle,
+  RotateCw,
   Zap,
 };
 

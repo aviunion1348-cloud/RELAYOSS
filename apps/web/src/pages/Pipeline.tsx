@@ -10,6 +10,8 @@ import { api } from '../lib/api';
 import { cls } from '../lib/cls';
 import { inr, relTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
+import { MutationFailure, QueryFailure } from '../components/QueryFailure';
+import { useMutationFailure, useQueryState } from '../lib/query-state';
 import { Avatar, Badge, Button, Card, Dot, Empty, Progress, SectionHeader, Segmented, Skeleton, Tooltip } from '../components/ui';
 import type { Deal } from '../types';
 
@@ -19,11 +21,15 @@ const PHASE_TONE: Record<string, string> = {
 
 export default function Pipeline() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ['pipeline'], queryFn: api.pipeline });
+  const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: api.pipeline });
+  const q = useQueryState(pipeline);
   const [view, setView] = useState<'board' | 'table'>('board');
   const [selected, setSelected] = useState<Deal | null>(null);
 
+  const moveError = useMutationFailure();
   const move = useMutation({
+    onMutate: () => moveError.clear(),
+    onError: (e: unknown) => moveError.set(e),
     mutationFn: (vars: { id: string; stageKey: string }) => api.updateDeal(vars.id, { stageKey: vars.stageKey }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pipeline'] });
@@ -32,12 +38,8 @@ export default function Pipeline() {
     },
   });
 
-  const grouped = useMemo(() => {
-    if (!data) return [];
-    return data.columns.filter((c) => c.key !== 'closed' || c.deals.length > 0);
-  }, [data]);
-
-  if (isLoading || !data) {
+  if (q.state === 'failed') return <QueryFailure error={q.error} what="the pipeline" retry={q.refetch} />;
+  if (q.state !== 'ready') {
     return (
       <div className="p-5">
         <Skeleton className="h-8 w-48" />
@@ -47,10 +49,23 @@ export default function Pipeline() {
     );
   }
 
+  const data = q.data;
+  const grouped = useMemo(() => {
+    if (!data) return [];
+    return data.columns.filter((c) => c.key !== 'closed' || c.deals.length > 0);
+  }, [data]);
+
+
   const s = data.summary;
 
   return (
     <div className="pb-8">
+      {moveError.error !== null && (
+        <div className="px-5 pt-3">
+          <MutationFailure error={moveError.error} what="Moving that deal" onDismiss={moveError.clear} />
+        </div>
+      )}
+
       <PageHeader
         eyebrow={<><Icons.GitBranch size={11} /> Revenue pipeline</>}
         title="Consultation → Kickoff"
