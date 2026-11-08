@@ -81,8 +81,11 @@ export async function resolveTimer(db: Db, timerId: string, outcome: 'met' | 'mi
 /** Sweep: mark every overdue running timer as missed and raise notifications. */
 export async function sweepTimers(db: Db): Promise<number> {
   const now = nowIso();
+  // A paused timer is waiting on somebody else. Sweeping it would breach the
+  // agency for the client's delay, which is precisely the failure mode the
+  // board warns about.
   const overdue = await db.all<Record<string, any>>(
-    "SELECT * FROM sla_timers WHERE outcome = 'running' AND due_at < ?",
+    "SELECT * FROM sla_timers WHERE outcome = 'running' AND paused_at IS NULL AND due_at < ?",
     [now],
   );
   await db.tx(async () => {
@@ -190,4 +193,97 @@ export async function liveTimers(db: Db, limit = 50) {
       targetHours: r.target_hours,
     };
   });
+}
+
+/* ---------------------------------------------------------------------------
+ * Pause / resume.
+ *
+ * A clock's `outcome` is the terminal verdict (met/missed/waived); its
+ * `paused_at` is a transient sub-state. Keeping them separate means a pause can
+ * never be mistaken for completion, and a sweep can never close a paused timer.
+ *
+ * Authorised pause time is banked in `paused_ms` and excluded from the elapsed
+ * measurement. When a pause ends, `due_at` is pushed forward by exactly the time
+ * the clock spent paused — so a clock paused for two days does not silently
+ * breach while waiting on a client.
+ *
+ * Pause categories are recorded because "we were waiting on the client" and "we
+ * were slow" are different facts, and only one of them is the agency's fault:
+ *   client   — waiting on the client (does not count against us)
+ *   internal — our own delay (counts; recorded so it cannot be disguised)
+ *   vendor   — third-party dependency
+ * -------------------------------------------------------------------------*/
+
+export type PauseCategory = 'client' | 'internal' | 'vendor';
+
+export async function pauseTimerFor(
+  db: Db,
+  entityType: string,
+  entityId: string,
+  reason: string,
+  options: { category?: PauseCategory; actorId?: string | null } = {},
+): Promise<Record<string, any> | null> {
+  const timer = await db.get<Record<string, any>>(
+    "SELECT * FROM sla_timers WHERE entity_type = ? AND entity_id = ? AND outcome = 'running' ORDER BY started_at DESC",
+    [entityType, entityId],
+  );
+  if (!timer) return null;
+  // Idempotent: pausing an already-paused clock is a no-op, not a second event.
+  if (timer.paused_at) return timer;
+  const category = options.category ?? 'client';
+  const now = nowIso();
+  await db.run(
+    'UPDATE sla_timers SET paused_at = ?, pause_reason = ?, pause_category = ?, paused_by = ? WHERE id = ?',
+    [now, reason, category, options.actorId ?? null, timer.id],
+  );
+  await db.run(
+    `INSERT INTO clock_events (id, timer_id, clock_key, kind, reason, category, actor_id, created_at)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [id('cev'), timer.id, timer.clock_key, 'paused', reason, category, options.actorId ?? null, now],
+  );
+  return (await db.get('SELECT * FROM sla_timers WHERE id = ?', [timer.id])) ?? null;
+}
+
+export async function resumeTimerFor(
+  db: Db,
+  entityType: string,
+  entityId: string,
+  options: { actorId?: string | null } = {},
+): Promise<Record<string, any> | null> {
+  const timer = await db.get<Record<string, any>>(
+    "SELECT * FROM sla_timers WHERE entity_type = ? AND entity_id = ? AND outcome = 'running' ORDER BY started_at DESC",
+    [entityType, entityId],
+  );
+  if (!timer || !timer.paused_at) return timer ?? null;
+  const pausedAt = toDate(timer.paused_at);
+  const pausedFor = pausedAt ? Math.max(0, Date.now() - pausedAt.getTime()) : 0;
+  const total = Number(timer.paused_ms ?? 0) + pausedFor;
+  // Push the deadline forward by exactly the paused duration.
+  const due = toDate(timer.due_at);
+  const newDue = due ? new Date(due.getTime() + pausedFor) : null;
+  const warn = toDate(timer.warn_at);
+  const newWarn = warn ? new Date(warn.getTime() + pausedFor) : null;
+  await db.run(
+    `UPDATE sla_timers SET paused_at = NULL, paused_ms = ?,
+       due_at = COALESCE(?, due_at), warn_at = COALESCE(?, warn_at)
+     WHERE id = ?`,
+    [total, newDue ? newDue.toISOString().slice(0, 19).replace('T', ' ') : null,
+      newWarn ? newWarn.toISOString().slice(0, 19).replace('T', ' ') : null, timer.id],
+  );
+  await db.run(
+    `INSERT INTO clock_events (id, timer_id, clock_key, kind, reason, category, actor_id, created_at)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [id('cev'), timer.id, timer.clock_key, 'resumed', `${Math.round(pausedFor / 60000)}m paused`, timer.pause_category ?? '', options.actorId ?? null, nowIso()],
+  );
+  return (await db.get('SELECT * FROM sla_timers WHERE id = ?', [timer.id])) ?? null;
+}
+
+/** Complete history for one timer, oldest first. */
+export async function clockHistory(db: Db, timerId: string) {
+  return db.all<Record<string, any>>(
+    `SELECT e.*, u.full_name AS actor_name FROM clock_events e
+       LEFT JOIN users u ON u.id = e.actor_id
+      WHERE e.timer_id = ? ORDER BY e.id ASC`,
+    [timerId],
+  );
 }

@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resetPostgres } from './helpers/fresh.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '../../..');
@@ -39,15 +40,11 @@ async function memoryDb() {
     // Policy tables are seeded by migrations (0005) and are *governance*, not
     // fixtures: truncating them would silently disable turnover enforcement and
     // make every clock lookup return "unknown". They are preserved.
-    const KEEP = new Set([
-      'schema_migrations', 'turnover_gates', 'sla_clocks', 'sla_policies',
-      'retention_policies', 'phases', 'pipeline_stages',
-    ]);
-    const rows = await db.all("SELECT tablename AS n FROM pg_tables WHERE schemaname='public'");
-    const wipe = rows.map((r) => r.n).filter((n) => !KEEP.has(n));
-    if (wipe.length) {
-      await db.exec(`TRUNCATE ${wipe.map((n) => `"${n}"`).join(', ')} RESTART IDENTITY CASCADE`);
-    }
+    // Shared reset (helpers/fresh.ts): one list of migration-seeded policy
+    // tables, so a suite added later cannot truncate a catalogue that another
+    // suite depends on. `domain` previously kept its own list, which omitted
+    // the lifecycle stage catalogue.
+    await resetPostgres(db);
   } else {
     db = new SqliteDb(':memory:');
     openDbs.push(db);

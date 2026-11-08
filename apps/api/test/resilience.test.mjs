@@ -19,6 +19,7 @@ import assert from 'node:assert/strict';
 import { SqliteDb } from '../src/db/sqlite.ts';
 import { PostgresDb } from '../src/db/postgres.ts';
 import { migrate, schemaVersion } from '../src/db/migrate.ts';
+import { resetPostgres } from './helpers/fresh.ts';
 import { createTask, updateTask, recordAcceptance, taskDetail, evaluateTask } from '../src/services/tasks.ts';
 import { startTimer, resolveTimer, sweepTimers } from '../src/services/clocks.ts';
 
@@ -41,9 +42,9 @@ async function freshDb() {
     db = new PostgresDb(pgUrl);
     open.push(db);
     // (Sqlite handles are tracked below only when they are not closed by a test.)
-    const tables = await db.all("SELECT tablename AS n FROM pg_tables WHERE schemaname='public'");
-    const wipe = tables.map((r) => r.n).filter((n) => !KEEP.has(n));
-    if (wipe.length) await db.exec(`TRUNCATE ${wipe.map((n) => `"${n}"`).join(', ')} RESTART IDENTITY CASCADE`);
+    // Shared reset: policy tables (incl. the lifecycle catalogue) are preserved
+    // by one list in helpers/fresh.ts, not by a per-suite copy that drifts.
+    await resetPostgres(db);
   } else {
     db = new SqliteDb(':memory:');
   }

@@ -16,7 +16,8 @@ import { TASK_SELECT, mapTask, mapUser, mapClient, mapProject, mapDeal } from '.
 import { SLA_HOURS, scoreRisk, slaState } from '../domain/risk.ts';
 import { plan } from '../domain/planner.ts';
 import { createTask, updateTask, taskDetail, recordAcceptance, ensureTaskChecks, ACCEPTANCE_LADDER } from '../services/tasks.ts';
-import { clockHealth, liveTimers, resolveTimer, startTimer, sweepTimers, closeTimersFor } from '../services/clocks.ts';
+import { clockHealth, liveTimers, resolveTimer, startTimer, sweepTimers, closeTimersFor, pauseTimerFor, resumeTimerFor, clockHistory } from '../services/clocks.ts';
+import { transition, lifecycleView, addEvidence, getStages } from '../services/lifecycle.ts';
 import { setGauge, renderMetrics, sweeperStats } from '../lib/metrics.ts';
 import { evaluateShipGate, markShipped } from '../services/shipgate.ts';
 
@@ -1379,6 +1380,119 @@ export async function registerRoutes(
       [...tw.params, like, ...pw.params, like],
     );
     return ok({ suggestions: rows });
+  });
+
+  /* ---------------------------------------------------- client lifecycle -- */
+  /**
+   * The 18-stage lifecycle. Reading is scoped like everything else; writing is
+   * enforced by the transition service, not by these handlers — the handlers
+   * only translate HTTP into a service call so the rules cannot be bypassed by
+   * a second caller.
+   */
+  app.get('/api/clients/:id/lifecycle', async (req) => {
+    const { id: clientId } = req.params as { id: string };
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    const client = await db().get<{ id: string }>('SELECT id FROM clients WHERE id = ?', [clientId]);
+    if (!client) throw notFound('Client not found');
+    const cw = clientsWhere(scope, 'c');
+    const visible = await db().get<{ c: number }>(`SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [clientId, ...cw.params]);
+    if (!(visible?.c ?? 0)) throw notFound('Client not found');
+    return ok(await lifecycleView(db(), clientId));
+  });
+
+  app.post('/api/clients/:id/lifecycle/:stageKey/transitions', async (req) => {
+    const { id: clientId, stageKey } = req.params as { id: string; stageKey: string };
+    const identity = await currentIdentity(req);
+    const body = req.body as { to?: string; reason?: string; note?: string; exception?: boolean };
+    if (!body.to) throw badRequest('A transition needs a target state');
+    // Only staff may drive the lifecycle; a client identity may only ever
+    // decide a client-approval stage (the service enforces which).
+    if (identity.role === 'client' && body.to !== 'approved') {
+      throw forbidden('A client identity may only record an approval decision.');
+    }
+    const result = await transition(db(), {
+      clientId, stageKey, to: body.to,
+      actorId: identity.userId, actorRole: identity.role,
+      reason: body.reason, note: body.note, exception: body.exception,
+    });
+    return ok({
+      replay: result.replay,
+      stage: result.stage.key,
+      state: result.instance.state,
+      lifecycle: await lifecycleView(db(), clientId),
+    });
+  });
+
+  app.post('/api/clients/:id/lifecycle/:stageKey/evidence', async (req) => {
+    const { id: clientId, stageKey } = req.params as { id: string; stageKey: string };
+    const identity = await currentIdentity(req);
+    const body = req.body as { kind?: string; label?: string; url?: string; body?: string };
+    if (!body.kind || !body.label) throw badRequest('Evidence needs a kind and a label');
+    const row = await addEvidence(db(), {
+      clientId, stageKey, kind: body.kind, label: body.label,
+      url: body.url, body: body.body, actorId: identity.userId,
+    });
+    return ok({ evidence: row, lifecycle: await lifecycleView(db(), clientId) });
+  });
+
+  /** Lifecycle dashboard: every client's position, for the delivery board. */
+  app.get('/api/lifecycle', async (req) => {
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    const cw = clientsWhere(scope, 'c');
+    const clients = await db().all<Record<string, any>>(
+      `SELECT c.id, c.name, c.initials, c.accent_color FROM clients c WHERE (${cw.sql}) ORDER BY c.name`,
+      cw.params,
+    );
+    const rows: Array<Record<string, unknown>> = [];
+    for (const c of clients) {
+      const view = await lifecycleView(db(), c.id);
+      const currentStage = view.stages.find((s) => s.key === view.current);
+      rows.push({
+        clientId: c.id,
+        clientName: c.name,
+        initials: c.initials,
+        color: c.accent_color,
+        progress: view.progress,
+        current: currentStage ? { key: currentStage.key, name: currentStage.name, state: currentStage.state, overdue: currentStage.overdue } : null,
+        overdueCount: view.stages.filter((s) => s.overdue).length,
+        waitingOnClient: view.stages.filter((s) => s.waitingOnClientSince).length,
+      });
+    }
+    return ok({ clients: rows, stages: await getStages(db()) });
+  });
+
+  /** Clock history for one timer — every pause, resume and verdict. */
+  app.get('/api/clocks/timers/:id/history', async (req) => {
+    const { id: timerId } = req.params as { id: string };
+    const timer = await db().get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
+    if (!timer) throw notFound('Timer not found');
+    return ok({ timer, events: await clockHistory(db(), timerId) });
+  });
+
+  /** Pause a clock while waiting on a client (authorised, categorised, logged). */
+  app.post('/api/clocks/timers/:id/pause', async (req) => {
+    const { id: timerId } = req.params as { id: string };
+    const identity = await currentIdentity(req);
+    const body = req.body as { reason?: string; category?: 'client' | 'internal' | 'vendor' };
+    if (!body.reason?.trim()) throw badRequest('A pause needs a reason — it is excluded from the elapsed measurement.');
+    const timer = await db().get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
+    if (!timer) throw notFound('Timer not found');
+    if (timer.outcome !== 'running') throw badRequest(`Only a running clock can be paused (this one is ${timer.outcome}).`);
+    const category = body.category ?? 'client';
+    const paused = await pauseTimerFor(db(), timer.entity_type, timer.entity_id, body.reason.trim(), {
+      category, actorId: identity.userId,
+    });
+    return ok({ timer: paused, events: await clockHistory(db(), timerId) });
+  });
+
+  app.post('/api/clocks/timers/:id/resume', async (req) => {
+    const { id: timerId } = req.params as { id: string };
+    const identity = await currentIdentity(req);
+    const timer = await db().get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
+    if (!timer) throw notFound('Timer not found');
+    if (!timer.paused_at) throw badRequest('This clock is not paused.');
+    const resumed = await resumeTimerFor(db(), timer.entity_type, timer.entity_id, { actorId: identity.userId });
+    return ok({ timer: resumed, events: await clockHistory(db(), timerId) });
   });
 
   /* ----------------------------------------------------------- documents -- */

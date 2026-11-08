@@ -18,6 +18,7 @@ import { buildApp } from '../src/app.ts';
 import { SqliteDb } from '../src/db/sqlite.ts';
 import { PostgresDb } from '../src/db/postgres.ts';
 import { migrate } from '../src/db/migrate.ts';
+import { resetPostgres } from './helpers/fresh.ts';
 import { verifyJwt, JwksCache, issueCsrf, verifyCsrf, createSession } from '../src/auth/index.ts';
 
 process.env.SESSION_SECRET ||= 'test-session-secret-do-not-use-in-production';
@@ -32,12 +33,7 @@ const pgUrl = process.env.TEST_DATABASE_URL ?? process.env.TEST_DATABASE_URL_ALT
 const db = pgUrl ? new PostgresDb(pgUrl) : new SqliteDb(':memory:');
 
 await migrate(db, { log: () => {} });
-if (pgUrl) {
-  const KEEP = new Set(['schema_migrations', 'turnover_gates', 'sla_clocks', 'sla_policies', 'retention_policies']);
-  const tables = await db.all("SELECT tablename AS n FROM pg_tables WHERE schemaname='public'");
-  const wipe = tables.map((r) => r.n).filter((n) => !KEEP.has(n));
-  if (wipe.length) await db.exec(`TRUNCATE ${wipe.map((n) => `"${n}"`).join(', ')} RESTART IDENTITY CASCADE`);
-}
+await resetPostgres(db);
 
 /* ------------------------------------------------------------- fixtures -- */
 await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_admin','admin@x.io','Ada Admin','admin','AA')");

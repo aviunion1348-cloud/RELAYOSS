@@ -23,20 +23,14 @@ import { buildApp } from '../src/app.ts';
 import { SqliteDb } from '../src/db/sqlite.ts';
 import { PostgresDb } from '../src/db/postgres.ts';
 import { migrate } from '../src/db/migrate.ts';
+import { resetPostgres } from './helpers/fresh.ts';
 
 const pgUrl = process.env.TEST_DATABASE_URL ?? '';
 const db = pgUrl ? new PostgresDb(pgUrl) : new SqliteDb(':memory:');
 await migrate(db, { log: () => {} });
 // PostgreSQL runs keep their data between runs; start from a known-empty
 // fixture set while preserving migration-seeded governance policy.
-if (pgUrl) {
-  // Governance policy survives (it is migration-seeded); demo rows do not.
-  const KEEP = new Set(['schema_migrations', 'turnover_gates', 'sla_clocks', 'sla_policies', 'retention_policies']);
-  const tables = await db.all("SELECT tablename AS n FROM pg_tables WHERE schemaname='public'");
-  const wipe = tables.map((r) => r.n).filter((n) => !KEEP.has(n));
-  if (wipe.length) await db.exec(`TRUNCATE ${wipe.map((n) => `"${n}"`).join(', ')} RESTART IDENTITY CASCADE`);
-  await db.exec(await (await import('node:fs/promises')).readFile(new URL('../../../db/migrations/pg/0005_baseline_policy.sql', import.meta.url), 'utf8'));
-}
+await resetPostgres(db);
 await db.run("INSERT INTO users (id,email,full_name,role,initials,capacity_hours_week) VALUES ('u1','a@x.io','Ada Lovelace','admin','AL',32) ON CONFLICT DO NOTHING");
 await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u2','b@x.io','Grace Hopper','member','GH') ON CONFLICT DO NOTHING");
 await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c1','Acme','acme','AC') ON CONFLICT DO NOTHING");
