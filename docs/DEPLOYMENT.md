@@ -81,7 +81,7 @@ each is a deliberate, one-off act.
 ```bash
 npm ci
 DATABASE_URL='postgres://…' npm run db:migrate:prod
-# Expected: "✓ migrations applied: 14" (or "already at version 14" on a re-run)
+# Expected: "✓ migrations applied: 15" (or "already at version 15" on a re-run)
 ```
 
 Migrations are forward-only and additive; running them twice is safe.
@@ -90,6 +90,14 @@ Migrations are forward-only and additive; running them twice is safe.
 
 ```bash
 RELAY_LOGIN_PASSWORD='your-chosen-password' node scripts/set-password.mjs --print-env
+
+# If the password is shorter than 12 characters the script refuses and generates
+# nothing:
+#   "Password is 11 characters; 12 is recommended for an internet-facing login."
+# That is a warning about margin, not a validation failure you should work around
+# silently. Re-run with --allow-short if you accept it; the script then prints the
+# mitigations that remain (Argon2id m=65536,t=3,p=4, login lockout, distributed
+# rate limiting) and still verifies the hash before printing it.
 # prints RELAY_LOGIN_USERNAME and RELAY_ADMIN_PASSWORD_HASH, then verifies the
 # hash by checking the password against it before printing.
 ```
