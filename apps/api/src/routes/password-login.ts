@@ -46,7 +46,14 @@ function secureCookies(): boolean {
 }
 
 export interface PasswordLoginOptions {
-  throttle?: LoginThrottle;
+  /**
+   * Accepts either implementation: the in-process `LoginThrottle` (sync, default for
+   * tests and single-container runs) or `DbLoginThrottle` (async, shared across
+   * processes). Both are awaited, which is a no-op for synchronous returns and
+   * correct for database-backed ones. Duplicating the route for two storage
+   * strategies would be a much better way to let them drift apart.
+   */
+  throttle?: LoginThrottle | import('../lib/rate-limit-store.ts').DbLoginThrottle;
 }
 
 export async function registerPasswordLogin(app: FastifyInstance, opts: PasswordLoginOptions = {}) {
@@ -82,7 +89,7 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
     const addressKey = `ip:${ip}`;
     const userKey = `user:${username}`;
     for (const key of [addressKey, userKey]) {
-      const locked = throttle?.check(key);
+      const locked = await throttle?.check(key);
       if (locked?.locked) {
         await auditAuthEvent(db(), {
           kind: 'login_throttled', ip, userAgent: ua, detail: username,
@@ -97,16 +104,16 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
     // Constant-work path: a missing credential still pays for one verification.
     if (!credential) {
       await verifyAgainstDummy(password);
-      throttle?.fail(addressKey);
-      throttle?.fail(userKey);
+      await throttle?.fail(addressKey);
+      await throttle?.fail(userKey);
       await auditAuthEvent(db(), { kind: 'login_failed', ip, userAgent: ua, detail: username });
       throw rejectBadCredentials();
     }
 
     if (credential.disabled_at) {
       await verifyAgainstDummy(password);
-      throttle?.fail(addressKey);
-      throttle?.fail(userKey);
+      await throttle?.fail(addressKey);
+      await throttle?.fail(userKey);
       await auditAuthEvent(db(), {
         kind: 'login_disabled', ip, userAgent: ua, detail: username,
       });
@@ -115,8 +122,8 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
 
     const valid = await verifyPassword(credential.password_hash, password);
     if (!valid) {
-      throttle?.fail(addressKey);
-      throttle?.fail(userKey);
+      await throttle?.fail(addressKey);
+      await throttle?.fail(userKey);
       await auditAuthEvent(db(), { kind: 'login_failed', ip, userAgent: ua, detail: username });
       throw rejectBadCredentials();
     }
@@ -127,16 +134,16 @@ export async function registerPasswordLogin(app: FastifyInstance, opts: Password
       [credential.user_id],
     );
     if (!user || !user.is_active) {
-      throttle?.fail(addressKey);
-      throttle?.fail(userKey);
+      await throttle?.fail(addressKey);
+      await throttle?.fail(userKey);
       await auditAuthEvent(db(), {
         kind: 'login_inactive_user', ip, userAgent: ua, detail: username,
       });
       throw rejectBadCredentials();
     }
 
-    throttle?.succeed(addressKey);
-    throttle?.succeed(userKey);
+    await throttle?.succeed(addressKey);
+    await throttle?.succeed(userKey);
 
     // Session fixation defence: the id is generated here, never accepted from the
     // client, and any previously issued session cookie is irrelevant because the

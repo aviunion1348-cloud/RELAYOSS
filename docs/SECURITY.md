@@ -153,22 +153,67 @@ the local default and is required to be set explicitly for a deployment.
 
 ## 5. Abuse resistance
 
-Per-address sliding budgets, held in process memory:
+Per-address budgets with three families:
 
 | Budget | Default | Env |
 | --- | --- | --- |
-| Global | 1200 / min | `RATE_LIMIT_GLOBAL` |
+| Global (reads) | 1200 / min | `RATE_LIMIT_GLOBAL` |
 | Writes | 240 / min | `RATE_LIMIT_WRITE` |
-| Auth | 30 / min | `RATE_LIMIT_AUTH` |
+| Auth (login, dev-login, OIDC) | 30 / min | `RATE_LIMIT_AUTH` |
 
-Auth login responses are constant-shaped: an unknown user and a wrong credential
-are indistinguishable, and both are throttled — *failed logins are throttled and
-do not reveal whether a user exists*. The limiter reports `retry-after` and is
-unit-tested with a lowered budget rather than disabled for tests.
+### Distributed enforcement
 
-> Limitation: budgets are per process. Behind more than one replica, effective
-> budgets multiply. A shared store (Redis) is required before horizontal
-> scaling — recorded as a gap.
+The budget is enforced **in the database when PostgreSQL is configured**, and in
+process memory only for a single-container SQLite run. This matters because a
+per-process counter is not a counter: three replicas give an attacker three times
+the allowance, and on a serverless platform the number of instances is not even
+fixed — every cold start would begin with an empty map.
+
+The mechanism is a conditional upsert, so the decision is made by the storage
+engine rather than by a read-then-write in application code:
+
+```sql
+INSERT INTO rate_limit_counters (bucket_key, count, reset_at, window_start)
+VALUES (?, 1, ?, ?)
+ON CONFLICT (bucket_key) DO UPDATE SET
+  count = CASE WHEN rate_limit_counters.reset_at <= ? THEN 1 ELSE count + 1 END,
+  …
+  WHERE rate_limit_counters.reset_at <= ? OR rate_limit_counters.count < ?
+```
+
+A live window at the limit suppresses the update and reports zero changed rows,
+which is the refusal. Two concurrent callers cannot both consume the last token —
+verified by firing 40 parallel requests against a limit of 10, and by splitting
+eight requests across two independent application instances against a budget of
+five (five succeed, three are refused).
+
+Windows are **fixed**, not sliding. A fixed window permits a burst of up to twice
+the limit across a boundary; a sliding window avoids that at the cost of many more
+rows or an approximate sketch. For budgets of this size the boundary burst is
+bounded and harmless, and the simpler mechanism is the one whose correctness can be
+demonstrated. The counter tables are pruned by the cron sweep, not on a request path.
+
+### Login lockout
+
+Five consecutive failures lock the identity, with exponential backoff capped at 30
+minutes. Two counters are kept — by client address **and** by username — because a
+single shared username means one counter alone would let an attacker rotate the
+other dimension.
+
+The lockout is database-backed too, so it survives an instance restart, which the
+in-process version could not: a test earns a lockout on one application instance and
+asserts that a *second* instance refuses the correct password.
+
+Auth responses are constant-shaped: an unknown user and a wrong credential are
+indistinguishable, both are throttled, and a dummy verification runs when the user
+does not exist so absence is not measurably faster — *failed logins are throttled
+and do not reveal whether a user exists*. `retry-after` is returned, and the limiter
+is unit-tested with a lowered budget rather than disabled for tests.
+
+> Remaining limitation: one round-trip per request is added when the DB-backed
+> limiter is active. That is the price of a correct cross-instance budget; a Redis
+> or provider-native edge limiter would remove it, and is the natural upgrade if the
+> added latency ever matters.
 
 ## 6. Secrets
 

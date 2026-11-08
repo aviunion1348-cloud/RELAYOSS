@@ -25,6 +25,7 @@ import {
   setResolvedAuthMode,
 } from './auth/index.ts';
 import { hasProvisionedCredential } from './auth/password.ts';
+import { DbLoginThrottle, consumeRateLimit } from './lib/rate-limit-store.ts';
 import { RateLimiter, LoginThrottle } from './lib/rate-limit.ts';
 import { tooMany } from './lib/http.ts';
 import { inc, routeTemplate } from './lib/metrics.ts';
@@ -270,10 +271,52 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
    * Limits are per-process (documented in docs/SECURITY.md); a shared store is
    * required for cluster-wide enforcement.
    */
-  const globalLimiter = new RateLimiter({ limit: config.rateLimit.global, windowMs: 60_000, scope: 'global' });
-  const authLimiter = new RateLimiter({ limit: config.rateLimit.auth, windowMs: 60_000, scope: 'auth' });
-  const writeLimiter = new RateLimiter({ limit: config.rateLimit.write, windowMs: 60_000, scope: 'write' });
-  const loginThrottle = opts.throttle ?? new LoginThrottle();
+  /*
+   * Request budgets.
+   *
+   * Two strategies behind one interface, chosen by whether the database is shared:
+   *
+   *   in-process  a Map. Correct for one container, and free.
+   *   database    a conditional upsert per request. Correct for N instances, at the
+   *               cost of one round-trip on every request.
+   *
+   * The database path is selected whenever PostgreSQL is configured, because that is
+   * the only case where a per-process budget is not a budget. §10 asks for a
+   * distributed limiter specifically; on a single container the in-process one is
+   * strictly better, since it adds no latency and cannot fail.
+   *
+   * Note that the database limiter is *awaited* in the hook while the in-process one
+   * is not. Both are awaited uniformly below — a resolved non-promise costs nothing.
+   */
+  const distributed = db.dialect === 'postgres';
+  const budgetFor = (scope: string, limit: number) =>
+    distributed
+      ? {
+          take: (key: string) =>
+            consumeRateLimit(db, `${scope}:${key}`, limit, 60_000),
+        }
+      : new RateLimiter({ limit, windowMs: 60_000, scope });
+
+  const globalLimiter = budgetFor('global', config.rateLimit.global);
+  const authLimiter = budgetFor('auth', config.rateLimit.auth);
+  const writeLimiter = budgetFor('write', config.rateLimit.write);
+  /**
+   * Login lockout storage.
+   *
+   * Order: an injected throttle (tests must control it), then the database when the
+   * database is shared, then the in-process map.
+   *
+   * The database is chosen whenever PostgreSQL is configured, because that is
+   * exactly the case where more than one process exists. An in-process lockout on a
+   * serverless deployment is not a lockout: each instance keeps its own counter, so
+   * five failures spread across five cold starts produce five fresh allowances.
+   *
+   * SQLite stays in-process: a single file-backed database means a single process,
+   * so a shared table would add a write per attempt and buy nothing.
+   */
+  const loginThrottle =
+    opts.throttle ??
+    (db.dialect === 'postgres' ? new DbLoginThrottle(db) : new LoginThrottle());
 
   app.addHook('onRequest', async (req, reply) => {
     const identityKey = (req.headers.cookie ? 'cookie' : req.ip) ?? 'anon';
@@ -287,7 +330,9 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
       : req.method === 'GET' || req.method === 'HEAD'
         ? globalLimiter
         : writeLimiter;
-    const decision = budget.take(key);
+    // Every budget exposes `take`; the database one is async. Awaiting both keeps a
+    // single code path, and a synchronous return awaits to itself.
+    const decision = await budget.take(key);
     reply.header('x-ratelimit-remaining', String(decision.remaining));
     if (!decision.allowed) {
       reply.header('retry-after', String(decision.retryAfterSec));
