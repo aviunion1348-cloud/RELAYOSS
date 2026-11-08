@@ -1,5 +1,17 @@
-/** Partner console — IAM, device licences, API quota and uptime per partner. */
-import { useQuery } from '@tanstack/react-query';
+/**
+ * Partner console — IAM, device licences, API quota and uptime per partner.
+ *
+ * The three limits on each card are the commercial contract, and they are now
+ * editable here. That matters more than it sounds: the server enforces every one
+ * of them on the next request, so changing a device ceiling in this sheet changes
+ * what the partner can do immediately — no redeploy, no cache to clear.
+ *
+ * The form refuses to be the authority on what is allowed. A limit below current
+ * usage is a real conflict, and the server answers 409 with the numbers; that
+ * answer is rendered as-is rather than guessed at by the client.
+ */
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts';
 import { Icons } from '../components/icons';
 import { api } from '../lib/api';
@@ -7,11 +19,66 @@ import { cls } from '../lib/cls';
 import { PageHeader } from '../components/Shell';
 import { QueryFailure } from '../components/QueryFailure';
 import { useQueryState } from '../lib/query-state';
-import { Badge, Card, Progress, Ring, SectionHeader, Skeleton } from '../components/ui';
+import {
+  Badge, Button, Card, Field, Input, Modal, Progress, Ring, SectionHeader, Select, Skeleton,
+} from '../components/ui';
+import { ApiFailure } from '../components/ApiFailure';
+import type { Partner } from '../types';
+
+const PLANS = ['starter', 'growth', 'enterprise'] as const;
+const PARTNER_STATUS = ['active', 'trial', 'suspended'] as const;
+
+type PartnerDraft = {
+  id: string;
+  name: string;
+  plan: string;
+  status: string;
+  consoleUrl: string;
+  deviceLimit: string;
+  seatLimit: string;
+  apiQuota: string;
+};
+
+const draftOf = (p: Partner): PartnerDraft => ({
+  id: p.id,
+  name: p.name,
+  plan: p.plan,
+  status: p.status,
+  consoleUrl: p.consoleUrl ?? '',
+  deviceLimit: String(p.deviceLimit),
+  seatLimit: String(p.seatLimit),
+  apiQuota: String(p.apiQuota),
+});
 
 export default function Partners() {
+  const qc = useQueryClient();
   const partners = useQuery({ queryKey: ['partners'], queryFn: api.partners });
   const q = useQueryState(partners);
+  const [editing, setEditing] = useState<PartnerDraft | null>(null);
+
+  /*
+   * A limit change has to re-read the list rather than patch the row: `usage`,
+   * `devicesActive` and the percentages are computed server-side alongside the
+   * limit, and a half-updated card would show a new ceiling against a stale graph.
+   * The entitlements endpoint is what enforcement reads, so it is refreshed too.
+   */
+  const save = useMutation({
+    mutationFn: (d: PartnerDraft) =>
+      api.updatePartner(d.id, {
+        name: d.name.trim(),
+        plan: d.plan,
+        status: d.status,
+        consoleUrl: d.consoleUrl.trim(),
+        deviceLimit: Number(d.deviceLimit),
+        seatLimit: Number(d.seatLimit),
+        apiQuotaMonth: Number(d.apiQuota),
+      }),
+    onSuccess: (_saved, d) => {
+      void qc.invalidateQueries({ queryKey: ['partners'] });
+      void qc.invalidateQueries({ queryKey: ['partner-entitlements', d.id] });
+      setEditing(null);
+    },
+  });
 
   if (q.state === 'failed') return <QueryFailure error={q.error} what="the partner consoles" retry={q.refetch} />;
   if (q.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-48" /><div className="mt-4 grid gap-3 lg:grid-cols-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-56" />)}</div></div>;
@@ -68,8 +135,14 @@ export default function Partners() {
                     <Badge tone={p.plan === 'enterprise' ? 'iris' : p.plan === 'growth' ? 'sky' : 'neutral'}>{p.plan}</Badge>
                     {p.status !== 'active' && <Badge tone="amber">{p.status}</Badge>}
                   </div>
-                  <p className="mt-0.5 truncate font-mono text-[9.5px] text-mist-500">{p.consoleUrl}</p>
+                  <p className="mt-0.5 truncate font-mono text-[9.5px] text-mist-500">{p.consoleUrl || 'no console URL'}</p>
                 </div>
+                <button
+                  onClick={() => { save.reset(); setEditing(draftOf(p)); }}
+                  className="shrink-0 rounded-md border border-ink-600 px-1.5 py-0.5 text-[9.5px] text-mist-400 transition-colors hover:border-gold-600/50 hover:text-gold-300"
+                >
+                  Edit
+                </button>
                 <Ring value={Math.round(p.uptimePct)} size={40} stroke={3} tone={p.uptimePct > 99.5 ? '#22c98a' : '#f5a524'} label={<span className="text-[8px]">{p.uptimePct.toFixed(1)}</span>} />
               </div>
 
@@ -146,6 +219,93 @@ export default function Partners() {
           </div>
         </Card>
       </div>
+
+      {/* --------------------------------------------------------- edit sheet */}
+      <Modal
+        open={editing !== null}
+        icon="Handshake"
+        title={editing ? `Edit ${editing.name}` : 'Edit partner'}
+        subtitle="Limits are enforced on the next request, not at the next deployment."
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              icon="Check"
+              loading={save.isPending}
+              disabled={!editing?.name.trim()}
+              onClick={() => editing && save.mutate(editing)}
+            >
+              Save partner
+            </Button>
+          </>
+        }
+      >
+        {editing && (
+          <div className="space-y-3">
+            <Field label="Partner name">
+              {({ id }) => (
+                <Input id={id} autoFocus value={editing.name}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+              )}
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Plan">
+                {({ id }) => (
+                  <Select id={id} value={editing.plan} onChange={(e) => setEditing({ ...editing, plan: e.target.value })}>
+                    {PLANS.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </Select>
+                )}
+              </Field>
+              <Field label="Status" hint="A suspended tenant can provision nothing at all.">
+                {({ id }) => (
+                  <Select id={id} value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })}>
+                    {PARTNER_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </Select>
+                )}
+              </Field>
+            </div>
+
+            <Field label="Console URL" hint="Where the partner's own console lives. Optional.">
+              {({ id }) => (
+                <Input id={id} value={editing.consoleUrl} placeholder="https://console.partner.example"
+                  onChange={(e) => setEditing({ ...editing, consoleUrl: e.target.value })} />
+              )}
+            </Field>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Devices" hint="Licensed ceiling">
+                {({ id }) => (
+                  <Input id={id} type="number" min={0} value={editing.deviceLimit}
+                    onChange={(e) => setEditing({ ...editing, deviceLimit: e.target.value })} />
+                )}
+              </Field>
+              <Field label="Seats" hint="IAM invitations">
+                {({ id }) => (
+                  <Input id={id} type="number" min={0} value={editing.seatLimit}
+                    onChange={(e) => setEditing({ ...editing, seatLimit: e.target.value })} />
+                )}
+              </Field>
+              <Field label="API / month">
+                {({ id }) => (
+                  <Input id={id} type="number" min={0} value={editing.apiQuota}
+                    onChange={(e) => setEditing({ ...editing, apiQuota: e.target.value })} />
+                )}
+              </Field>
+            </div>
+
+            <p className="rounded-lg border border-ink-600 bg-ink-850/60 px-2.5 py-2 text-[10.5px] leading-relaxed text-mist-500">
+              A device limit cannot be cut below the number of devices the partner already has —
+              the server refuses that with the current count, because the tenant would otherwise sit
+              permanently over quota with no way to see why.
+            </p>
+
+            {save.error ? <ApiFailure error={save.error} what="the partner was not saved." /> : null}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

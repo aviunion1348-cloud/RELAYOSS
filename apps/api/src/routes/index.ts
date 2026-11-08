@@ -1292,6 +1292,100 @@ export async function registerRoutes(
     return ok(mapClient(row));
   });
 
+  /*
+   * Editing and retiring a client.
+   *
+   * `POST /api/clients` existed and nothing could change a client afterwards: the
+   * tier, health and contact details on the Clients screen were seed data, so the
+   * one record the rest of the product is organised around was write-once.
+   *
+   * `slug` is deliberately not editable. It is the stable identifier quoted in
+   * integrations and URLs, and renaming it silently breaks every caller holding the
+   * old value; moving a client to a new slug is a migration, not a form edit.
+   */
+  app.patch('/api/clients/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
+    const { id: clientId } = req.params as { id: string };
+    const parsed = z.object({
+      name: z.string().trim().min(1, 'a client needs a name').max(120).optional(),
+      industry: z.string().max(80).optional(),
+      initials: z.string().max(3).optional(),
+      accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'accentColor is a hex colour such as #c9a227').optional(),
+      tier: z.enum(['strategic', 'enterprise', 'growth', 'starter']).optional(),
+      health: z.enum(['healthy', 'watch', 'at_risk', 'churn']).optional(),
+      primaryContactName: z.string().max(120).optional(),
+      primaryContactEmail: z.union([z.literal(''), z.string().email('that is not an email address')]).optional(),
+      primaryContactRole: z.string().max(80).optional(),
+      notes: z.string().max(5000).optional(),
+      mrrCents: z.number().int().min(0).max(1_000_000_000).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid client payload', parsed.error.issues);
+    const patch = parsed.data;
+    if (Object.keys(patch).length === 0) throw badRequest('Nothing to change');
+
+    const conn = await db();
+    const existing = await conn.get<{ id: string }>('SELECT id FROM clients WHERE id = ?', [clientId]);
+    if (!existing) throw notFound('No such client');
+
+    const columns: Record<string, string> = {
+      name: 'name', industry: 'industry', initials: 'initials', accentColor: 'accent_color',
+      tier: 'tier', health: 'health', primaryContactName: 'primary_contact_name',
+      primaryContactEmail: 'primary_contact_email', primaryContactRole: 'primary_contact_role',
+      notes: 'notes', mrrCents: 'mrr_cents',
+    };
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    for (const [field, column] of Object.entries(columns)) {
+      if (patch[field as keyof typeof patch] !== undefined) {
+        sets.push(`${column} = ?`);
+        params.push(patch[field as keyof typeof patch]);
+      }
+    }
+    sets.push('updated_at = ?');
+    params.push(nowIso());
+    await conn.run(`UPDATE clients SET ${sets.join(', ')} WHERE id = ?`, [...params, clientId]);
+    const row = await conn.get<Record<string, any>>('SELECT * FROM clients WHERE id = ?', [clientId]);
+    if (!row) throw notFound('The client was written but could not be read back');
+    return ok(mapClient(row));
+  });
+
+  /*
+   * Deleting a client is refused while it still owns work.
+   *
+   * `projects.client_id` and `partners.client_id` cascade, so a DELETE would
+   * succeed and take every project, task and document belonging to that client
+   * with it — silently, in one statement. The failure a person actually wants is a
+   * refusal that names what is in the way.
+   */
+  app.delete('/api/clients/:id', async (req, reply) => {
+    await requireRole(req, ['admin']);
+    const { id: clientId } = req.params as { id: string };
+    const conn = await db();
+    const existing = await conn.get<{ id: string; name: string }>(
+      'SELECT id, name FROM clients WHERE id = ?', [clientId],
+    );
+    if (!existing) throw notFound('No such client');
+
+    const projects = await conn.get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM projects WHERE client_id = ?', [clientId],
+    );
+    const partners = await conn.get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM partners WHERE client_id = ?', [clientId],
+    );
+    const blockers: string[] = [];
+    if (Number(projects?.n ?? 0) > 0) blockers.push(`${projects?.n} project(s)`);
+    if (Number(partners?.n ?? 0) > 0) blockers.push(`${partners?.n} partner record(s)`);
+    if (blockers.length) {
+      throw conflict(
+        `"${existing.name}" still owns ${blockers.join(' and ')}. ` +
+          'Move or retire those first — deleting the client would cascade to them.',
+      );
+    }
+    await conn.run('DELETE FROM clients WHERE id = ?', [clientId]);
+    reply.code(204);
+    return null;
+  });
+
   app.get('/api/clients', async () => {
     const clients = (await (await db()).all<Record<string, any>>('SELECT * FROM clients ORDER BY name')).map(mapClient);
     const deals = await (await db()).all<Record<string, any>>('SELECT client_id, value_cents, status FROM deals');
@@ -1411,6 +1505,75 @@ export async function registerRoutes(
       identity.userId,
     );
     return reply.code(201).send({ data: result });
+  });
+
+  /*
+   * Editing a partner.
+   *
+   * The partner console shows a plan, a status and three limits that decide what
+   * the tenant is allowed to do, and none of them could be changed. Lowering a
+   * device limit is the interesting case: `enforceDeviceLimit` re-reads the live
+   * row on every registration, so a reduction takes effect on the next device
+   * rather than requiring anything to be rebuilt or restarted.
+   */
+  app.patch('/api/partners/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
+    const { id: partnerId } = req.params as { id: string };
+    const parsed = z.object({
+      name: z.string().trim().min(1).max(120).optional(),
+      consoleUrl: z.union([z.literal(''), z.string().url('consoleUrl must be a URL')]).optional(),
+      plan: z.enum(['starter', 'growth', 'enterprise']).optional(),
+      status: z.enum(['active', 'trial', 'suspended']).optional(),
+      deviceLimit: z.number().int().min(0).max(1_000_000).optional(),
+      apiQuotaMonth: z.number().int().min(0).max(1_000_000_000).optional(),
+      seatLimit: z.number().int().min(0).max(100_000).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid partner payload', parsed.error.issues);
+    const patch = parsed.data;
+    if (Object.keys(patch).length === 0) throw badRequest('Nothing to change');
+
+    const conn = await db();
+    const existing = await conn.get<Record<string, any>>('SELECT * FROM partners WHERE id = ?', [partnerId]);
+    if (!existing) throw notFound('No such partner');
+
+    /*
+     * A limit may not be cut below what the tenant has already consumed: the rows
+     * would then be permanently over quota, and every subsequent request would be
+     * refused for a reason the operator cannot see. Refusing the edit with the
+     * current usage is the only answer that leaves the console truthful.
+     */
+    if (patch.deviceLimit !== undefined) {
+      const used = await conn.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM device_licenses WHERE partner_id = ? AND status != 'revoked'",
+        [partnerId],
+      );
+      if (Number(used?.n ?? 0) > patch.deviceLimit) {
+        throw conflict(
+          `This partner already has ${used?.n} registered device(s); a limit of ${patch.deviceLimit} ` +
+            'would put it over quota. Revoke devices first.',
+        );
+      }
+    }
+
+    const columns: Record<string, string> = {
+      name: 'name', consoleUrl: 'console_url', plan: 'plan', status: 'status',
+      deviceLimit: 'device_limit', apiQuotaMonth: 'api_quota_month', seatLimit: 'seat_limit',
+    };
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    for (const [field, column] of Object.entries(columns)) {
+      if (patch[field as keyof typeof patch] !== undefined) {
+        sets.push(`${column} = ?`);
+        params.push(patch[field as keyof typeof patch]);
+      }
+    }
+    await conn.run(`UPDATE partners SET ${sets.join(', ')} WHERE id = ?`, [...params, partnerId]);
+    const row = await conn.get<Record<string, any>>('SELECT * FROM partners WHERE id = ?', [partnerId]);
+    return ok({
+      id: row?.id, name: row?.name, slug: row?.slug, plan: row?.plan, status: row?.status,
+      consoleUrl: row?.console_url, deviceLimit: row?.device_limit,
+      apiQuotaMonth: row?.api_quota_month, seatLimit: row?.seat_limit,
+    });
   });
 
   app.post('/api/partners/:id/devices/:deviceId/activate', async (req) => {
@@ -2544,8 +2707,143 @@ export async function registerRoutes(
         );
     return ok(rows.map((d) => ({
       id: d.id, title: d.title, kind: d.kind, body: d.body, status: d.status,
-      projectName: d.project_name, clientVisible: !!d.client_visible, updatedAt: d.updated_at,
+      projectName: d.project_name, projectId: d.project_id, clientVisible: !!d.client_visible,
+      updatedAt: d.updated_at,
     })));
+  });
+
+  /*
+   * Documents were read-only.
+   *
+   * The Docs screen rendered a list of records that nothing in the product could
+   * create, edit or retire — the `docs` table was only ever populated by the seed.
+   * A document is the one artefact in a delivery org that people genuinely write,
+   * so this is the feature where "read-only" was least defensible.
+   *
+   * The three writes below are the smallest complete set: create, edit, retire.
+   * Deliberately no PATCH for `author_id` and no way to move a document between
+   * projects, because both would rewrite history rather than edit the document.
+   */
+
+  /** Create a document. Authored by the caller; scope-checked against its project. */
+  app.post('/api/docs', async (req, reply) => {
+    const actorId = await requireRole(req, ['admin', 'lead', 'member']);
+    const parsed = z.object({
+      title: z.string().trim().min(1, 'a document needs a title').max(200),
+      kind: z.enum(['runbook', 'adr', 'spec', 'note', 'retro', 'exec_summary', 'onboarding']).default('note'),
+      body: z.string().max(100_000).default(''),
+      status: z.enum(['draft', 'in_review', 'approved', 'archived']).default('draft'),
+      projectId: z.string().min(1).nullable().default(null),
+      clientVisible: z.boolean().default(false),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid document payload', parsed.error.issues);
+    const input = parsed.data;
+
+    const conn = await db();
+    if (input.projectId) {
+      const scope = await resolveReadScope(conn, await currentIdentity(req));
+      await assertProjectInScope(scope, input.projectId);
+      const project = await conn.get<{ id: string }>('SELECT id FROM projects WHERE id = ?', [input.projectId]);
+      if (!project) throw badRequest(`No project "${input.projectId}" to attach this document to`);
+    }
+
+    const docId = `doc_${Math.random().toString(36).slice(2, 10)}`;
+    const at = nowIso();
+    await conn.run(
+      `INSERT INTO docs (id,project_id,title,kind,body,status,author_id,client_visible,updated_at,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [
+        docId, input.projectId, input.title, input.kind, input.body, input.status, actorId,
+        input.clientVisible ? 1 : 0, at, at,
+      ],
+    );
+    reply.code(201);
+    return ok({
+      id: docId, title: input.title, kind: input.kind, body: input.body, status: input.status,
+      projectId: input.projectId, clientVisible: input.clientVisible, updatedAt: at,
+    });
+  });
+
+  /** Edit a document's prose and metadata. Every field is optional; `updated_at` moves. */
+  app.patch('/api/docs/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead', 'member']);
+    const { id: docId } = req.params as { id: string };
+    const parsed = z.object({
+      title: z.string().trim().min(1, 'a document needs a title').max(200).optional(),
+      kind: z.enum(['runbook', 'adr', 'spec', 'note', 'retro', 'exec_summary', 'onboarding']).optional(),
+      body: z.string().max(100_000).optional(),
+      status: z.enum(['draft', 'in_review', 'approved', 'archived']).optional(),
+      clientVisible: z.boolean().optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid document payload', parsed.error.issues);
+    const patch = parsed.data;
+    if (Object.keys(patch).length === 0) throw badRequest('Nothing to change');
+
+    const conn = await db();
+    /*
+     * Read the row through the caller's scope first. A document the caller cannot
+     * see is answered exactly as one that does not exist — otherwise a 403 would
+     * confirm the id is real, which is the enumeration oracle scope.ts exists to
+     * avoid.
+     */
+    const scope = await resolveReadScope(conn, await currentIdentity(req));
+    const dw = docsWhere(scope, 'd');
+    const existing = await conn.get<Record<string, unknown>>(
+      `SELECT d.* FROM docs d WHERE d.id = ? AND (${dw.sql})`,
+      [docId, ...dw.params],
+    );
+    if (!existing) throw notFound('No such document');
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const columns: Record<string, string> = {
+      title: 'title', kind: 'kind', body: 'body', status: 'status',
+    };
+    for (const [field, column] of Object.entries(columns)) {
+      if (patch[field as keyof typeof patch] !== undefined) {
+        sets.push(`${column} = ?`);
+        params.push(patch[field as keyof typeof patch]);
+      }
+    }
+    if (patch.clientVisible !== undefined) {
+      sets.push('client_visible = ?');
+      params.push(patch.clientVisible ? 1 : 0);
+    }
+    const at = nowIso();
+    sets.push('updated_at = ?');
+    params.push(at);
+    await conn.run(`UPDATE docs SET ${sets.join(', ')} WHERE id = ?`, [...params, docId]);
+
+    const row = await conn.get<Record<string, unknown>>('SELECT * FROM docs WHERE id = ?', [docId]);
+    return ok({
+      id: docId,
+      title: row?.title, kind: row?.kind, body: row?.body, status: row?.status,
+      projectId: row?.project_id, clientVisible: !!row?.client_visible, updatedAt: row?.updated_at,
+    });
+  });
+
+  /**
+   * Retire a document.
+   *
+   * A real delete, not an `archived` status in disguise: the caller asked to
+   * remove it, and silently keeping the row would make the list disagree with the
+   * database. Archiving is available separately as a status change for documents
+   * that must be kept for audit.
+   */
+  app.delete('/api/docs/:id', async (req, reply) => {
+    await requireRole(req, ['admin', 'lead']);
+    const { id: docId } = req.params as { id: string };
+    const conn = await db();
+    const scope = await resolveReadScope(conn, await currentIdentity(req));
+    const dw = docsWhere(scope, 'd');
+    const existing = await conn.get<{ id: string }>(
+      `SELECT d.id FROM docs d WHERE d.id = ? AND (${dw.sql})`,
+      [docId, ...dw.params],
+    );
+    if (!existing) throw notFound('No such document');
+    await conn.run('DELETE FROM docs WHERE id = ?', [docId]);
+    reply.code(204);
+    return null;
   });
 }
 

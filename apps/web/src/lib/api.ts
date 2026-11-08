@@ -388,6 +388,32 @@ export const api = {
   notifications: () => request<Array<{ id: string; kind: string; title: string; body: string; readAt: string | null; createdAt: string }>>('/notifications'),
   readNotification: (id: string) => request(`/notifications/${id}/read`, { method: 'POST' }),
   docs: (projectId?: string) => request<Doc[]>(`/docs${qs({ projectId })}`),
+  /*
+   * The document writes.
+   *
+   * Until now `docs()` was the whole contract: the knowledge base could be read and
+   * never written, which is a strange thing for the one artefact in a delivery org
+   * that people actually author.
+   *
+   * `remove()` returns `void` because the route answers 204 with no body; asking for
+   * JSON there would parse an empty string and throw on a successful delete.
+   */
+  createDoc: (payload: {
+    title: string;
+    kind?: string;
+    body?: string;
+    status?: string;
+    projectId?: string | null;
+    clientVisible?: boolean;
+  }) => request<Doc>('/docs', { method: 'POST', body: JSON.stringify(payload) }),
+  updateDoc: (id: string, patch: Partial<Pick<Doc, 'title' | 'kind' | 'body' | 'status'>> & { clientVisible?: boolean }) =>
+    request<Doc>(`/docs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteDoc: (id: string) => request<void>(`/docs/${id}`, { method: 'DELETE' }),
+  updateClient: (id: string, patch: Record<string, unknown>) =>
+    request<ClientSummary>(`/clients/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteClient: (id: string) => request<void>(`/clients/${id}`, { method: 'DELETE' }),
+  updatePartner: (id: string, patch: Record<string, unknown>) =>
+    request<Partner>(`/partners/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   search: (q: string) =>
     request<{ tasks: Task[]; projects: Array<{ id: string; key: string; name: string }>; clients: Array<{ id: string; name: string }>; deals: Deal[]; docs: Doc[] }>(
       `/search?q=${encodeURIComponent(q)}`,

@@ -1,5 +1,5 @@
 /** Design-system primitives. Small, composable, no external UI dependency. */
-import { forwardRef, type ReactNode, type ButtonHTMLAttributes, type HTMLAttributes } from 'react';
+import { forwardRef, useEffect, useId, type ReactNode, type ButtonHTMLAttributes, type HTMLAttributes } from 'react';
 import { Icons } from './icons';
 import { cls } from '../lib/cls';
 
@@ -354,5 +354,141 @@ export function Stat({
       <p className="metric mt-2 text-[26px] font-semibold leading-none text-white">{value}</p>
       <div className="mt-2 flex items-center gap-1.5 text-[11px] text-mist-500">{trend}{sub}</div>
     </Card>
+  );
+}
+
+
+/* ------------------------------------------------------------------- modal */
+/**
+ * A form in a sheet, not a page.
+ *
+ * Editing a client, a partner or a document is a small, self-contained act on a
+ * record already on screen, and sending the reader to a separate route loses the
+ * context they are editing from. This is the surface for that: a centred sheet
+ * with a real header, a scrollable body and the actions pinned at the foot, so a
+ * long form never pushes its own Save button out of reach.
+ *
+ * What it does deliberately:
+ *
+ *   - Escape closes it, because that is the one gesture every person tries;
+ *   - the backdrop is a click target but the sheet is not, so a stray click in the
+ *     form cannot discard typed work;
+ *   - it does not trap focus with a library. The first field is autofocused and
+ *     the sheet is a labelled landmark, which is what the platform's own dialogs
+ *     do; a hand-rolled trap that gets the tab order wrong is worse than none.
+ */
+export function Modal({
+  open,
+  title,
+  subtitle,
+  icon = 'PenTool',
+  onClose,
+  footer,
+  children,
+  width = 620,
+}: {
+  open: boolean;
+  title: string;
+  subtitle?: ReactNode;
+  icon?: keyof typeof Icons;
+  onClose: () => void;
+  footer?: ReactNode;
+  children: ReactNode;
+  width?: number;
+}) {
+  const headingId = useId();
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    // The page behind the sheet must not scroll while the sheet is open, or a
+    // trackpad gesture over the form moves the list underneath it.
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  const Icon = Icons[icon] as React.ComponentType<{ size?: number; className?: string }>;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-ink-950/75 p-4 backdrop-blur-sm animate-fade"
+      onMouseDown={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{ width }}
+        className="glass-strong flex max-h-[86vh] w-full max-w-full flex-col overflow-hidden rounded-xl border border-gold-600/30 shadow-[0_30px_90px_-24px_rgb(0_0_0/0.95)] animate-rise"
+      >
+        <div className="flex items-start gap-2.5 border-b border-ink-600/80 px-4 py-3">
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg border border-gold-600/35 bg-gold-500/10 text-gold-300">
+            <Icon size={13} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 id={headingId} className="display text-[14.5px] leading-tight text-white">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-[11px] leading-relaxed text-mist-400">{subtitle}</p>}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="grid size-6 shrink-0 place-items-center rounded-md text-mist-500 transition-colors hover:bg-ink-700 hover:text-mist-200"
+          >
+            <Icons.X size={14} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">{children}</div>
+
+        {footer && (
+          <div className="flex items-center justify-end gap-2 border-t border-ink-600/80 bg-ink-900/40 px-4 py-2.5">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A labelled control.
+ *
+ * The label is a real `<label>` bound by id, not a styled span: clicking the text
+ * has to focus the field, and a screen reader has to announce it. `hint` carries
+ * the rule (a limit, a format) rather than repeating the label, and `error` is
+ * rendered next to the field it belongs to instead of in a summary at the top.
+ */
+export function Field({
+  label,
+  hint,
+  error,
+  children,
+  className,
+}: {
+  label: string;
+  hint?: ReactNode;
+  error?: string | null;
+  children: (props: { id: string }) => ReactNode;
+  className?: string;
+}) {
+  const id = useId();
+  return (
+    <div className={cls('space-y-1', className)}>
+      <label htmlFor={id} className="block text-[10px] font-semibold uppercase tracking-[0.11em] text-mist-500">
+        {label}
+      </label>
+      {children({ id })}
+      {error
+        ? <p className="text-[10.5px] leading-relaxed text-rose-300">{error}</p>
+        : hint && <p className="text-[10.5px] leading-relaxed text-mist-500">{hint}</p>}
+    </div>
   );
 }

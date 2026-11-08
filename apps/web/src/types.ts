@@ -37,6 +37,8 @@ export interface ClientSummary {
   contactName: string;
   contactRole: string;
   contactEmail?: string;
+  /** Internal notes. Returned by `mapClient`; safe to render, never sent to clients. */
+  notes?: string;
   mrrCents: number;
   openValueCents: number;
   wonValueCents: number;
@@ -365,6 +367,8 @@ export interface Doc {
   body: string;
   status: string;
   projectName: string | null;
+  /** Present on the write responses, absent on older list payloads. */
+  projectId?: string | null;
   clientVisible: boolean;
   updatedAt: string;
 }
