@@ -505,3 +505,44 @@ test('idor: a write to a task that does not exist is a 404, never a 500', async 
     );
   }
 });
+
+test('idor: a notification cannot be marked read by another identity', async () => {
+  await db.run(
+    "INSERT INTO notifications (id,user_id,kind,title,body) VALUES ('ntf_admin','u_admin','system','Private','Do not touch')",
+  );
+  const res = await asClientB('POST', '/api/notifications/ntf_admin/read', {});
+  // 404, not 403: the notification exists but is not this caller's, and the API does not
+  // confirm which of the two it is.
+  assert.equal(res.status, 404, 'a foreign identity marked another user\'s notification read');
+  const row = await db.get("SELECT read_at FROM notifications WHERE id = 'ntf_admin'");
+  assert.equal(row.read_at, null, 'the refused write still touched the row');
+
+  // The owner can.
+  const own = await app.inject({
+    method: 'POST',
+    url: '/api/notifications/ntf_admin/read',
+    headers: { cookie: admin.cookie, 'x-csrf-token': admin.csrf, 'content-type': 'application/json' },
+    payload: '{}',
+  });
+  assert.equal(own.statusCode, 200);
+  assert.ok((await db.get("SELECT read_at FROM notifications WHERE id = 'ntf_admin'")).read_at);
+});
+
+test('idor: a signatory decision cannot be recorded on another tenant\'s contract', async () => {
+  // The suite's fixtures may not include a second client row; the FK needs one.
+  await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c2','Globex','globex','GX') ON CONFLICT (id) DO NOTHING");
+  await db.run("INSERT INTO legal_documents (id,client_id,kind,title,status) VALUES ('doc_scope','c2','nda','Their NDA','awaiting_client')");
+  await db.run(
+    "INSERT INTO legal_signatories (id,document_id,party,full_name,state) VALUES ('sig_scope','doc_scope','client','Someone','pending')",
+  );
+  // clientA belongs to c1; the document belongs to c2.
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/legal/doc_scope/signatories/sig_scope/decision',
+    headers: { cookie: clientA.cookie, 'x-csrf-token': clientA.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify({ state: 'approved' }),
+  });
+  assert.equal(res.statusCode, 404, 'a foreign client approved a signature on another tenant\'s contract');
+  const row = await db.get("SELECT state FROM legal_signatories WHERE id = 'sig_scope'");
+  assert.equal(row.state, 'pending', 'the refused decision was still recorded');
+});

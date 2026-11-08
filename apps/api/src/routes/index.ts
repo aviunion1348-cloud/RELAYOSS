@@ -1565,7 +1565,18 @@ export async function registerRoutes(
     // An UPDATE that matches nothing is indistinguishable from a successful one
     // unless the row count is checked. Returning 200 for an id that does not
     // exist told the caller a notification had been read when none had.
-    const result = await db().run('UPDATE notifications SET read_at = ? WHERE id = ?', [nowIso(), notifId]);
+    /*
+     * A notification is addressed to one user, so the update is scoped to the caller.
+     * Marking someone else's notification read is not a data breach on its own, but it
+     * is a write to another identity's mailbox — and an unscoped `WHERE id = ?` here
+     * means the id alone decides. Scoping the statement is both the authorisation check
+     * and the update, so they cannot disagree.
+     */
+    const identity = await currentIdentity(req);
+    const result = await db().run(
+      'UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?',
+      [nowIso(), notifId, identity.userId],
+    );
     if (!result.changes) throw notFound('Notification not found');
     return ok({ id: notifId });
   });
@@ -2123,6 +2134,21 @@ export async function registerRoutes(
     const identity = await currentIdentity(req);
     const body = req.body as { state?: 'approved' | 'declined' | 'signed'; evidenceUrl?: string; reason?: string };
     if (!body.state) throw badRequest('state is required');
+
+    /*
+     * A signature decision is the most consequential write in the application, so it
+     * needs a tenancy check before anything else. The service verifies that the
+     * signatory belongs to the document — that is a consistency check, not an
+     * authorisation one — and it was the only check present. Any authenticated identity
+     * could therefore approve, decline or sign on another tenant's contract.
+     */
+    const sigDoc = await db().get<{ client_id: string | null }>(
+      'SELECT client_id FROM legal_documents WHERE id = ?',
+      [documentId],
+    );
+    if (!sigDoc) throw notFound('Legal document not found');
+    if (sigDoc.client_id) await assertClientInScope(db(), identity, sigDoc.client_id);
+
     const detail = await recordSignatoryDecision(db(), {
       documentId, signatoryId, state: body.state, evidenceUrl: body.evidenceUrl,
       reason: body.reason, actorId: identity.userId,
