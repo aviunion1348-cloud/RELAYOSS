@@ -379,11 +379,34 @@ if (cfg) {
        * someone reloads a deep link rather than clicking through the app.
        */
       const webRewrites = Array.isArray(web.rewrites) ? web.rewrites : [];
-      const fallback = webRewrites.find((r) => String(r.source ?? '') === '/(.*)');
+      const fallback = webRewrites.find((r) => String(r.destination ?? '') === '/index.html');
       if (!fallback) {
-        fail('the web service has no "/(.*)" SPA fallback — a deep-link refresh would 404');
-      } else if (String(fallback.destination ?? '') !== '/index.html') {
-        fail(`the web service fallback targets "${fallback.destination}", not /index.html`);
+        fail('the web service has no fallback to /index.html — a deep-link refresh would 404');
+      } else if (String(fallback.source ?? '') === '/(.*)') {
+        /*
+         * The naive catch-all. It fixes deep links and quietly breaks assets.
+         *
+         * `/(.*)` also matches `/assets/index-abc123.js`, so a request for a missing or
+         * stale hashed asset is answered with the HTML document and status 200. The
+         * browser reports a MIME type error instead of a 404, and a stale reference
+         * renders a blank page rather than failing cleanly.
+         *
+         * The fallback therefore has to exclude anything that looks like a file. Verified
+         * against the real build: with `/(.*)` three missing-asset cases return the
+         * document; with the extension guard they 404 and deep links still resolve.
+         * `scripts/verify-web-routing.mjs` proves it against the built output, because
+         * `vercel dev` proxies the Vite dev server, which applies its own fallback first.
+         */
+        fail(
+          'the web fallback is "/(.*) → /index.html", which also swallows missing assets: ' +
+            'they would return the SPA document with status 200 instead of 404. Exclude ' +
+            'file-like paths, e.g. "/((?!assets/)[^.]*)"',
+        );
+      } else if (!/\[\^\.\]|\.\+|\{\d/.test(String(fallback.source ?? ''))) {
+        fail(
+          `the web fallback source "${fallback.source}" does not appear to exclude file-like ` +
+            'paths; missing assets would receive the SPA document instead of a 404',
+        );
       }
     }
 

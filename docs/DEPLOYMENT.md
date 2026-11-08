@@ -31,9 +31,22 @@ Both services are public, and each one receives exactly the traffic it is built 
 * **`api`** is reachable only under `/api/*`. It has no rewrite of its own; the
   top-level `/api/(.*)` rule is the only way in.
 * **`web`** is the catch-all. Because routing into a service is final, the service
-  owns its own deep-link behaviour — `web` declares a service-level
-  `/(.*) → /index.html` fallback so that reloading `/projects/pr_northwind` returns
-  the document rather than a 404.
+  owns its own deep-link behaviour — `web` declares a service-level fallback so that
+  reloading `/projects/pr_northwind` returns the document rather than a 404.
+* **The fallback is not `/(.*)`.** That pattern also matches `/assets/index-abc123.js`,
+  so a missing or stale hashed asset would be answered with the HTML document and
+  status 200: the browser reports a MIME type error instead of a 404, and a stale
+  reference renders a blank page rather than failing cleanly. The fallback excludes
+  file-like paths:
+
+  ```json
+  { "source": "/((?!assets/)[^.]*)", "destination": "/index.html" }
+  ```
+
+  Deep links (`/projects/pr_northwind`) contain no dot and resolve to the document;
+  anything with an extension 404s. `npm run verify:routing` proves this against the
+  built output — `vercel dev` cannot, because it proxies the Vite dev server, which
+  serves `index.html` for every unmatched path itself.
 * Order matters. Vercel routes to the first match, so a catch-all listed first would
   swallow `/api` entirely. The guard asserts the order.
 
@@ -456,7 +469,9 @@ never failed is a guard you do not know works.
 | Password login returns 500 `no such table: local_credentials` | The database predates migration 0014; login is the first thing to touch that table | Run `npm run db:migrate:prod`, then `npm run db:pg:assign-login` |
 | `argon2` works locally but fails on the platform | npm 12 skipped the install script because the version is not approved | Update the pinned `allowScripts` entry to the installed version; the guard fails when the pin and the lockfile disagree |
 | `npm warn Unknown env config "cache-dir"` | Vercel's build image exports `npm_config_cache_dir`; npm 11+ rejects the key | Cosmetic. `.npmrc` pins the supported `cache` key; see §1.2.4 |
-| Deep links 404 but the root works | The `web` service is not falling back to the document | `web` must declare `rewrites: [{source: "/(.*)", destination: "/index.html"}]`; confirm the request reached `web` and not `api` |
+| Deep links 404 but the root works | The `web` service is not falling back to the document | `web` must declare a fallback to `/index.html` that excludes file-like paths, e.g. `{"source": "/((?!assets/)[^.]*)", "destination": "/index.html"}`; confirm the request reached `web` and not `api` |
+| The app loads but shows a MIME type error, or a page goes blank after a deploy | A stale or missing hashed asset was answered with the SPA document (200) instead of 404 | The fallback is too broad — `/(.*)` catches `/assets/*`. Use the extension-guarded pattern above |
+| The deployment builds the root app instead of the two services | Framework Preset is not `Services`, or a project-level Build Command overrides the service commands | See §1.2: set the preset to Services and clear Build/Install Command |
 | `/api/*` returns the HTML page | The `/api` rewrite is missing | Check `vercel.json` rewrites are present and ordered |
 
 ### 1.7 What is not proven about the Vercel path

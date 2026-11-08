@@ -48,6 +48,7 @@
     "set-password": "node scripts/set-password.mjs",
     "build:vercel": "npm run build -w @relay/api && npm run build -w @relay/web",
     "build:service": "node scripts/verify-service-builds.mjs . api && node scripts/verify-service-builds.mjs . web",
+    "verify:routing": "node scripts/verify-web-routing.mjs",
     "db:migrate:prod": "node apps/api/dist/db/cli.js migrate"
   },
   "devDependencies": {
