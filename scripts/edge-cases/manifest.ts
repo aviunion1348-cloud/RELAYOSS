@@ -319,6 +319,20 @@ export interface Fixtures {
  * over-exposed? It was, for rates; the directory itself is not.
  */
 const ADMIN_ONLY = ['/api/audit', '/api/metrics'];
+
+/**
+ * Routes a plain member cannot read.
+ *
+ * Partner surfaces are IAM-scoped, not role-scoped: `assertPartner` resolves the caller
+ * through `partner_iam_users.user_id` and answers 404 for anyone without a row. A plain
+ * member therefore cannot read a partner's entitlements or devices — not because the
+ * role lacks a capability, but because membership is the entitlement. The registry
+ * asserted 200 and recorded working code as broken.
+ *
+ * The fixture's partner identity holds the IAM row, so the partner-role probe still
+ * exercises the allowed path; this list covers the member probe.
+ */
+const PARTNER_SCOPED = ['/api/partners/'];
 const expectedMemberStatus = (route: { method: Probe['method']; path: string }) => {
   const adminOnly = ADMIN_ONLY.some((p) => route.path.startsWith(p));
   if (route.method === 'GET') return adminOnly ? 403 : 200;
@@ -444,9 +458,23 @@ const MALFORMED: Family = {
 
 export const FAMILIES: Family[] = [HAPPY, ANON, HEADER_FORGE, MEMBER_DENY, CLIENT_TENANT, MISSING, CSRF, MALFORMED];
 
-function fill(route: { path: string }, ids: Record<string, string>): string {
+/**
+ * Fill a route path for the happy-path families.
+ *
+ * This used to ignore `needsId` entirely and substitute `Object.values(ids)[0]` —
+ * which is the project id. So the *authorised* probe for `GET /api/tasks/:id` asked
+ * for `GET /api/tasks/p1`, the handler correctly answered 404 (there is no task with
+ * that id), and the registry recorded the product as broken. Every object route whose
+ * subject is not a project was affected; the role matrix beside it used the correct
+ * fixture, which is why the same route could fail on one family and pass on another.
+ *
+ * `fillRoute` already implements the right behaviour — honour the declared `needsId`,
+ * fall back to the project only when a route does not name one — so this delegates
+ * rather than reimplementing it. One substitution rule, one place.
+ */
+function fill(route: { path: string; needsId?: string }, ids: Record<string, string>): string {
   return route.path
-    .replace(':id', ids[ids.__for ?? ''] ?? Object.values(ids)[0] ?? 'x')
+    .replace(':id', (route.needsId && ids[route.needsId]) || ids.project || 'x')
     .replace(':stageKey', 'lead_capture')
     .replace(':itemId', ids.taskChecklist ?? 'x')
     .replace(':gateId', ids.taskGate ?? 'x')
@@ -608,8 +636,12 @@ export function buildCases(fixtures: Fixtures, surface: RouteDef[] = ROUTE_SURFA
       // tenancy (a foreign object is a 404), then the normal success status.
       const memberLike = ['member', 'client', 'partner'].includes(role);
       const adminOnly = ADMIN_ONLY.some((p) => route.path.startsWith(p));
+      // Partner surfaces answer 404 to a non-member: tenancy-style denial, not capability.
+      const partnerScoped = PARTNER_SCOPED.some((p) => route.path.startsWith(p));
       const expected = (adminOnly && memberLike)
         ? 403
+        : partnerScoped && (role === 'member' || role === 'lead')
+          ? 404
         : isWrite
           ? (crossTenant ? (route.path.includes(':id') ? 404 : 403) : successStatus(route))
           : crossTenant && route.path.includes(':id')

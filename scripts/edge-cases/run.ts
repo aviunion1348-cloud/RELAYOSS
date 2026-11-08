@@ -245,11 +245,29 @@ async function main() {
     );
     notifRow = await db.get<{ id: string }>('SELECT id FROM notifications LIMIT 1');
   }
+  /*
+   * A project phase needs *two* rows: the phase catalogue entry and the per-project
+   * instance. The harness assumed the catalogue was already populated and silently
+   * produced nothing when it was not, so every phase probe asked for `phase_missing`
+   * and the API correctly answered 404.
+   *
+   * The catalogue is migration-seeded in a real deployment but not in this fixture
+   * database, so it is created here when absent — and the existence of both rows is
+   * asserted by re-reading, rather than assumed from the insert not throwing.
+   */
   let phaseRow = await db.get<{ id: string }>("SELECT id FROM project_phases WHERE project_id = 'p1' LIMIT 1");
   if (!phaseRow) {
+    await db.run(
+      `INSERT INTO phases (id, key, name, position, description, sla_days, billable, color)
+       VALUES ('ph_edge', 'edge_probe', 'Edge probe phase', 90, 'Fixture phase', 10, 1, '#6366f1')
+       ON CONFLICT (key) DO NOTHING`,
+    );
     const anyPhase = await db.get<{ id: string }>('SELECT id FROM phases LIMIT 1');
     if (anyPhase) {
-      await db.run("INSERT INTO project_phases (id, project_id, phase_id, status) VALUES ('pp_edge','p1',?, 'active')", [anyPhase.id]);
+      await db.run(
+        "INSERT INTO project_phases (id, project_id, phase_id, status) VALUES ('pp_edge','p1',?, 'active')",
+        [anyPhase.id],
+      );
       phaseRow = await db.get<{ id: string }>("SELECT id FROM project_phases WHERE project_id = 'p1' LIMIT 1");
     }
   }
