@@ -50,6 +50,7 @@ There is no JSON file pretending to be a database, and a CI guard enforces that
 | Integrity | FKs enforced, CHECK constraints, append-only `audit_log` |
 | Governance | Turnover gates + acceptance ladder enforced in the service layer *and* the Postgres schema |
 | Migrations | Auto-applied on boot, or `SKIP_MIGRATE=1` + a migration job |
+| Guard | `npm run guard` fails any build that reintroduces a JSON-file store |
 
 ---
 
@@ -213,11 +214,15 @@ explain *why* rather than just refusing.
 ## Verification
 
 ```bash
+npm run verify      # everything below, in order — the CI gate
 npm run guard       # no JSON-file store, no JSON-db dependencies
 npm run typecheck   # strict on both apps
 npm test            # 34 tests: domain engines + HTTP contract
-npm run build       # SPA production build
+npm run build       # API compile (tsc) + SPA production bundle
 ```
+
+`npm run verify` is exactly what `.github/workflows/ci.yml` runs (plus a
+migration-on-empty-database check and a PostgreSQL schema apply).
 
 Tests cover the parts that would hurt if they broke: gate evaluation, the
 `pass`-needs-evidence rule, ladder ordering, the fail-closed policy, CPM float

@@ -21,7 +21,7 @@
     "test": "node --test apps/api/test/*.test.mjs",
     "guard": "node scripts/guard-no-json-store.mjs",
     "build:api": "npm run build -w @relay/api",
-    "verify": "npm run guard && npm run typecheck && npm test"
+    "verify": "npm run guard && npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
