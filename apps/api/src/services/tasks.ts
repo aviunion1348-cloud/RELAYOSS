@@ -19,15 +19,42 @@ import { startTimer, closeTimersFor } from './clocks.ts';
 export const ACCEPTANCE_LADDER = ['dev_complete', 'qa_approved', 'lead_approved', 'client_accepted'] as const;
 export type AcceptanceStep = (typeof ACCEPTANCE_LADDER)[number];
 
+/**
+ * The next task key for a project.
+ *
+ * Derived from the **highest existing suffix**, not from the row count. The count
+ * version was off by one in a way that only appears once a project has any tasks:
+ * with N rows numbered 101..100+N, `100 + N` *is* the last key, so the generator
+ * returned a value already in use and every subsequent creation failed on
+ * `UNIQUE (board_id, key)`. Seeding masked it, because a freshly seeded project has
+ * enough rows that the collision lands on the next insert — which is exactly the
+ * first thing a new user does.
+ *
+ * Counting also cannot survive a deletion: remove one row and the count goes
+ * backwards while the keys do not, producing a collision that depends on unrelated
+ * history. The maximum is stable under deletes, under gaps, and under imported data.
+ *
+ * Keys that do not match `<prefix>-<digits>` are ignored rather than parsed, so a
+ * hand-created row cannot poison the sequence.
+ */
 export async function nextKey(db: Db, projectId: string | null): Promise<string> {
-  if (!projectId) {
-    const n = await db.get<{ c: number }>("SELECT COUNT(*) AS c FROM tasks WHERE project_id IS NULL");
-    return `RLY-${100 + (n?.c ?? 0)}`;
+  let prefix = 'RLY';
+  if (projectId) {
+    const project = await db.get<{ key: string }>('SELECT key FROM projects WHERE id = ?', [projectId]);
+    if (!project) throw badRequest('Unknown project');
+    prefix = project.key;
   }
-  const project = await db.get<{ key: string }>('SELECT key FROM projects WHERE id = ?', [projectId]);
-  if (!project) throw badRequest('Unknown project');
-  const n = await db.get<{ c: number }>('SELECT COUNT(*) AS c FROM tasks WHERE project_id = ?', [projectId]);
-  return `${project.key}-${100 + (n?.c ?? 0)}`;
+  const rows = projectId
+    ? await db.all<{ key: string }>('SELECT key FROM tasks WHERE project_id = ?', [projectId])
+    : await db.all<{ key: string }>('SELECT key FROM tasks WHERE project_id IS NULL');
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp("^" + escaped + "-(\\d+)$");
+  let highest = 100;
+  for (const row of rows) {
+    const match = pattern.exec(String(row.key ?? ''));
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  return `${prefix}-${highest + 1}`;
 }
 
 export async function gatesFor(db: Db, scope: 'task' | 'phase' | 'project'): Promise<GateDef[]> {

@@ -340,7 +340,7 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
    * the single most load-bearing claim in a Vercel deployment, so it is tested by
    * mounting the real export as a listener and speaking HTTP to it.
    */
-  const entry = await import('../src/vercel.ts');
+  const entry = await import('../src/entrypoints/vercel.ts');
   const handler = entry.default;
   assert.equal(typeof handler, 'function', 'vercel.ts must default-export the request handler');
 
@@ -389,32 +389,24 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
     const body = await missing.json();
     assert.ok(body.error?.code, 'a JSON error must carry a code');
 
-    // 4. A non-API path is never answered with the JSON 404 reserved for /api.
+    // 4. The API function does not serve the SPA.
     //
-    //    When the web bundle has been built, the fallback returns the SPA document
-    //    so a deep link survives a browser refresh. When it has not, it returns a
-    //    404 whose message says exactly that ("Build the web app first"). Both are
-    //    correct, and this test must not depend on whether a sibling workspace was
-    //    built — CI runs the unit suite *before* the web build, so asserting 200
-    //    here passed on a workstation and failed on every clean runner.
+    //    This assertion has changed twice, and the history is the point.
     //
-    //    What is invariant, and what actually matters, is that a browser route is
-    //    never served the `{"error":{"code":"not_found"}}` envelope the API uses:
-    //    that is the shape the frontend would try to parse as a screen.
+    //    Originally it required 200 + HTML for a browser route, which passed on a
+    //    workstation with a stale `apps/web/dist` and failed on every clean runner,
+    //    because CI builds the unit suite before the web build. That was fixed by
+    //    accepting either the document or the "build the web app first" 404.
+    //
+    //    In the multi-service deployment neither is right. Vercel rewrites every
+    //    non-`/api` path to the `web` service before a request reaches this
+    //    function, so a browser route arriving here means the routing config is
+    //    wrong. Serving a document — or a document's absence — makes that invisible.
+    //    The API function answers a JSON 404, which is a routing bug you can see.
     const spa = await fetch(`${base}/projects/some-deep-link`);
-    assert.notEqual(spa.status, 500, 'the SPA fallback crashed');
-    if (spa.status === 200) {
-      assert.match(String(spa.headers.get('content-type')), /text\/html/i,
-        'the SPA fallback returned 200 but not HTML');
-    } else {
-      assert.equal(spa.status, 404);
-      const text = await spa.text();
-      // The graceful miss names the missing build. A bare 404 here would be the
-      // misroute this test exists to catch: it is what a browser route looks like
-      // when the fallback treats it like an unknown API path.
-      assert.match(text, /Build the web app first/i,
-        'an unbuilt SPA fallback must say what is missing, not return a bare 404');
-    }
+    assert.equal(spa.status, 404, 'the API function answered a browser route as if it owned it');
+    assert.match(String(spa.headers.get('content-type')), /application\/json/i,
+      'a browser route reaching the API must not be answered with a document');
 
     // 5. A request with a body reaches the handler intact — the adapter must not
     //    depend on the body having been pre-parsed.
