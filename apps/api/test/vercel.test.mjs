@@ -389,11 +389,32 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
     const body = await missing.json();
     assert.ok(body.error?.code, 'a JSON error must carry a code');
 
-    // 4. A non-API path is served as the SPA document, not as a 404, so a deep link
-    //    survives a browser refresh.
+    // 4. A non-API path is never answered with the JSON 404 reserved for /api.
+    //
+    //    When the web bundle has been built, the fallback returns the SPA document
+    //    so a deep link survives a browser refresh. When it has not, it returns a
+    //    404 whose message says exactly that ("Build the web app first"). Both are
+    //    correct, and this test must not depend on whether a sibling workspace was
+    //    built — CI runs the unit suite *before* the web build, so asserting 200
+    //    here passed on a workstation and failed on every clean runner.
+    //
+    //    What is invariant, and what actually matters, is that a browser route is
+    //    never served the `{"error":{"code":"not_found"}}` envelope the API uses:
+    //    that is the shape the frontend would try to parse as a screen.
     const spa = await fetch(`${base}/projects/some-deep-link`);
-    assert.equal(spa.status, 200);
-    assert.match(String(spa.headers.get('content-type')), /text\/html/i);
+    assert.notEqual(spa.status, 500, 'the SPA fallback crashed');
+    if (spa.status === 200) {
+      assert.match(String(spa.headers.get('content-type')), /text\/html/i,
+        'the SPA fallback returned 200 but not HTML');
+    } else {
+      assert.equal(spa.status, 404);
+      const text = await spa.text();
+      // The graceful miss names the missing build. A bare 404 here would be the
+      // misroute this test exists to catch: it is what a browser route looks like
+      // when the fallback treats it like an unknown API path.
+      assert.match(text, /Build the web app first/i,
+        'an unbuilt SPA fallback must say what is missing, not return a bare 404');
+    }
 
     // 5. A request with a body reaches the handler intact — the adapter must not
     //    depend on the body having been pre-parsed.
