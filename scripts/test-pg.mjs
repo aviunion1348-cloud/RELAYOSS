@@ -93,6 +93,9 @@ try {
   console.log('\n• failure and recovery suite on PostgreSQL 16');
   exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/resilience.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
 
+  console.log('\n• ship gate and clock lifecycle suite on PostgreSQL 16');
+  exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/shipgate.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
+
   console.log('\n• HTTP contract suite on PostgreSQL 16');
   exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/http.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
 } catch (err) {

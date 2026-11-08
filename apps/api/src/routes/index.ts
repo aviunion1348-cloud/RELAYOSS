@@ -17,6 +17,7 @@ import { plan } from '../domain/planner.ts';
 import { createTask, updateTask, taskDetail, recordAcceptance, ensureTaskChecks, ACCEPTANCE_LADDER } from '../services/tasks.ts';
 import { clockHealth, liveTimers, resolveTimer, startTimer, sweepTimers, closeTimersFor } from '../services/clocks.ts';
 import { setGauge, renderMetrics, sweeperStats } from '../lib/metrics.ts';
+import { evaluateShipGate, markShipped } from '../services/shipgate.ts';
 
 const db = () => getDb();
 
@@ -431,7 +432,44 @@ export async function registerRoutes(
     const { id: timerId } = req.params as { id: string };
     const { outcome, note } = req.body as { outcome: 'met' | 'missed' | 'paused' | 'waived'; note?: string };
     if (outcome === 'waived') await requireRole(req, ['admin', 'lead']);
-    return ok(await resolveTimer(db(), timerId, outcome, note));
+    // A waiver without a written exception is just a deleted violation.
+    if (outcome === 'waived' && !note?.trim()) {
+      throw badRequest('A waiver requires a written exception note — an unexplained waiver erases the breach.');
+    }
+    const resolved = await resolveTimer(db(), timerId, outcome, note);
+    await db().run('INSERT INTO audit_log (actor_id,action,entity_type,entity_id,after_json) VALUES (?,?,?,?,?)', [
+      await actor(req as never), 'clock.resolve', 'timer', timerId, JSON.stringify({ outcome, note: note ?? '' }),
+    ]);
+    return ok(resolved);
+  });
+
+  /**
+   * Acknowledge a missed clock. The miss is not erased — the timer keeps its
+   * `missed` outcome and the acknowledgement sits beside it, naming the person
+   * who owns the miss and why. This is what turns an alert into accountability.
+   */
+  app.post('/api/clocks/timers/:id/acknowledge', async (req) => {
+    const { id: timerId } = req.params as { id: string };
+    const identity = await currentIdentity(req);
+    const body = req.body as { reason?: string; escalatedTo?: string };
+    if (!body.reason?.trim() || body.reason.trim().length < 12) {
+      throw badRequest('An acknowledgement needs a substantive reason (at least 12 characters).');
+    }
+    const timer = await db().get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
+    if (!timer) throw notFound('Timer not found');
+    if (timer.outcome !== 'missed') {
+      throw badRequest(`Only a missed clock can be acknowledged (this timer is ${timer.outcome}).`);
+    }
+    const existing = await db().get<{ id: string }>('SELECT id FROM clock_acknowledgements WHERE timer_id = ?', [timerId]);
+    if (existing) throw badRequest('This clock miss has already been acknowledged.');
+    await db().run(
+      'INSERT INTO clock_acknowledgements (id, timer_id, acknowledged_by, reason, escalated_to) VALUES (?,?,?,?,?)',
+      [id('ack'), timerId, identity.userId, body.reason.trim(), body.escalatedTo ?? null],
+    );
+    await db().run('INSERT INTO activity (entity_type,entity_id,actor_id,verb,summary) VALUES (?,?,?,?,?)', [
+      timer.entity_type, timer.entity_id, identity.userId, 'clock_acknowledged', `acknowledged miss on ${timer.clock_key}`,
+    ]);
+    return ok(await db().get('SELECT * FROM clock_acknowledgements WHERE timer_id = ?', [timerId]));
   });
 
   /* ------------------------------------------------------------ projects -- */
@@ -566,8 +604,19 @@ export async function registerRoutes(
       await db().run('UPDATE project_phases SET status = ?, started_at = COALESCE(started_at, ?) WHERE id = ?', [
         body.status, body.status === 'active' ? nowIso() : null, phaseRowId,
       ]);
-      if (body.status === 'active') await startTimer(db(), 'milestone-turnover', 'phase', rows.phase_id, `Phase turnover: ${rows.phase_id}`);
-      if (body.status === 'done') await closeTimersFor(db(), 'phase', rows.phase_id, 'met');
+      // Phase lifecycle drives three clocks. Starting a phase starts the
+      // milestone clock; moving it into client review starts the client-turnover
+      // clock (14d ceiling / 7d target); closing it stops both as met. A late
+      // sweep may already have marked them missed — that verdict stands.
+      if (body.status === 'active') {
+        await startTimer(db(), 'milestone-turnover', 'phase', rows.phase_id, `Phase turnover: ${rows.phase_id}`);
+      }
+      if (body.status === 'blocked') {
+        await startTimer(db(), 'client-turnover', 'phase', rows.phase_id, `Client review: ${rows.phase_id}`);
+      }
+      if (body.status === 'done') {
+        await closeTimersFor(db(), 'phase', rows.phase_id, 'met');
+      }
     }
     if (body.progress !== undefined) await db().run('UPDATE project_phases SET progress = ? WHERE id = ?', [body.progress, phaseRowId]);
     if (body.turnoverPassed !== undefined) {
@@ -656,8 +705,16 @@ export async function registerRoutes(
       await db().run('INSERT INTO activity (entity_type,entity_id,actor_id,verb,summary) VALUES (?,?,?,?,?)', [
         'deal', dealId, actorId, 'stage_changed', `${deal.title} → ${stage.name}`,
       ]);
-      if (stage.key === 'tech_consult') await startTimer(db(), 'consult-to-plan', 'deal', dealId, `${deal.title} — plan due`);
-      if (stage.key === 'proposal') await startTimer(db(), 'plan-revision', 'deal', dealId, `${deal.title} — proposal`) ;
+      // Every deal-stage transition that has a clock policy starts it. The map
+      // is data, not a chain of ifs, so a stage added later cannot silently
+      // leave its clock unwired.
+      const STAGE_CLOCKS: Record<string, string> = {
+        inbound: 'lead-triage',
+        tech_consult: 'consult-to-plan',
+        proposal: 'plan-revision',
+      };
+      const clockKey = STAGE_CLOCKS[stage.key];
+      if (clockKey) await startTimer(db(), clockKey, 'deal', dealId, `${deal.title} — ${stage.name}`);
     }
     if (body.status) {
       await db().run('UPDATE deals SET status = ?, won_at = ?, lost_at = ?, updated_at = ? WHERE id = ?', [
@@ -803,6 +860,125 @@ export async function registerRoutes(
   });
 
   /* ------------------------------------------------------------ releases -- */
+  /**
+   * Ship readiness is computed, never asserted. This endpoint is the same code
+   * path that guards the ship transition, so the UI cannot show a green gate
+   * that the server would refuse.
+   */
+  app.get('/api/releases/:id/gate', async (req) => {
+    const { id: releaseId } = req.params as { id: string };
+    const release = await db().get<Record<string, any>>('SELECT * FROM releases WHERE id = ?', [releaseId]);
+    if (!release) throw notFound('Release not found');
+    await requireProjectAccess(db(), await currentIdentity(req), release.project_id, 'read');
+    return ok(await evaluateShipGate(db(), releaseId));
+  });
+
+  /**
+   * Release lifecycle. Only forward transitions are allowed, demo approval and
+   * shipping require a lead, and `shipped` is unreachable while any requirement
+   * is outstanding — the refusal names every outstanding check.
+   */
+  app.patch('/api/releases/:id', async (req) => {
+    const { id: releaseId } = req.params as { id: string };
+    const actorId = await actor(req as never);
+    const body = req.body as {
+      status?: string; demoAt?: string; execSummaryUrl?: string; execSummaryAt?: string;
+      shipPlannedAt?: string; rollbackPlan?: string;
+    };
+    const release = await db().get<Record<string, any>>('SELECT * FROM releases WHERE id = ?', [releaseId]);
+    if (!release) throw notFound('Release not found');
+    await requireProjectAccess(db(), await currentIdentity(req), release.project_id, 'write');
+
+    if (body.execSummaryUrl !== undefined) {
+      await db().run('UPDATE releases SET exec_summary_url = ? WHERE id = ?', [body.execSummaryUrl, releaseId]);
+      // Prepared-at is what the 48h rule compares. It is recorded explicitly so
+      // a link added minutes before the ship window cannot claim a 2-day lead.
+      if (body.execSummaryAt !== undefined) {
+        await db().run('UPDATE releases SET exec_summary_at = ? WHERE id = ?', [body.execSummaryAt, releaseId]);
+      }
+    }
+    if (body.demoAt !== undefined) await db().run('UPDATE releases SET demo_at = ? WHERE id = ?', [body.demoAt, releaseId]);
+    if (body.shipPlannedAt !== undefined) await db().run('UPDATE releases SET ship_planned_at = ? WHERE id = ?', [body.shipPlannedAt, releaseId]);
+    if (body.rollbackPlan !== undefined) await db().run('UPDATE releases SET rollback_plan = ? WHERE id = ?', [body.rollbackPlan, releaseId]);
+
+    if (body.status) {
+      const ORDER = ['planning', 'in_qa', 'demo_ready', 'demo_done', 'approved', 'shipped', 'rolled_back'];
+      const current = ORDER.indexOf(release.status);
+      const next = ORDER.indexOf(body.status);
+      if (next < 0) throw badRequest(`Unknown release status: ${body.status}`);
+      if (body.status !== 'rolled_back' && next <= current) {
+        throw badRequest(`Release ${release.version} is already ${release.status}; the lifecycle only moves forward.`);
+      }
+      if (body.status === 'demo_done' || body.status === 'approved' || body.status === 'shipped') {
+        await requireRole(req, ['admin', 'lead']);
+      }
+      if (body.status === 'demo_done' && !release.demo_at) {
+        throw badRequest('A demo must be scheduled before it can be marked as done.');
+      }
+      if (body.status === 'shipped') {
+        const result = await markShipped(db(), releaseId, actorId);
+        await db().run('INSERT INTO audit_log (actor_id,action,entity_type,entity_id,after_json) VALUES (?,?,?,?,?)', [
+          actorId, 'release.ship', 'release', releaseId,
+          JSON.stringify({ version: release.version, gate: result.gate.checks.map((c) => [c.key, c.passed]) }),
+        ]);
+        return ok({ release: result.release, gate: result.gate });
+      }
+      if (body.status === 'demo_done') {
+        await db().run("UPDATE releases SET status = 'demo_done', demo_approved_at = COALESCE(demo_approved_at, ?) WHERE id = ?", [nowIso(), releaseId]);
+        // Approval locks the 5-day ship clock: the promise is measured from here.
+        await startTimer(db(), 'ship-after-approval', 'release', releaseId, `Ship ${release.version}`);
+        await startTimer(db(), 'exec-summary', 'release', releaseId, `Exec summary ${release.version}`);
+      } else {
+        await db().run('UPDATE releases SET status = ? WHERE id = ?', [body.status, releaseId]);
+        if (body.status === 'demo_ready') {
+          await startTimer(db(), 'exec-summary', 'release', releaseId, `Exec summary ${release.version}`);
+        }
+      }
+      await db().run('INSERT INTO activity (entity_type,entity_id,actor_id,verb,summary) VALUES (?,?,?,?,?)', [
+        'release', releaseId, actorId, 'status_changed', `${release.version} → ${body.status}`,
+      ]);
+    }
+    return ok(await db().get('SELECT * FROM releases WHERE id = ?', [releaseId]));
+  });
+
+  /**
+   * Post-ship acknowledgements. A ship cannot claim success without a
+   * deployment acknowledgement and a post-ship verification — both recorded
+   * here with a source and a timestamp, never inferred.
+   */
+  app.post('/api/releases/:id/acknowledgements', async (req) => {
+    const { id: releaseId } = req.params as { id: string };
+    const actorId = await actor(req as never);
+    const body = req.body as { signal?: string; state?: string; source?: string; detail?: string };
+    const valid = ['device_ack', 'deployment_ack', 'post_ship_verification'];
+    if (!body.signal || !valid.includes(body.signal)) throw badRequest(`signal must be one of ${valid.join(', ')}`);
+    if (!body.state || !['pending', 'received', 'failed', 'waived'].includes(body.state)) throw badRequest('Invalid acknowledgement state');
+    if (body.state === 'received' && !body.source?.trim()) {
+      throw badRequest('A received acknowledgement needs a source (pipeline URL, device id or verification report).');
+    }
+    const release = await db().get<Record<string, any>>('SELECT * FROM releases WHERE id = ?', [releaseId]);
+    if (!release) throw notFound('Release not found');
+    await requireProjectAccess(db(), await currentIdentity(req), release.project_id, 'write');
+    const existing = await db().get<{ id: string }>('SELECT id FROM ship_acknowledgements WHERE release_id = ? AND signal = ?', [releaseId, body.signal]);
+    const receivedAt = body.state === 'received' ? nowIso() : null;
+    if (existing) {
+      await db().run('UPDATE ship_acknowledgements SET state = ?, source = ?, detail = ?, received_at = ?, recorded_by = ? WHERE id = ?', [
+        body.state, body.source ?? '', body.detail ?? '', receivedAt, actorId, existing.id,
+      ]);
+    } else {
+      await db().run(
+        `INSERT INTO ship_acknowledgements (id, release_id, signal, state, source, detail, received_at, recorded_by)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [id('ack'), releaseId, body.signal, body.state, body.source ?? '', body.detail ?? '', receivedAt, actorId],
+      );
+    }
+    await db().run('INSERT INTO audit_log (actor_id,action,entity_type,entity_id,after_json) VALUES (?,?,?,?,?)', [
+      actorId, 'release.acknowledgement', 'release', releaseId, JSON.stringify({ signal: body.signal, state: body.state, source: body.source ?? '' }),
+    ]);
+    const acks = await db().all('SELECT * FROM ship_acknowledgements WHERE release_id = ? ORDER BY signal', [releaseId]);
+    return ok({ releaseId, acknowledgements: acks });
+  });
+
   app.get('/api/releases', async () => {
     const rows = await db().all<Record<string, any>>(
       `SELECT r.*, p.name AS project_name, p.key AS project_key, c.name AS client_name, c.accent_color AS client_color
