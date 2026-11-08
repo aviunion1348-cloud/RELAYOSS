@@ -569,3 +569,31 @@ test('partner routes: an unknown partner id is 404, not an empty success', async
   });
   assert.equal(real.statusCode, 200, 'the existence check broke the legitimate staff path');
 });
+
+test('planner: the schedule is scoped to the caller, and only staff may persist a run', async () => {
+  // `GET /api/planner` selected every non-cancelled task in the database and gave
+  // the lot to the scheduler. Cross-project is the *point* of a resource plan;
+  // cross-client is a leak. Client B's task titles were in client A's schedule.
+  const asClientA = await app.inject({ method: 'GET', url: '/api/planner', headers: { cookie: clientA.cookie } });
+  assert.equal(asClientA.statusCode, 200);
+  const body = JSON.parse(asClientA.body);
+  const ids = JSON.stringify(body);
+  assert.ok(!ids.includes('t_bravo'), "client A saw client B's task in the planner");
+  assert.ok(ids.includes('t_visible'), 'scoping removed the caller\'s own task, which is not a fix');
+
+  // Persisting a run claims "a plan was computed" in the audit trail.
+  const asClientWrite = await app.inject({
+    method: 'POST',
+    url: '/api/planner/runs',
+    headers: { cookie: clientA.cookie, 'x-csrf-token': clientA.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify({ horizonDays: 14 }),
+  });
+  assert.equal(asClientWrite.statusCode, 403, 'a client-portal identity persisted a schedule run');
+  const asLead = await app.inject({
+    method: 'POST',
+    url: '/api/planner/runs',
+    headers: { cookie: lead.cookie, 'x-csrf-token': lead.csrf, 'content-type': 'application/json' },
+    payload: JSON.stringify({ horizonDays: 14 }),
+  });
+  assert.equal(asLead.statusCode, 200, 'the role gate broke the legitimate staff path');
+});

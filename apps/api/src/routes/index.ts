@@ -567,11 +567,27 @@ export async function registerRoutes(
   /* ----------------------------------------------------------- planning --- */
   app.get('/api/planner', async (req) => {
     const horizonDays = queryInt(req, 'horizon', 21);
+    /*
+     * The planner is a read, so it obeys the same scope as every other read.
+     *
+     * It used to select every non-cancelled task in the database and hand the lot
+     * to the scheduler, which returned titles, assignees, due dates and blocking
+     * reasons. `plan()` is cross-project by nature — a resource-levelling view
+     * has to see the whole portfolio — but "whole portfolio" means the caller's,
+     * not the installation's. A client-portal identity saw every other client's
+     * work in the schedule.
+     */
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    const tw = tasksWhere(scope, 't');
     const tasks = await db().all<Record<string, any>>(
       `SELECT t.*, a.capacity_hours_week FROM tasks t LEFT JOIN users a ON a.id = t.assignee_id
-       WHERE t.status NOT IN ('cancelled')`,
+       WHERE t.status NOT IN ('cancelled') AND (${tw.sql})`,
+      tw.params,
     );
-    const deps = await db().all<{ task_id: string; depends_on_id: string }>('SELECT task_id, depends_on_id FROM task_dependencies');
+    const visibleIds = new Set(tasks.map((t) => String(t.id)));
+    const deps = (
+      await db().all<{ task_id: string; depends_on_id: string }>('SELECT task_id, depends_on_id FROM task_dependencies')
+    ).filter((d) => visibleIds.has(String(d.task_id)) && visibleIds.has(String(d.depends_on_id)));
     const depMap = new Map<string, string[]>();
     for (const d of deps) depMap.set(d.task_id, [...(depMap.get(d.task_id) ?? []), d.depends_on_id]);
 
@@ -617,7 +633,9 @@ export async function registerRoutes(
   });
 
   app.post('/api/planner/runs', async (req) => {
-    const actorId = await actor(req as never);
+    // Persisting a schedule run is a staff action: it writes an audit row that
+    // claims a plan was computed. A client-portal identity could create one.
+    const actorId = await requireRole(req, ['admin', 'lead']);
     const horizonDays = Number((req.body as { horizonDays?: number })?.horizonDays ?? 21);
     const runId = id('run');
     await db().run('INSERT INTO schedule_runs (id,created_by,algorithm,horizon_days) VALUES (?,?,?,?)', [runId, actorId, 'cpm+wspt', horizonDays]);
