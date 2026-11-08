@@ -174,6 +174,25 @@ test('vercel: cron is not reachable with a session cookie alone', async () => {
 });
 
 test('vercel: a provisioned credential selects password mode, not dev', async () => {
+  /*
+   * This test is about the *automatic* resolution, so it must control AUTH_MODE
+   * itself rather than inherit it. CI exports AUTH_MODE=dev for the whole workflow,
+   * which is correct there and would make this assertion test the wrong thing — an
+   * explicit mode overrides resolution by design, so the test would fail for a
+   * reason unrelated to the behaviour under test.
+   */
+  const declared = process.env.AUTH_MODE;
+  delete process.env.AUTH_MODE;
+  try {
+    await provisionedCredentialResolution();
+  } finally {
+    if (declared === undefined) delete process.env.AUTH_MODE;
+    else process.env.AUTH_MODE = declared;
+    resetResolvedAuthMode();
+  }
+});
+
+async function provisionedCredentialResolution() {
   const db = await freshDb();
   const { app } = await buildApp({ db, logger: false });
   // No credential yet: a fresh clone must work without configuration.
@@ -202,7 +221,7 @@ test('vercel: a provisioned credential selects password mode, not dev', async ()
   assert.equal(bypass.statusCode, 403);
   await rebuilt.app.close();
   await app.close();
-});
+}
 
 test('vercel: an explicit AUTH_MODE wins over the automatic choice', async () => {
   const db = await freshDb();
