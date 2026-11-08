@@ -156,8 +156,16 @@ export function createAuth(ctx: AuthContext) {
       // expose no user data: health, liveness, readiness and metrics.
       if (url.startsWith('/api/health') || url === '/api/live' || url === '/api/ready' || url === '/api/metrics') return;
 
-      // Creating a session is the one truly anonymous operation.
-      if (url === '/api/auth/dev-login' || url === '/api/auth/oidc/exchange') return;
+      // Creating a session is the one truly anonymous operation. `/api/auth/login`
+      // and `/api/auth/session` are the shared-credential equivalents: the first
+      // mints a session from a username and password, the second only reports
+      // whether the caller already has one.
+      if (
+        url === '/api/auth/dev-login'
+        || url === '/api/auth/oidc/exchange'
+        || url === '/api/auth/login'
+        || url === '/api/auth/session'
+      ) return;
 
       // Session-management endpoints soft-resolve: `/auth/me` answers "who am
       // I", and `/auth/logout` must still work for an already-expired session.

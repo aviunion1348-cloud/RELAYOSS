@@ -1,13 +1,18 @@
 /**
  * Sign-in.
  *
- * Production: an authorization-code redirect to the configured OIDC issuer (the
- * button is disabled and labelled when the IdP is not configured — it never
- * pretends to work).
+ * Three modes, in order of precedence — the server decides which is in force and
+ * reports it as `authMode`, so this screen never shows a button that cannot work:
  *
- * Development: pick a seeded identity and start a real server-side session. The
- * banner is explicit about what mode you are in, because mistaking a dev session
- * for production authentication is exactly how demo auth reaches production.
+ *   password  The shared internal login: one username, one password. This is the
+ *             requested access model for this deployment. There is no registration
+ *             link and no guest path, because neither exists on the server.
+ *   dev       Pick a seeded identity and start a real server-side session. Only
+ *             reachable while no shared credential is provisioned, and refused
+ *             outright in production — the banner says so rather than implying the
+ *             session is proof of identity.
+ *   oidc      Redirect to the organisation's identity provider. Retained for
+ *             multi-user use; not required for this deployment.
  */
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -27,6 +32,8 @@ interface DevUser {
 
 export function SignIn({ info, onSignedIn }: { info: SessionInfo | null; onSignedIn: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
 
   const users = useQuery({
     queryKey: ['dev-identities'],
@@ -40,7 +47,13 @@ export function SignIn({ info, onSignedIn }: { info: SessionInfo | null; onSigne
     onSuccess: () => onSignedIn(),
   });
 
-  const isDev = !info || info.authMode === 'dev';
+  const passwordSignIn = useMutation({
+    mutationFn: () => auth.login(username, password),
+    onSuccess: () => onSignedIn(),
+  });
+
+  const isPassword = info?.authMode === 'password';
+  const isDev = !isPassword && (!info || info.authMode === 'dev');
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ink-950 px-4 py-10">
@@ -57,7 +70,68 @@ export function SignIn({ info, onSignedIn }: { info: SessionInfo | null; onSigne
         </div>
 
         <Card className="p-5">
-          {isDev ? (
+          {isPassword ? (
+            <form
+              className="space-y-3.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (username.trim() && password) passwordSignIn.mutate();
+              }}
+            >
+              <div>
+                <label htmlFor="relay-username" className="mb-1.5 block text-[11.5px] font-medium text-mist-400">
+                  Username
+                </label>
+                <input
+                  id="relay-username"
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  autoFocus
+                  required
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full rounded-lg border border-ink-700/80 bg-ink-900/60 px-3 py-2 text-[13px] text-mist-100 placeholder:text-mist-600 focus:border-iris-500/60 focus:outline-none focus:ring-1 focus:ring-iris-500/40"
+                  placeholder="Your Relay username"
+                />
+              </div>
+              <div>
+                <label htmlFor="relay-password" className="mb-1.5 block text-[11.5px] font-medium text-mist-400">
+                  Password
+                </label>
+                <input
+                  id="relay-password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-lg border border-ink-700/80 bg-ink-900/60 px-3 py-2 text-[13px] text-mist-100 placeholder:text-mist-600 focus:border-iris-500/60 focus:outline-none focus:ring-1 focus:ring-iris-500/40"
+                  placeholder="Password"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full justify-center"
+                disabled={passwordSignIn.isPending || !username.trim() || !password}
+              >
+                {passwordSignIn.isPending ? 'Signing in…' : 'Sign in'}
+              </Button>
+
+              {passwordSignIn.isError && (
+                <p role="alert" className="text-center text-[11.5px] leading-relaxed text-rose-300">
+                  {(passwordSignIn.error as Error).message}
+                </p>
+              )}
+
+              <p className="pt-1 text-center text-[10.5px] leading-relaxed text-mist-600">
+                One shared workspace login. Accounts are provisioned by the delivery lead — there is no
+                self-registration.
+              </p>
+            </form>
+          ) : isDev ? (
             <>
               <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2.5">
                 <Icons.AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" />

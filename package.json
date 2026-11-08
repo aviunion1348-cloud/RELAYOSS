@@ -39,7 +39,10 @@
     "test:edge": "node --no-warnings scripts/edge-cases/run.ts",
     "pg:seed": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts seed",
     "pg:status": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts status",
-    "test:e2e": "node --no-warnings scripts/e2e-browser.mjs"
+    "test:e2e": "node --no-warnings scripts/e2e-browser.mjs",
+    "db:assign-login": "node apps/api/src/db/cli.ts assign-login",
+    "db:pg:assign-login": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts assign-login",
+    "set-password": "node scripts/set-password.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
@@ -48,5 +51,8 @@
   },
   "engines": {
     "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "argon2": "^0.41.1"
   }
 }

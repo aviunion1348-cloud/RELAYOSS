@@ -62,7 +62,7 @@ export interface SessionUser {
 export interface SessionInfo {
   user: SessionUser;
   method: string;
-  authMode: 'oidc' | 'dev';
+  authMode: 'oidc' | 'dev' | 'password';
   expiresAt: string;
   csrfToken: string | null;
   permissions: Record<string, boolean>;
@@ -74,7 +74,19 @@ export const auth = {
     setCsrfToken(me.csrfToken);
     return me;
   },
-  /** Local development only — the endpoint is refused in production. */
+  /**
+   * The shared-credential login. This is the primary sign-in for this deployment:
+   * one username and one password, no registration and no guest path.
+   */
+  async login(username: string, password: string): Promise<SessionInfo> {
+    const out = await request<{ user: SessionUser; csrfToken: string }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    setCsrfToken(out.csrfToken);
+    return this.me();
+  },
+  /** Local development only — refused once a shared credential exists, and in production. */
   async devLogin(userId?: string): Promise<SessionInfo> {
     const out = await request<{ user: SessionUser; csrfToken: string }>('/auth/dev-login', {
       method: 'POST',

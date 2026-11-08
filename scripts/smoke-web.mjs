@@ -61,15 +61,39 @@ async function get(p) {
   return j?.data ?? j;
 }
 
-const login = await fetch(BASE + '/auth/dev-login', {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ userId: 'usr_maya' }),
-});
+/*
+ * Authenticate the way a real user does.
+ *
+ * If the shared credential is provisioned, the demo login is refused — correctly —
+ * and the smoke run must sign in with it. It is provisioned here from the
+ * environment, never hardcoded: the smoke script is committed, and a password in
+ * a committed script is a leaked password.
+ */
+const SHARED_USER = process.env.SMOKE_LOGIN_USERNAME ?? '';
+const SHARED_PASS = process.env.SMOKE_LOGIN_PASSWORD ?? '';
+let login;
+if (SHARED_USER && SHARED_PASS) {
+  login = await fetch(BASE + '/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: SHARED_USER, password: SHARED_PASS }),
+  });
+} else {
+  login = await fetch(BASE + '/auth/dev-login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: 'usr_maya' }),
+  });
+}
 if (!login.ok) { console.error('login failed', login.status); process.exit(2); }
 COOKIE = String(login.headers.get('set-cookie') ?? '').split(';')[0];
-CSRF = (await login.json())?.data?.csrfToken ?? '';
-const session = { user: { id: 'usr_maya', name: 'Maya Iyer', email: 'maya@relayoss.studio', role: 'admin' }, method: 'dev', authMode: 'dev', expiresAt: '', csrfToken: CSRF, permissions: {} };
+// Read the body exactly once: a Response body is a stream, and cloning after
+// reading throws.
+const loginBody = await login.json().catch(() => ({}));
+CSRF = loginBody?.data?.csrfToken ?? '';
+const sessionUser = loginBody?.data?.user
+  ?? { id: 'usr_maya', name: 'Maya Iyer', email: 'maya@relayoss.studio', role: 'admin' };
+const session = { user: sessionUser, method: SHARED_USER ? 'password' : 'dev', authMode: SHARED_USER ? 'password' : 'dev', expiresAt: '', csrfToken: CSRF, permissions: {} };
 
 const pages = ${JSON.stringify(PAGES)};
 let failed = 0;

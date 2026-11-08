@@ -99,8 +99,18 @@ test('backup: a backup archive carries the full schema at the current version', 
   const verified = run(['verify', path.join(dir, archived)]);
   assert.equal(verified.status, 0, verified.stderr);
   // The archive must be at the same migration version as the source, or a restore
-  // would silently regress the schema.
-  assert.match(verified.stdout, /schema version 13/);
+  // would silently regress the schema. The expected version is read from the
+  // migrations directory rather than hardcoded: pinning the literal made this test
+  // fail on every new migration, which trains people to update the number instead
+  // of noticing a real drift.
+  const expectedVersion = fs
+    .readdirSync(path.join(ROOT, 'db', 'migrations'))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f)).length;
+  assert.match(
+    verified.stdout,
+    new RegExp(`schema version ${expectedVersion}\\b`),
+    `the archive must be at schema version ${expectedVersion}`,
+  );
   assert.match(verified.stdout, /integrity ok/);
 });
 

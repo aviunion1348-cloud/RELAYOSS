@@ -29,7 +29,10 @@ export interface Identity {
   role: 'admin' | 'lead' | 'member' | 'client' | 'bot';
   name: string;
   /** How this request was authenticated — audited with every mutation. */
-  method: 'oidc' | 'dev';
+  method: 'oidc' | 'dev' | 'password';
+  /** The session backing this request, when there is one. Needed for logout and
+   *  revocation; absent for bearer and header-derived identities. */
+  sessionId?: string;
   /** Token/session expiry (epoch ms). */
   expiresAt: number;
   /** Scopes/claims relevant to authorisation decisions. */
@@ -200,7 +203,7 @@ export interface SessionRow {
  */
 export async function createSession(
   db: Db,
-  input: { userId: string; method: 'oidc' | 'dev'; ttlMs: number; userAgent?: string; ip?: string },
+  input: { userId: string; method: Identity['method']; ttlMs: number; userAgent?: string; ip?: string },
 ): Promise<{ id: string; expiresAt: number }> {
   const id = `ses_${crypto.randomBytes(18).toString('base64url')}`;
   const expiresAt = Date.now() + input.ttlMs;
@@ -250,6 +253,26 @@ export async function lookupSession(
   );
   if (!user || !user.is_active) return null;
 
+  /**
+   * Credential rotation invalidates password sessions.
+   *
+   * A session minted under credential version N stops working the moment the
+   * credential moves to N+1. This is what makes "change the password" also mean
+   * "sign everybody out" without enumerating sessions. OIDC and dev sessions are
+   * not governed by the shared credential, so the check does not apply to them.
+   */
+  if (session.method === 'password') {
+    const credentialVersion = (session as unknown as { credential_version?: number | null }).credential_version;
+    if (credentialVersion === null || credentialVersion === undefined) return null;
+    const credential = await db.get<{ version: number; disabled_at: string | null }>(
+      'SELECT version, disabled_at FROM local_credentials WHERE user_id = ?',
+      [session.user_id],
+    );
+    if (!credential) return null;
+    if (credential.disabled_at) return null;
+    if (Number(credential.version) !== Number(credentialVersion)) return null;
+  }
+
   if (opts.touch !== false) {
     await db.run('UPDATE sessions SET last_seen_at = ? WHERE id = ?', [
       new Date().toISOString().slice(0, 19).replace('T', ' '),
@@ -264,7 +287,8 @@ export async function lookupSession(
       email: user.email,
       role: user.role,
       name: user.full_name,
-      method: session.method as 'oidc' | 'dev',
+      method: session.method as Identity['method'],
+      sessionId: session.id,
       expiresAt: new Date(session.expires_at.replace(' ', 'T') + 'Z').getTime(),
       claims: {},
     },

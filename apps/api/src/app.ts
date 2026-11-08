@@ -16,6 +16,7 @@ import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
 import { registerRoutes } from './routes/index.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
+import { registerPasswordLogin } from './routes/password-login.ts';
 import { createAuth } from './auth/middleware.ts';
 import { assertAuthConfiguration } from './auth/index.ts';
 import { RateLimiter, LoginThrottle } from './lib/rate-limit.ts';
@@ -29,6 +30,13 @@ export interface BuildOptions {
   migrateOnBoot?: boolean;
   serveStatic?: boolean;
   logger?: boolean;
+  /**
+   * Inject a login throttle. Tests need this: several of them fail a login on
+   * purpose, and a fresh application built inside a test would otherwise carry the
+   * default limiter, which then locks the shared username for the remaining tests.
+   * The limiter's real behaviour is covered by its own unit test.
+   */
+  throttle?: LoginThrottle;
 }
 
 export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyInstance; db: Db }> {
@@ -230,12 +238,16 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   const globalLimiter = new RateLimiter({ limit: config.rateLimit.global, windowMs: 60_000, scope: 'global' });
   const authLimiter = new RateLimiter({ limit: config.rateLimit.auth, windowMs: 60_000, scope: 'auth' });
   const writeLimiter = new RateLimiter({ limit: config.rateLimit.write, windowMs: 60_000, scope: 'write' });
-  const loginThrottle = new LoginThrottle();
+  const loginThrottle = opts.throttle ?? new LoginThrottle();
 
   app.addHook('onRequest', async (req, reply) => {
     const identityKey = (req.headers.cookie ? 'cookie' : req.ip) ?? 'anon';
     const key = `${req.ip}|${identityKey}`;
-    const budget = req.url.startsWith('/api/auth/dev-login') || req.url.startsWith('/api/auth/oidc')
+    // Login attempts draw on the stricter auth budget, whether they use the shared
+    // credential, the demo login or OIDC.
+    const budget = req.url.startsWith('/api/auth/dev-login')
+      || req.url.startsWith('/api/auth/oidc')
+      || req.url.startsWith('/api/auth/login')
       ? authLimiter
       : req.method === 'GET' || req.method === 'HEAD'
         ? globalLimiter
@@ -254,6 +266,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   app.addHook('onRequest', auth.authenticate);
 
   await app.register(registerAuthRoutes, { throttle: loginThrottle });
+  await app.register(registerPasswordLogin, { throttle: loginThrottle });
   await registerRoutes(app, { auth });
 
   if ((opts.serveStatic ?? true) && fs.existsSync(config.webDist)) {

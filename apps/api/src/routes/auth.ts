@@ -20,6 +20,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getDb } from '../db/index.ts';
+import { hasProvisionedCredential } from '../auth/password.ts';
 import { config } from '../config.ts';
 import { badRequest, forbidden, notFound, ok, unauthorized } from '../lib/http.ts';
 import { nowIso } from '../lib/ids.ts';
@@ -71,6 +72,20 @@ export async function registerAuthRoutes(
     const demoAllowed = process.env.ALLOW_DEV_AUTH_IN_PRODUCTION === '1' && config.authMode === 'dev';
     if (config.env === 'production' && !demoAllowed) {
       throw forbidden('Local development login is disabled in production');
+    }
+    /**
+     * No alternate bypass once the shared login is provisioned.
+     *
+     * The requested access model is a single username and password with no guest
+     * mode and no demo entry point. Leaving dev-login reachable would mean anyone
+     * who can POST a user id gets a session, which is precisely the bypass the
+     * requirement forbids. It stays available only while no credential exists —
+     * i.e. for a fresh clone and for the test suites that predate the shared login.
+     */
+    if (await hasProvisionedCredential(db())) {
+      throw forbidden(
+        'This deployment uses the shared login. Sign in at /login.',
+      );
     }
     const parsed = z.object({ userId: z.string().min(1).optional() }).safeParse(req.body ?? {});
     if (!parsed.success) throw badRequest('Invalid payload', parsed.error.issues);
@@ -311,7 +326,16 @@ export async function registerAuthRoutes(
         role: identity.role,
       },
       method: identity.method,
-      authMode: config.authMode,
+      /**
+       * The effective sign-in mode, which is not simply `AUTH_MODE`.
+       *
+       * Once a shared credential exists, the password login is the way in and the
+       * demo login is refused — so the frontend must render the password form
+       * rather than a list of demo identities, even if AUTH_MODE is still `dev`.
+       * Reporting `config.authMode` here would show a sign-in screen whose only
+       * button is guaranteed to fail.
+       */
+      authMode: (await hasProvisionedCredential(db())) ? 'password' : config.authMode,
       expiresAt: new Date(identity.expiresAt).toISOString(),
       csrfToken: sessionId ? issueCsrf(decodeURIComponent(sessionId), config.sessionSecret) : null,
       permissions: permissionsFor(identity.role),
