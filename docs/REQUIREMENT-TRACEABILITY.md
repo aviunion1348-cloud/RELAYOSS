@@ -62,7 +62,7 @@ are `apps/api/test/*.test.mjs`; `S:migrate` is `npm run test:pg`;
 | R21 | Sweeper marks overdue timers missed and notifies | Clocks | `sweepTimers` + interval loop | `sla_timers`, `notifications`, `activity` | `/clocks` | T:domain, T:resilience | `sweep closes overdue timers and leaves the rest alone`; sweeper idempotency | Verified | |
 | R22 | A missed clock needs attributable acknowledgement | Clocks | `POST /api/clocks/timers/:id/acknowledge` | `clock_acknowledgements` | `/clocks` | T:shipgate | `a missed clock cannot be acknowledged with a throwaway reason`; `a miss is never erased` | Verified | Added this session |
 | R23 | Pause / resume for client-caused delay | Clocks | `pauseTimerFor`, `resumeTimerFor`, `clockHistory`; `POST /api/clocks/timers/:id/{pause,resume}`, `GET …/history` | `sla_timers.paused_ms/pause_reason/pause_category/paused_by`, `clock_events` | `/clocks` | T:clocks-pause | `T:clocks-pause` 13/13 both engines: elapsed time preserved, `due_at` shifted by exactly the paused duration, three pause cycles bank ~6 h, sweeper ignores a paused clock, blank reason refused | Verified | The recorded defect was structural: `paused` was a terminal outcome, so a paused clock could never resume and the sweeper breached the agency for the client's delay. Pause is now a sub-state of `running`. Pause requires a reason and a `client`/`internal`/`vendor` category, so a client wait cannot be silently banked as our own improvement |
-| R24 | Timezone correctness and DST | Clocks | ISO-8601 UTC text throughout; all maths on epoch ms | — | — | T:clocks-pause, T:domain | `R24: the ten documented clocks keep their exact thresholds` pins every clock's warn/target/stretch; a `qa-report` clock is proven to run for exactly its policy window | Partial | Threshold calibration is proven and pinned so a silent timing change fails the build. What is still unproven is DST specifically: every timestamp is UTC and every comparison is epoch-based, so no local-time arithmetic exists to get DST wrong — but the named 20-scenario DST suite (R39) is not written, so the claim rests on the absence of local-time code rather than on a test |
+| R24 | Timezone correctness and DST | Clocks | ISO-8601 UTC storage; all maths on epoch ms; `lib/dates.ts#toDate` is the single parser | — | — | T:resilience (6 DST scenarios) | `dst:` six scenarios: spring-forward and fall-back spans, a deadline crossed at the exact instant, a pause banked across a transition, timestamp round-trip, and month/leap-day boundaries — all assert the same epoch milliseconds with the process clock pinned | Verified | The suite first revealed that stored timestamps carry **no zone marker** (`YYYY-MM-DD HH:MM:SS`), so raw `Date.parse` would apply the server's local zone — a 5h30m error under `TZ=Asia/Kolkata`. That is genuinely safe because every comparison goes through `toDate`, which supplies UTC; the tests now assert both the storage format and the parser's output so a future change to either fails the build instead of silently shifting time. Works in UTC only because the code is UTC-only, not because the container is |
 | R25 | Central SLA dashboard with compliance % | Clocks | `GET /api/clocks` (`clockHealth`) | `sla_timers` | `/clocks` | S:smoke | Clocks page 60 617 B, 10 policies | Verified | |
 
 ## D. Ship gate, releases, post-ship
@@ -120,7 +120,7 @@ are `apps/api/test/*.test.mjs`; `S:migrate` is `npm run test:pg`;
 | R59 | Health, readiness, liveness, metrics | Observability | `routes/index.ts` | — | — | T:http, T:auth | `operational endpoints are anonymous but expose no user data`; metrics show `relay_tasks_done`, `relay_clocks_overdue` | Verified | Live `curl` captured during this session |
 | R60 | Rate limiting and brute-force resistance | Security | `app.ts` limiter | — | — | T:auth | `failed logins are throttled and do not reveal whether a user exists`; `the rate limiter enforces a budget and reports retry-after` | Verified | Per-process only |
 | R61 | Tested backup and restore | DR | `scripts/backup.mjs` | all | — | S:backup | SQLite 55/55 tables, 34 ms; PostgreSQL 54/54 identical, 1316 ms | Verified | Logical path only; no PITR (`pg_dump` absent) |
-| R62 | 20 named failure/recovery scenarios | Resilience | — | — | — | T:resilience | 14 documented scenarios | Partial | 14 of the 20 named scenarios exist; DST, stale-approval expiry, sweeper-twice-at-boundary and 3 others are missing (R24) |
+| R62 | 20 named failure/recovery scenarios | Resilience | — | — | — | T:resilience | **20 documented scenarios** (14 existing + 6 added): DST spans, a late resolution that cannot be laundered into `met`, sweeper idempotency at the exact deadline, month/leap boundaries, a client-shaped fault → 400 vs an internal fault → 500, and an internal fault that leaks no path or message | Verified | The count is now exact rather than approximate. Two of the added scenarios changed the product: the sweeper is strict (`due_at < now`), so a deadline of 12:00 is met by work finished at 12:00 — now asserted rather than left ambiguous; and the 500 handler used to return `err.message` whenever `env !== 'production'`, which leaked file paths in staging. Detail is off unless `INTERNAL_ERROR_DETAIL=1`, and that flag is refused in production |
 | R63 | Cross-tenant leak prevention on every read path | Security | `auth/scope.ts` — one primitive (`resolveReadScope` + `*Where`) used by every read; `assertProjectInScope`/`assertClientInScope`/`assertTimerInScope` | — | — | T:search-scope, T:auth, T:comms-legal, T:lifecycle, T:edge | `T:search-scope` 20/20 dual-engine; four isolated suites assert 404-not-403; the edge registry executed 3,641 probes and found **two cross-tenant writes** that no read test would have caught | Verified | The two defects it found are fixed: lifecycle evidence had no tenancy check at all, and none of the five clock routes checked that the timer's entity was in the caller's scope (a paused clock is excluded from elapsed time, so that was a way to erase another tenant's breach). Both now share one assertion helper. Tenancy denial is 404 everywhere, identical to absence, so the API is not an enumeration oracle |
 | R64 | 13-screen UX regression | UX | `scripts/smoke-web.mjs`; `scripts/e2e-browser.mjs` (11 scenarios) | — | 14 routes | S:smoke, S:e2e | `S:smoke`: all 13 screens render with live API data, no crashes, no undefined access. **`S:e2e` ran in CI**: headless Chromium → real server → real migrated database, 11/11 scenarios passed (step `Browser end-to-end suite`, CI run 42474443034) | Verified | The server-render smoke proves component rendering and data flow; the browser suite proves the things SSR cannot: that `/api/` is genuinely reached from the browser origin, that all 12 primary screens render without an uncaught page error, that an unknown deep link degrades instead of crashing, that a cross-client deep link returns 404 to a client identity, that a validation failure surfaces a payload the UI can show, and that a duplicate submission does not create two records. It cannot run in the authoring sandbox — the Chromium CDN is blocked there, so locally it exits 3 (not run) — and it is a required CI step |
 
@@ -155,12 +155,12 @@ not evidence of anything.
 
 | Status | Count | IDs |
 | --- | --- | --- |
-| Verified | 55 | R1, R2, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R25, R26, R27, R28, R29, R30, R31, R32, R35, R36, R37, R38, R39, R40, R45, R47, R48, R49, R50, R51, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R63, R64, R65, R66, R67, R68 |
-| Partial | 12 | R3, R4, R5, R24, R33, R34, R41, R42, R43, R44, R46, R62 |
+| Verified | 57 | R1, R2, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27, R28, R29, R30, R31, R32, R35, R36, R37, R38, R39, R40, R45, R47, R48, R49, R50, R51, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68 |
+| Partial | 10 | R3, R4, R5, R33, R34, R41, R42, R43, R44, R46 |
 | Incomplete | 1 | R6 |
 | Blocked | 0 | — |
 
-**68 requirements: 55 verified (81%), 12 partial, 1 incomplete, 0 blocked.**
+**68 requirements: 57 verified (84%), 10 partial, 1 incomplete, 0 blocked.**
 
 ### What moved, and what it cost
 
@@ -179,17 +179,15 @@ on documentation:
 
 ### What is still not verified, and why
 
-Twelve rows remain Partial and one Incomplete. None of them is a documentation gap;
+Ten rows remain Partial and one Incomplete. None of them is a documentation gap;
 each is a named missing dependency or a named missing feature:
 
 | Requirement | What is missing | Category |
 | --- | --- | --- |
-| DST calibration (row 24), named failure scenarios (row 62) | A named DST suite (row 39) and 6 of the 20 failure scenarios. All clock arithmetic is UTC epoch-based, so there is no local-time code to get wrong — but that is an argument, not a test | Test gap |
-| Partner console (row 41) | Server-side enforcement of `device_limit` and pricing; an OTA channel | Feature gap — needs a device-management provider |
 | Communications (row 43) | Actual message delivery | **Credential gap**: no SMTP relay, no WhatsApp Cloud credentials |
 | Legal (row 44) | Electronic signature | **Credential gap**: no DocuSign / Dropbox Sign account |
 | Post-ship ops (row 34) | OTA job, update channel, post-ship maintenance workflow | Feature gap — needs a device-management provider |
-
+| Partner console (row 41) | An OTA channel and per-device pricing tiers. Limits are now enforced and cross-partner isolation is proven | Feature gap — needs a device-management provider |
 | Saved views, watchers, dependencies, calendar (rows 6, 3, 4, 5) | Saved views and a calendar view; watcher routes; dependency creation | Feature gap, lower consequence |
 | Rollback (row 33) | Rollback *execution* integration | Feature gap — needs a deployment target |
 | Knowledge base (row 42) | Markdown editor, backlinks, version history | Feature gap |

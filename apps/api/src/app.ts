@@ -186,8 +186,24 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
       });
     }
     req.log.error({ err }, 'unhandled');
+    // The detail stays in the server log, keyed by request id. It is never put in
+    // the response: an error message can carry a file path, a SQL fragment or a
+    // table name, and the client has no need for any of them. The request id is
+    // what lets an operator join the client's report to the stack trace.
+    //
+    // Previously the raw message was returned whenever `env !== 'production'`,
+    // which meant a staging deployment pointed at real data leaked internals —
+    // and a test that asserted "no leak" failed against the development build for
+    // exactly that reason.
+    //
+    // `INTERNAL_ERROR_DETAIL=1` opts back in for local debugging, and is refused in
+    // production by the boot guard.
+    const showDetail = config.internalErrorDetail === true;
     return reply.code(500).send({
-      error: { code: 'internal_error', message: config.env === 'production' ? 'Something went wrong.' : err.message },
+      error: {
+        code: 'internal_error',
+        message: showDetail ? `${err.message} (requestId ${req.id})` : 'Something went wrong. Quote the request id when reporting this.',
+      },
       requestId: req.id,
     });
   });

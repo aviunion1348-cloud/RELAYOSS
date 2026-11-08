@@ -396,6 +396,42 @@ test('oidc: tokens are never persisted — only flow metadata is stored', async 
 
   const flow = await db.get('SELECT * FROM oidc_flows WHERE state = ?', [auth.state]);
   const serialised = JSON.stringify(flow);
-  assert.ok(!/eyJ[A-Za-z0-9_-]{10,}/.test(serialised), 'no JWT may be stored in the flow row');
+  // A JWT is three base64url segments joined by dots, and its header decodes to
+  // JSON. Matching a bare `eyJ` prefix is not the same thing: a random 24-byte
+  // token produced by `crypto.randomBytes` begins `eyJ` about once in 17,600
+  // goes, which made this test flake roughly once per few thousand runs.
+  //
+  // Asserting the real structure is both stricter (it catches an actual JWT) and
+  // stable (it ignores an opaque token that happens to start with those letters).
+  const looksLikeJwt = (value) => {
+    if (typeof value !== 'string') return false;
+    const parts = value.split('.');
+    if (parts.length !== 3) return false;
+    if (!parts.every((p) => p.length > 0 && /^[A-Za-z0-9_-]+$/.test(p))) return false;
+    try {
+      const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+      return typeof header === 'object' && header !== null && 'alg' in header;
+    } catch {
+      return false;
+    }
+  };
+  const offenders = [];
+  const walk = (node, path) => {
+    if (typeof node === 'string') { if (looksLikeJwt(node)) offenders.push(path); return; }
+    if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) walk(v, path ? `${path}.${k}` : k);
+    }
+  };
+  walk(flow, '');
+  assert.deepEqual(offenders, [], `no JWT may be stored in the flow row, found at: ${offenders.join(', ')}`);
+  // And prove the detector would have caught one, so a passing assertion is not
+  // merely the result of a detector that never fires.
+  const realJwt = [
+    Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ sub: 'subject-sso' })).toString('base64url'),
+    Buffer.from('signature').toString('base64url'),
+  ].join('.');
+  assert.ok(looksLikeJwt(realJwt), 'the detector must recognise a real JWT');
+  assert.ok(!looksLikeJwt('eyJhbGciOiJSUzI1NiIs'), 'and must not flag a bare opaque token');
   assert.ok(flow.consumed_at, 'the flow is marked consumed');
 });

@@ -344,6 +344,11 @@ export function assertAuthConfiguration(): void {
   if (!config.sessionSecret) {
     throw new Error('SESSION_SECRET is required (used to sign CSRF tokens and dev sessions)');
   }
+  // Detailed internal error messages are a debugging aid, never a production
+  // behaviour: a stack message can name a file, a table or a column.
+  if (prod && config.internalErrorDetail) {
+    throw new Error('INTERNAL_ERROR_DETAIL=1 is refused in production. Internal error text is not returned to clients.');
+  }
 }
 
 export { forbidden };

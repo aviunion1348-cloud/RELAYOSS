@@ -28,6 +28,12 @@ function int(name: string, fallback: number): number {
  */
 const env = () => ({
   env: process.env.NODE_ENV ?? 'development',
+  /**
+   * Return the raw internal error message in 500 responses. Off by default and
+   * refused in production — an error message can carry a file path, a table name
+   * or a SQL fragment. Turn it on locally with INTERNAL_ERROR_DETAIL=1.
+   */
+  internalErrorDetail: process.env.INTERNAL_ERROR_DETAIL === '1',
   host: process.env.HOST ?? '0.0.0.0',
   port: int('PORT', 4000),
   /** SQLite file path (WAL mode). Swap to Postgres via DATABASE_URL. */
