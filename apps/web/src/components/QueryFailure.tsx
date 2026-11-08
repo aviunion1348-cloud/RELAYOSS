@@ -18,9 +18,11 @@
  * distinguishes "the API refused to start because its environment is
  * incomplete" from "the API never answered" from "the API rejected this".
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icons } from './icons';
 import { ApiFailure } from './ApiFailure';
+import { NetworkError } from '../lib/api';
+import { diagnoseApiFailure, type Diagnosis } from '../lib/diagnose';
 
 export function QueryFailure({
   error,
@@ -37,6 +39,29 @@ export function QueryFailure({
   compact?: boolean;
 }) {
   const [retrying, setRetrying] = useState(false);
+  /*
+   * Diagnose, do not merely report.
+   *
+   * "The request never reached the server" is true for half a dozen different
+   * faults and leads to a different fix for each. Once the screen has failed, one
+   * cheap probe turns the browser's generic TypeError into a named cause with
+   * instructions. It runs after the failure, so it costs nothing on the happy
+   * path.
+   */
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
+  useEffect(() => {
+    let live = true;
+    // Only worth asking when the failure was a transport failure rather than a
+    // status the API itself returned and explained.
+    const transport = error instanceof TypeError || error instanceof NetworkError;
+    if (!transport) return;
+    void diagnoseApiFailure().then((d) => {
+      if (live) setDiagnosis(d);
+    });
+    return () => {
+      live = false;
+    };
+  }, [error]);
 
   async function run() {
     if (!retry) return;
@@ -71,6 +96,8 @@ export function QueryFailure({
             <div className="mt-2.5">
               <ApiFailure error={error} what={`Could not load ${what}.`} />
             </div>
+
+            {diagnosis && <DiagnosisPanel diagnosis={diagnosis} />}
 
             {retry && (
               <button
@@ -153,6 +180,62 @@ export function MutationFailure({ error, what, onDismiss }: { error: unknown; wh
           <Icons.X size={11} />
         </button>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * The verdict from `diagnoseApiFailure`, shown as a checklist.
+ *
+ * Deliberately not a paragraph: the reader is already in a failure state, and
+ * what they need is the one cause that applies and the two or three actions that
+ * follow from it. The raw evidence sits underneath, collapsed, for the case where
+ * the verdict is wrong.
+ */
+function DiagnosisPanel({ diagnosis }: { diagnosis: Diagnosis }) {
+  const healthy = diagnosis.code === 'api-ok';
+  return (
+    <div
+      className={
+        healthy
+          ? 'mt-2.5 rounded-lg border border-mint-500/30 bg-mint-500/[0.06] p-3'
+          : 'mt-2.5 rounded-lg border border-gold-600/35 bg-gold-500/[0.05] p-3'
+      }
+    >
+      <p className="flex items-start gap-2 text-[11.5px] font-medium leading-relaxed text-mist-100">
+        <Icons.Info size={13} className={healthy ? 'mt-0.5 shrink-0 text-mint-400' : 'mt-0.5 shrink-0 text-gold-400'} />
+        <span>
+          <span className="text-gold-300">Diagnosis · {diagnosis.code}</span>
+          <span className="mt-1 block font-normal text-mist-300">{diagnosis.summary}</span>
+        </span>
+      </p>
+
+      {!healthy && diagnosis.remedies.length > 0 && (
+        <ol className="mt-2.5 space-y-1.5 pl-1">
+          {diagnosis.remedies.map((step, i) => (
+            <li key={step} className="flex gap-2 text-[11px] leading-relaxed text-mist-400">
+              <span className="mt-[2px] grid size-4 shrink-0 place-items-center rounded-full border border-gold-600/40 bg-gold-500/10 text-[9px] font-semibold text-gold-300">
+                {i + 1}
+              </span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <details className="mt-2.5">
+        <summary className="cursor-pointer text-[10.5px] text-mist-500 hover:text-mist-300">
+          Evidence
+        </summary>
+        <ul className="mt-1.5 space-y-0.5 border-l border-ink-600 pl-2.5">
+          {diagnosis.evidence.map((line) => (
+            <li key={line} className="font-mono text-[10px] leading-relaxed text-mist-500">
+              {line}
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }
