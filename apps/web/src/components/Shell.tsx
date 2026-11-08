@@ -48,14 +48,16 @@ function Logo() {
         The mark: a champagne-metal tile with a specular top edge. Dark stroke on
         gold, for the same contrast reason as the primary button.
       */}
-      <div className="relative grid size-7 place-items-center rounded-lg bg-gradient-to-b from-gold-200 via-gold-400 to-gold-600 shadow-[0_2px_12px_-2px_rgb(212_164_76/0.8),inset_0_1px_0_0_rgb(255_255_255/0.6),inset_0_-1px_0_0_rgb(0_0_0/0.25)]">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#1a1409" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <div className="relative grid size-8 place-items-center rounded-[10px] bg-gradient-to-b from-gold-200 via-gold-400 to-gold-600 shadow-[0_3px_16px_-3px_rgb(212_164_76/0.85),inset_0_1px_0_0_rgb(255_255_255/0.65),inset_0_-1px_0_0_rgb(0_0_0/0.3)]">
+        {/* An engraved inner ring: the detail that makes metal read as metal. */}
+        <span className="pointer-events-none absolute inset-[2px] rounded-[8px] ring-1 ring-inset ring-ink-950/25" />
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#1a1409" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M7 18V6h5.5a3.5 3.5 0 010 7H10l7 5" />
         </svg>
       </div>
       <div className="leading-none">
-        <div className="text-[13px] font-semibold tracking-tight text-mist-100">Relay <span className="text-gold-400">OSS</span></div>
-        <div className="mt-0.5 text-[9.5px] uppercase tracking-[0.17em] text-gold-600/80">Delivery OS</div>
+        <div className="text-[13.5px] font-semibold tracking-[-0.02em] text-mist-100">Relay <span className="text-gold-400">OSS</span></div>
+        <div className="mt-1 text-[9px] font-medium uppercase tracking-[0.2em] text-gold-600/90">Delivery OS</div>
       </div>
     </div>
   );
@@ -223,7 +225,9 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
   return (
     <div className="flex h-full min-h-screen bg-ink-950">
       {/* ------------------------------------------------------------ rail */}
-      <aside className="glass sticky top-0 hidden h-screen w-[228px] shrink-0 flex-col border-r border-gold-600/15 lg:flex">
+      <aside className="glass relative sticky top-0 hidden h-screen w-[236px] shrink-0 flex-col lg:flex">
+        {/* The seam between rail and content: a vertical gold hairline that fades. */}
+        <span className="pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-gold-600/25 to-transparent" />
         <div className="px-4 pb-4 pt-4">
           <Logo />
         </div>
@@ -231,7 +235,7 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
         <nav className="flex-1 overflow-y-auto px-2.5 pb-3">
           {NAV.map((group) => (
             <div key={group.group} className="mb-4">
-              <p className="mb-1 px-2 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-mist-500/70">{group.group}</p>
+              <p className="mb-1.5 mt-1 px-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-mist-500/60">{group.group}</p>
               {group.items.map((item) => {
                 const Icon = Icons[item.icon] as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
                 return (
@@ -241,19 +245,23 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
                     end={item.to === '/'}
                     className={({ isActive }) =>
                       cls(
-                        'group relative flex items-center gap-2.5 rounded-lg px-2 py-[7px] text-[12.5px] font-medium transition-colors',
+                        'group relative flex items-center gap-2.5 rounded-lg px-2 py-[7.5px] text-[12.5px] font-medium transition-all duration-200',
                         isActive
-                          ? 'bg-gradient-to-r from-gold-500/[0.14] via-gold-500/[0.05] to-transparent text-mist-100'
-                          : 'text-mist-400 hover:bg-white/[0.035] hover:text-mist-200',
+                          ? 'bg-gradient-to-r from-gold-500/[0.16] via-gold-500/[0.06] to-transparent text-white shadow-[inset_0_1px_0_0_rgb(248_231_185/0.06)]'
+                          : 'text-mist-400 hover:bg-white/[0.04] hover:text-mist-100',
                       )
                     }
                   >
                     {({ isActive }) => (
                       <>
-                        {isActive && <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-gold-400 shadow-[0_0_10px_0_rgb(212_164_76/0.7)]" />}
+                        {isActive && <span className="rail absolute left-0 top-1/2 h-5 w-[2.5px] -translate-y-1/2 rounded-r-full" />}
                         <Icon size={14.5} strokeWidth={isActive ? 2.2 : 1.8} className={isActive ? 'text-gold-300' : 'text-mist-500 group-hover:text-mist-300'} />
                         <span className="flex-1">{item.label}</span>
-                        {item.hint && <span className="hidden font-mono text-[9.5px] text-mist-500/60 group-hover:inline">{item.hint}</span>}
+                        {item.hint && (
+                          <span className="hidden opacity-0 transition-opacity duration-200 group-hover:opacity-100 lg:block">
+                            <span className="keycap">{item.hint}</span>
+                          </span>
+                        )}
                       </>
                     )}
                   </NavLink>
@@ -266,7 +274,7 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
         <div className="border-t border-ink-700/80 p-2.5">
           <button
             onClick={() => setPaletteOpen(true)}
-            className="flex w-full items-center gap-2 rounded-lg border border-ink-600 bg-ink-850/70 px-2 py-1.5 text-[11.5px] text-mist-500 backdrop-blur-md transition-colors hover:border-gold-600/40 hover:text-gold-200"
+            className="edge flex w-full items-center gap-2 rounded-lg bg-ink-850/60 px-2 py-1.5 text-[11.5px] text-mist-500 transition-colors hover:text-gold-200"
           >
             <Icons.Search size={12} />
             <span className="flex-1 text-left">Search…</span>
@@ -305,7 +313,8 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
 
       {/* --------------------------------------------------------- content */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="glass sticky top-0 z-30 flex h-12 shrink-0 items-center gap-3 border-b border-gold-600/15 px-3 sm:px-4">
+        <header className="glass relative sticky top-0 z-30 flex h-[52px] shrink-0 items-center gap-3 px-3 sm:px-4">
+          <span className="gold-rule pointer-events-none absolute inset-x-0 bottom-0 h-px" />
           <div className="flex items-center gap-2 lg:hidden">
             <Logo />
             <span className="hidden text-[11px] text-mist-500 sm:inline">·</span>
@@ -445,9 +454,13 @@ export function PageHeader({
     <div className="relative flex flex-wrap items-end justify-between gap-3 px-4 pb-3.5 pt-4 sm:px-5 sm:pb-4 sm:pt-5">
       <span className="gold-rule pointer-events-none absolute inset-x-0 bottom-0 h-px" />
       <div className="min-w-0">
-        {eyebrow && <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.12em] text-mist-500">{eyebrow}</div>}
-        <h1 className="text-[19px] font-semibold tracking-tight text-white">{title}</h1>
-        {subtitle && <p className="mt-1 max-w-[92ch] text-[12px] leading-relaxed text-mist-500">{subtitle}</p>}
+        {eyebrow && (
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-gold-600/90">
+            {eyebrow}
+          </div>
+        )}
+        <h1 className="display text-[23px] text-white">{title}</h1>
+        {subtitle && <p className="mt-1.5 max-w-[92ch] text-[12px] leading-relaxed text-mist-500">{subtitle}</p>}
       </div>
       {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
     </div>

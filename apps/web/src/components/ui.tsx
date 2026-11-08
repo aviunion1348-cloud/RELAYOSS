@@ -118,9 +118,31 @@ export function AvatarStack({ people, max = 3, size = 20 }: { people: Array<{ in
 }
 
 /* -------------------------------------------------------------------- card */
-export function Card({ children, className, hover, ...rest }: HTMLAttributes<HTMLDivElement> & { hover?: boolean }) {
+export function Card({
+  children, className, hover, hero, ...rest
+}: HTMLAttributes<HTMLDivElement> & { hover?: boolean; hero?: boolean }) {
+  /*
+   * Three levels of presence, and only three, so a screen never becomes a field
+   * of equally-important boxes:
+   *
+   *   hero    one per screen — the thing the reader came for
+   *   hover   interactive: lifts 2px and its hairline brightens
+   *   plain   a container, deliberately quiet
+   *
+   * The gradient hairline (`edge`) is what separates these from a wireframe:
+   * a flat 1px border reads as a mockup, while a border that brightens towards
+   * one corner reads as a lit edge.
+   */
   return (
-    <div {...rest} className={cls('surface rounded-xl', hover && 'surface-hover', className)}>
+    <div
+      {...rest}
+      className={cls(
+        'edge rounded-xl',
+        hero ? 'surface-hero' : 'surface',
+        hover && 'surface-hover lift edge-hover',
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -134,7 +156,11 @@ export function SectionHeader({
     <div className={cls('flex items-start justify-between gap-4', className)}>
       <div className="min-w-0">
         <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-white">
-          {Icon && <Icon size={14} className="text-mist-500" />}
+          {Icon ? (
+            <Icon size={14} className="text-gold-500" />
+          ) : (
+            <span className="h-3 w-[2px] rounded-full bg-gold-500/70" />
+          )}
           {title}
         </h2>
         {subtitle && <p className="mt-0.5 text-[11.5px] leading-relaxed text-mist-500">{subtitle}</p>}
@@ -315,13 +341,18 @@ export function Stat({
 }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string; icon?: keyof typeof Icons; trend?: ReactNode }) {
   const Icon = icon ? (Icons[icon] as React.ComponentType<{ size?: number; className?: string }>) : null;
   return (
-    <Card className="p-3.5" hover>
+    <Card className="group p-3.5" hover>
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-mist-500">{label}</p>
-        {Icon && <Icon size={13} className={cls('shrink-0', TONE_TEXT[tone ?? ''] ?? 'text-mist-500')} />}
+        <p className="eyebrow">{label}</p>
+        {Icon && (
+          <Icon
+            size={13}
+            className={cls('shrink-0 transition-transform duration-300 group-hover:scale-110', TONE_TEXT[tone ?? ''] ?? 'text-mist-500')}
+          />
+        )}
       </div>
-      <p className="mt-1.5 text-[22px] font-semibold leading-none tracking-tight tabular text-white">{value}</p>
-      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-mist-500">{trend}{sub}</div>
+      <p className="metric mt-2 text-[26px] font-semibold leading-none text-white">{value}</p>
+      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-mist-500">{trend}{sub}</div>
     </Card>
   );
 }
