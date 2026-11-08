@@ -168,9 +168,27 @@ if (await portOpen(PORT)) {
   // A clean checkout has no database: migrate + seed so every screen has real
   // content to render, rather than a wall of empty states that would pass while
   // proving nothing.
-  const dbFile = process.env.DB_PATH ?? path.join(ROOT, 'data', 'relay.sqlite');
+  /*
+   * A dedicated throwaway database, not the developer's working one.
+   *
+   * This used to default to `data/relay.sqlite` — the same file the documented
+   * login-setup step writes a real credential into (`assign-login`). Once anyone
+   * followed the deployment guide locally, the shared credential was provisioned,
+   * `AUTH_MODE=dev` was correctly refused, the dev-login the smoke run depends on
+   * returned 403, and `npm run verify` failed permanently with `login failed 401`.
+   * A smoke test that breaks when the developer configures the application it is
+   * testing is worse than useless: it trains people to ignore it.
+   *
+   * The smoke run builds its own fixture each time instead, so it is impervious to
+   * whatever else the checkout has been used for.
+   */
+  const dbFile = process.env.SMOKE_DB_PATH ?? path.join(WORK, 'smoke.sqlite');
+  if (process.env.SMOKE_DB_PATH && !fs.existsSync(dbFile)) {
+    console.error(`✗ SMOKE_DB_PATH is set but ${dbFile} does not exist`);
+    process.exit(1);
+  }
   if (!fs.existsSync(dbFile)) {
-    console.log('· no database — migrating and seeding for the smoke run');
+    console.log('· no smoke database — migrating and seeding a fresh one');
     execFileSync(process.execPath, ['--no-warnings', 'apps/api/src/db/cli.ts', 'migrate'], {
       cwd: ROOT,
       stdio: 'inherit',
