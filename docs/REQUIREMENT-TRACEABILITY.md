@@ -113,9 +113,9 @@ are `apps/api/test/*.test.mjs`; `S:migrate` is `npm run test:pg`;
 | R52 | Transactional migrations with checksum guard | DB | `db/migrate.ts` | `schema_migrations` | — | T:resilience | `a failed migration rolls back without recording a version`; `checksums prevent editing an applied migration` | Verified | |
 | R53 | SQL portability enforced in CI | DB | `scripts/guard-sql-portability.mjs` | — | — | CI | guard output `✓ SQL portability guard passed` | Verified | Runs in `npm run guard` |
 | R54 | No JSON-file data store | Architecture | `scripts/guard-no-json-store.mjs` | — | — | CI | `✓ Architecture guard passed` | Verified | Covers the whole repo including scripts |
-| R55 | Docker: multi-stage, non-root, healthcheck | Deployment | `Dockerfile` | — | — | — | file reviewed, never built | Blocked | No Docker binary in this environment; CI has the step but has not run |
-| R56 | Compose: Postgres 16, health gate, seed, volume | Deployment | `docker-compose.yml` | — | — | — | file reviewed, never started | Blocked | Same reason |
-| R57 | CI pipeline per spec | Deployment | `.github/workflows/ci.yml` | — | — | — | workflow uses `npm ci`, secret scan, PG integration, builds, docker build | Blocked | Written and reviewed; **never executed** — no GitHub runner was involved in this work |
+| R55 | Docker: multi-stage, non-root, healthcheck | Deployment | `Dockerfile` | — | — | CI | **CI run 42469354957: `Docker image builds` success** | Verified | Not executable in this sandbox (no Docker binary); proven on the GitHub runner. Build fails if guards or the production `pg` assertion fail |
+| R56 | Compose: Postgres 16, health gate, seed, volume | Deployment | `docker-compose.yml` | — | — | CI | **CI run 42469354957: `Docker fresh-start with PostgreSQL 16` success** — `/api/ready` returned 200 from a freshly built stack | Verified | Proven on a runner; this sandbox still has no Docker. Earlier runs failed here, which is how the missing `pg` dependency was found |
+| R57 | CI pipeline per spec | Deployment | `.github/workflows/ci.yml` | — | — | CI | **run 42469354957 green: 20 steps incl. PG 16 conformance, backup drill, SSR smoke, production-auth refusal, docker build, compose fresh-start, traceability audit** | Verified | Executed on every push; three consecutive failures were fixed rather than retried |
 | R58 | Structured logs, correlation IDs, no leakage | Observability | `app.ts` `onResponse`, `requestId` | — | — | T:http | `GET /api/health reports…`; access log uses route templates | Verified | Bodies, tokens and cookies are never logged |
 | R59 | Health, readiness, liveness, metrics | Observability | `routes/index.ts` | — | — | T:http, T:auth | `operational endpoints are anonymous but expose no user data`; metrics show `relay_tasks_done`, `relay_clocks_overdue` | Verified | Live `curl` captured during this session |
 | R60 | Rate limiting and brute-force resistance | Security | `app.ts` limiter | — | — | T:auth | `failed logins are throttled and do not reveal whether a user exists`; `the rate limiter enforces a budget and reports retry-after` | Verified | Per-process only |
@@ -146,22 +146,33 @@ not evidence of anything.
 | 2 | `/dev-login` was hard-blocked in production while the boot guard honoured `ALLOW_DEV_AUTH_IN_PRODUCTION` | The documented compose stack could not sign in; the escape hatch was untestable | Both read the same opt-in, must be exactly `1`, warning stays loud |
 | 3 | `http.test.mjs` never set `SESSION_SECRET` | The suite passed only because another file in the same process had set it — it failed when run alone | Each suite provides its own throwaway secret; all five verified standalone |
 | 4 | Five of ten clock policies were rows no event ever started | The SLA dashboard showed targets that could never be breached or met | Anchors wired as data (`STAGE_CLOCKS`), client-turnover and ship/exec clocks added, 6 new tests |
+| 5 | `npm run smoke:web` needed a server that CI never started | It had only ever passed because a dev server happened to be running — a false green | Now migrates, seeds, boots and stops its own API; verified from a bare checkout |
+| 6 | `pg` was imported but never declared as a dependency | It resolved only through a dev-only tool, so `npm ci --omit=dev` produced an image with no database driver: **every container would have crashed on boot** | Declared `pg`, asserted inside the Dockerfile, and added `scripts/guard-declared-deps.mjs` (verified to fail when the fix is reverted) |
+| 7 | Docker and compose steps were skipped silently when unavailable | A safeguard that reports nothing looks green | Steps now emit an explicit warning naming the blocker and the traceability row |
+| 8 | The release gate was decorative prose in the UI while the server enforced six real checks | The UI implied control it did not have | The panel now renders the server's own evaluation; refused ships are audited |
 
 ## Summary
 
 | Status | Count | IDs |
 | --- | --- | --- |
-| Verified | 43 | R1, R2, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R25, R26, R28, R29, R30, R31, R32, R35, R39, R40, R45, R47, R48, R49, R50, R51, R52, R53, R54, R58, R59, R60, R61, R65, R66, R67 |
+| Verified | 46 | R1, R2, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R25, R26, R28, R29, R30, R31, R32, R35, R39, R40, R45, R47, R48, R49, R50, R51, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R65, R66, R67 |
 | Partial | 14 | R3, R4, R5, R7, R27, R33, R36, R41, R42, R46, R62, R63, R64, R68 |
 | Incomplete | 8 | R6, R23, R24, R34, R37, R38, R43, R44 |
-| Blocked | 3 | R55, R56, R57 |
+| Blocked | 0 | — |
 
-**68 requirements: 43 verified (63%), 14 partial, 8 incomplete, 3 blocked.**
+**68 requirements: 46 verified (68%), 14 partial, 8 incomplete, 0 blocked.**
 
-The number that matters is not 63%. It is that the four highest-consequence
+Nothing is blocked any more — the three Docker and CI rows moved to Verified once
+the pipeline actually ran on a runner (CI run 42469354957) instead of only being
+written. That move was earned, not asserted: the path there was three failing CI
+runs, one of which exposed a production bug that would have crashed every
+container on boot.
+
+The number that matters is not 68%. It is that the four highest-consequence
 controls — the acceptance ladder (R9–R17), the ten clocks (R18–R22), the ship
 gate (R26–R32) and auth/isolation (R45–R52) — are all Verified with adversarial
-tests, while every unbuilt area is named rather than implied.
+tests, while every unbuilt area (client lifecycle R37, communications R43, legal
+R44, pause/resume R23, DST R24) is named rather than implied.
 
 Totals verified against the table by `scripts/check-traceability.mjs`, which
 fails the build if a row lacks a status, an ID repeats, or the summary drifts

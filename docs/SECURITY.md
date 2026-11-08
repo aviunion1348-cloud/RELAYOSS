@@ -164,4 +164,5 @@ and by the HTTP suite.
 | S3 | CSP disabled | Weaker XSS defence-in-depth | Helmet's other headers; no `dangerouslySetInnerHTML`; escaping relies on React |
 | S4 | No upload endpoint | Cannot host binary artifacts | URL-based artifacts with provenance fields |
 | S5 | `npm audit` is advisory | A vulnerable transitive dep would not fail CI | Reviewed at each release; recorded in the runbook |
+| S7 | A dependency can exist by accident | `pg` was imported but undeclared, resolved only via a dev tool, and the production image crashed on boot | Fixed; `scripts/guard-declared-deps.mjs` now fails the build on an undeclared or dev-only runtime import |
 | S6 | No penetration test, no WAF, no IDS | This is an application-level review, not a certified one | Explicitly not claimed as certified |

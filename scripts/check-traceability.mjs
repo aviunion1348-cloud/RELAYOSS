@@ -64,7 +64,11 @@ for (const line of lines) {
   if (claimed !== counts[status]) {
     problems.push(`summary says ${claimed} ${status}, but ${counts[status]} rows carry that status`);
   }
-  const listed = (cells[3] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  // An em dash means "no requirements in this status" — a legitimate cell.
+  const listed = (cells[3] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s && s !== '—' && s !== '-');
   const actualIds = lines
     .filter((l) => /^\| R\d+ \|/.test(l))
     .map((l) => l.split('|').map((c) => c.trim()))

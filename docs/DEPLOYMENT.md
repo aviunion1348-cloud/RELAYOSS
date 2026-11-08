@@ -1,9 +1,10 @@
 # Deployment
 
-Two supported paths: **Node directly** (what was actually executed in this
-environment) and **Docker Compose** (written, validated by build, but *not
-executed here — there is no Docker binary in the build environment*). Every
-claim below that was not executed is marked.
+Two supported paths: **Node directly** and **Docker Compose**. Both have been
+executed — the Node path in this sandbox, the Docker path on the GitHub runner
+(CI run 42469354957: image built, stack started, `/api/ready` returned 200 from a
+fresh PostgreSQL 16 volume). This sandbox still has no Docker binary, so Docker
+commands below are quoted from the pipeline that ran, not from here.
 
 ---
 
@@ -59,7 +60,7 @@ returned `401`; a mutation without a CSRF token returned `403`.
 > It is not a deployment mode. It announces itself at boot and is refused
 > unless the value is exactly `1`.
 
-## 3. Docker path — written, not executed
+## 3. Docker path — executed on CI
 
 `Dockerfile` (multi-stage):
 * **build** stage: `npm ci`, `npm run guard`, `npm run build`, then the runtime
@@ -82,10 +83,17 @@ docker compose up -d
 curl -fsS localhost:4000/api/ready
 ```
 
-**Blocker:** no Docker binary exists in this environment, so the image was never
-built and compose was never started here. CI performs `docker build` and a
-compose smoke; that job has not run either. Treat this section as reviewed
-configuration, not as evidence.
+**Status:** the image build and the compose fresh-start both pass in CI
+(run 42469354957). The first attempts failed, and that failure was real: `pg`
+was imported but never declared, resolving only through a dev-only dependency,
+so `npm ci --omit=dev` produced an image with no PostgreSQL driver. It is now
+declared, asserted inside the Dockerfile, and guarded by
+`scripts/guard-declared-deps.mjs` so the mistake fails at build time.
+
+What the compose run proves: migrations apply on a fresh volume, the health
+gate holds the app until PostgreSQL is ready, and `/api/ready` answers 200.
+What it does not prove: sustained load, multi-replica behaviour, TLS
+termination, or a managed database provider.
 
 ## 4. CI
 
