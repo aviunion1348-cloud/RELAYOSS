@@ -96,16 +96,36 @@ async function main() {
     }
   }
 
-  let task;
+  /*
+   * `createTask` returns the new task's **id string**, not a row.
+   *
+   * The harness used to read `task?.id`, which is `undefined` on a string, so
+   * `taskId` silently fell through to the literal 't_missing' and every task probe
+   * asked for an object that does not exist. The product then correctly answered
+   * 404 and the registry recorded a defect that belonged to the harness.
+   *
+   * Normalising both shapes here — and asserting the row exists — means a future
+   * change to the return type fails loudly instead of turning every task probe into
+   * a phantom 404.
+   */
+  let taskIdRaw: string | undefined;
   try {
-    task = await createTask(db, { title: 'Edge probe task', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1', clientVisible: true }, 'u_lead');
+    const created = await createTask(
+      db,
+      { title: 'Edge probe task', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1', clientVisible: true },
+      'u_lead',
+    );
+    taskIdRaw = typeof created === 'string' ? created : (created as { id?: string })?.id;
   } catch {
-    task = await db.get<{ id: string }>("SELECT id FROM tasks WHERE project_id = 'p1' LIMIT 1");
+    /* the board or column may not exist on a partially-seeded fixture; fall back */
   }
+  const taskRow = taskIdRaw ? await db.get<{ id: string }>('SELECT id FROM tasks WHERE id = ?', [taskIdRaw]) : null;
+  const task = taskRow ?? (await db.get<{ id: string }>("SELECT id FROM tasks WHERE project_id = 'p1' LIMIT 1"));
   const timerId = await startTimer(db, 'module-turnover', 'project', 'p1', 'Edge probe clock');
   await ensureLifecycle(db, 'c1');
 
-  const taskId = String((task as { id?: string })?.id ?? 't_missing');
+  // `task` is a row ({id}) from the query above, so read `id` once, here.
+  const taskId = String(task?.id ?? '');
   const checklist = await db.get<{ id: string }>('SELECT id FROM task_checklist WHERE task_id = ? LIMIT 1', [taskId]);
   const gate = await db.get<{ id: string }>('SELECT id FROM turnover_checks WHERE task_id = ? LIMIT 1', [taskId]);
 
@@ -266,7 +286,7 @@ async function main() {
 
   const fixtures = {
     ids: {
-      project: 'p1', task: taskId, client: 'c1', timer: String(timerId ?? 'tm_missing'),
+      project: 'p1', partner: 'pa1', client: 'c1', timer: String(timerId ?? 'tm_missing'),
       release: release?.id ?? 'rel_missing', qa: qa?.id ?? 'qa_missing',
       legalDoc: doc?.id ?? 'doc_missing', thread: thread?.id ?? 'thr_missing',
       changeRequest: change?.id ?? 'chg_missing', notification: notif?.id ?? 'notif_missing',
@@ -465,8 +485,15 @@ async function main() {
       console.log(`  ${String(count).padStart(5)}  ${key}`);
     }
     console.log('');
-    console.log('first 15 failures:');
-    for (const f of failures.slice(0, 15)) {
+    /*
+     * `--failures N` controls how many are listed. The default of 15 is enough to
+     * notice a pattern; classifying 800+ failures needs all of them, and reading them
+     * from the source of truth beats re-deriving the distribution by hand.
+     */
+    const failArgIdx = args.indexOf('--failures');
+    const failCount = failArgIdx >= 0 ? Number(args[failArgIdx + 1] ?? 50) : 15;
+    console.log(`listing ${Math.min(failCount, failures.length)} of ${failures.length} failures:`);
+    for (const f of failures.slice(0, failCount)) {
       console.log(`  ${f.code}  ${f.scenario.slice(0, 90)}`);
       console.log(`          expected ${f.expected}, got ${f.actual}`);
     }

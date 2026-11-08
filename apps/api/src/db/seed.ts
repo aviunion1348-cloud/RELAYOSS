@@ -648,15 +648,45 @@ export async function seed(db: Db, log: (m: string) => void = console.log): Prom
         'INSERT INTO partners (id,client_id,name,slug,console_url,plan,device_limit,api_quota_month,seat_limit) VALUES (?,?,?,?,?,?,?,?,?)',
         [pid, cid, name, slug, `https://${slug}.relayoss.studio/console`, plan, devices, quota, seats],
       );
+      /*
+       * Partner IAM identities.
+       *
+       * `user_id` is not decoration: `assertPartner` in the router resolves a partner
+       * from `partner_iam_users.user_id`, so a row without one grants nobody access.
+       * The seed used to insert these rows with the column unset, which meant every
+       * non-admin partner request was a 404 — the console looked present in the UI
+       * and was unreachable through the API for anyone but an admin. The edge-case
+       * registry caught it as 124 "expected 200, got 404" failures, mostly on the
+       * partner routes.
+       *
+       * So each partner gets a real `users` row, and the IAM row references it. The
+       * first partner's owner doubles as the partner identity used by the smoke run
+       * and the edge fixtures.
+       */
       const iamUsers: Array<any[]> = [
         [`${slug}.owner@${slug}.app`, pick([`Priya Raman`, `Rohit Malhotra`, `Aisha Khan`, `Vikram Shah`, `Neha Bansal`]), 'owner', 1, 1],
         [`ops@${slug}.app`, 'Ops Desk', 'operator', 1, pick([0, 1, 2])],
         [`qa@${slug}.app`, 'QA Automation', 'service', 0, 1],
       ];
       for (const [email, dn, role, mfa, ago] of iamUsers) {
+        const iamId = id('iam');
+        // The `service` role is a machine account: it authenticates with an API key,
+        // not a user session, so it deliberately has no `users` row.
+        const userId = role === 'service' ? null : `usr_${slug}_${role}`;
+        if (userId) {
+          await db.run(
+            `INSERT INTO users (id,email,full_name,title,role,initials,capacity_hours_week,cost_rate_cents,bill_rate_cents,skills_json)
+             VALUES (?,?,?,?,?,?,?,?,?,?)`,
+            [
+              userId, email, dn, `${name} — ${role}`, 'member',
+              dn.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase(),
+              0, 0, 0, JSON.stringify(['partner']),
+            ],
+          );
+        }
         await db.run(
-          'INSERT INTO partner_iam_users (id,partner_id,email,display_name,role,mfa_enabled,last_active_at,status) VALUES (?,?,?,?,?,?,?,?)',
-          [id('iam'), pid, email, dn, role, mfa, ago === null ? null : daysAgo(ago), mfa === 1 ? 'active' : 'invited'],
+          'INSERT INTO partner_iam_users (id,partner_id,user_id,email,display_name,role,mfa_enabled,last_active_at,status) VALUES (?,?,?,?,?,?,?,?,?)',
+          [iamId, pid, userId, email, dn, role, mfa, ago === null ? null : daysAgo(ago), mfa === 1 ? 'active' : 'invited'],
         );
       }
       for (let i = 0; i < Math.min(devices, 9); i++) {

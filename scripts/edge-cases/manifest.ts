@@ -118,6 +118,23 @@ export const ROUTE_META: Record<string, Partial<RouteDef>> = {
   'POST /api/legal/:id/signatories': { needsId: 'legalDoc', body: { party: 'client', fullName: 'probe' } },
   'POST /api/legal/:id/signatories/:signatoryId/decision': { okStatus: 200, needsId: 'legalDoc', body: { state: 'approved' } },
   'GET /api/legal/:id': { needsId: 'legalDoc' },
+  /*
+   * Partner routes take a *partner* id, not a project or client one.
+   *
+   * Without an entry here `fillRoute` falls back to `ids.project`, so every probe
+   * became `GET /api/partners/p1/devices`. The handler correctly answers 404 —
+   * partner "p1" does not exist — and the registry recorded that as a failure of the
+   * product. It was a failure of the harness: the fixture map has no partner key.
+   *
+   * Naming the fixture per route is the fix. A generic "use the project id" rule
+   * cannot be right for a route whose subject is a different kind of object, and
+   * quietly substituting one kind for another is how a harness manufactures defects.
+   */
+  'GET /api/partners/:id/entitlements': { needsId: 'partner' },
+  'GET /api/partners/:id/devices': { needsId: 'partner' },
+  'POST /api/partners/:id/devices': { needsId: 'partner', okStatus: 201, body: { deviceId: 'EDGE-PROBE-1', deviceName: 'Edge probe device', platform: 'android' } },
+  'POST /api/partners/:id/devices/:deviceId/activate': { needsId: 'partner' },
+  'POST /api/partners/:id/devices/:deviceId/revoke': { needsId: 'partner' },
   'POST /api/legal': { body: { clientId: 'c1', kind: 'nda', title: 'probe nda' } },
   'POST /api/change-requests/:id/decision': { okStatus: 200, needsId: 'changeRequest', body: { decision: 'approved' } },
   'POST /api/change-requests': { body: { clientId: 'c1', title: 'probe change' } },
@@ -136,17 +153,17 @@ export const ROUTE_META: Record<string, Partial<RouteDef>> = {
   'PATCH /api/tasks/:id': { needsId: 'task', body: { title: 'Probe renamed' } },
   'DELETE /api/tasks/:id': { needsId: 'task' },
   'POST /api/tasks/:id/comments': { needsId: 'task', body: { body: 'probe' } },
-  'POST /api/tasks/:id/checklist': { okStatus: 200, needsId: 'task', body: { text: 'probe item' } },
+  'POST /api/tasks/:id/checklist': { okStatus: 200, needsId: 'task', body: { label: 'probe item' } },
   'PATCH /api/tasks/:id/checklist/:itemId': { needsId: 'taskChecklist', body: { done: true } },
-  'PATCH /api/tasks/:id/turnover/:gateId': { needsId: 'taskGate', body: { status: 'pass' } },
-  'POST /api/tasks/:id/acceptance': { okStatus: 200, needsId: 'task', body: { rung: 1 } },
+  'PATCH /api/tasks/:id/turnover/:gateId': { needsId: 'taskGate', body: { status: 'pass', evidence: 'Edge probe: turnover evidence recorded by the registry.' } },
+  'POST /api/tasks/:id/acceptance': { okStatus: 200, needsId: 'task', body: { step: 'internal_review', state: 'passed' } },
   'POST /api/deals': { body: { title: 'Probe deal', clientId: 'c1' } },
   'PATCH /api/deals/:id': { needsId: 'deal', body: { title: 'Probe deal renamed' } },
   'POST /api/qa': { body: { projectId: 'p1', title: 'Probe QA', severity: 'p3' } },
   'PATCH /api/qa/:id': { needsId: 'qa', body: { status: 'verified' } },
   'GET /api/releases/:id/gate': { needsId: 'release' },
   'PATCH /api/releases/:id': { needsId: 'release', body: { status: 'in_qa' } },
-  'POST /api/releases/:id/acknowledgements': { okStatus: 200, needsId: 'release', body: { signal: 'deployment_ack' } },
+  'POST /api/releases/:id/acknowledgements': { okStatus: 200, needsId: 'release', body: { signal: 'deployment_ack', state: 'received', source: 'edge-probe pipeline run' } },
   'GET /api/search': {},
   'GET /api/search/suggest': {},
 };
@@ -202,7 +219,7 @@ export const ROUTE_SURFACE: RouteDef[] = [
   { method: 'POST', path: '/api/tasks/:id/comments', okStatus: 200, needsId: 'task', body: { body: 'probe' } },
   { method: 'POST', path: '/api/tasks/:id/checklist', okStatus: 200, needsId: 'task', body: { text: 'probe item' } },
   { method: 'PATCH', path: '/api/tasks/:id/checklist/:itemId', needsId: 'taskChecklist', body: { done: true } },
-  { method: 'PATCH', path: '/api/tasks/:id/turnover/:gateId', needsId: 'taskGate', body: { status: 'pass' } },
+  { method: 'PATCH', path: '/api/tasks/:id/turnover/:gateId', needsId: 'taskGate', body: { status: 'pass', evidence: 'Edge probe: turnover evidence recorded by the registry.' } },
   { method: 'POST', path: '/api/tasks/:id/acceptance', okStatus: 200, needsId: 'task', body: { rung: 1 } },
   // --- deals
   { method: 'POST', path: '/api/deals', body: { title: 'Probe deal', clientId: 'c1' } },
