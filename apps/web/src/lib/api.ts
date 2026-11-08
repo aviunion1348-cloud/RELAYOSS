@@ -84,6 +84,8 @@ export interface MisconfiguredDetail {
   stage?: 'configuration' | 'database';
   summary: string;
   missing: string[];
+  /** Absent but not fatal, with the consequence of its absence. */
+  optional?: Array<{ name: string; consequence: string }>;
   invalid: Array<{ name: string; problem: string }>;
   remedy: string[];
 }

@@ -339,6 +339,54 @@ Set these in **Project → Settings → Environment Variables** for *Production*
 client bundle, which would publish the secret to every visitor. The frontend needs
 no secrets: it talks to `/api` on its own origin.
 
+### 1.3.1 Running with no database at all (evaluation mode)
+
+You can deploy and sign in with **no PostgreSQL instance**. Set two variables and
+nothing else:
+
+| Variable | Value |
+| --- | --- |
+| `SESSION_SECRET` | 32+ random bytes |
+| `RELAY_ADMIN_PASSWORD_HASH` | from `npm run set-password` |
+
+Optionally `RELAY_LOGIN_USERNAME` (default `lear roadmap 289`) and
+`RELAY_LOGIN_USER_ID` (default `usr_owner`).
+
+On boot the API then: creates SQLite in the instance temp directory (the
+deployment bundle is read-only, so the source tree cannot be used), runs the
+migrations, seeds the demo studio because `users` is empty, and writes the
+credential from the two environment values before the auth mode is resolved — so
+`AUTH_MODE=auto` chooses `password` rather than `dev`, and the production refusal
+never fires.
+
+Verified cold, with no `DATABASE_URL` and no `DB_PATH`:
+
+```
+GET /api/ready         200 {"ready":true,"engine":"sqlite"}
+POST /api/auth/login   200 admin session
+GET /api/projects      200 seeded projects
+GET /api/dashboard     200 {"openTasks":73,"inFlight":31,"blocked":8,...}
+```
+
+**What this mode is not.** SQLite lives in `/tmp`, which is per-instance and
+discarded. Specifically:
+
+- **Data does not survive a cold start.** Write a task, let the instance recycle,
+  and it is gone — the seed runs again and you are back to the demo data.
+- **Two concurrent instances do not share state.** A second instance has its own
+  empty file and its own seed. Concurrent edits to "the same" row are not
+  conflicts, they are two different databases.
+- **Session cookies survive only while the instance does**, and the CSRF secret
+  is derived per instance.
+
+That makes this a way to *evaluate* the product and to see it working, not a way
+to run a studio. Set `DATABASE_URL` to make it durable — §1.4 has the exact
+commands. `SEED_DEMO_DATA=0` turns the automatic seed off if you want an empty
+instance instead.
+
+`/api/health` always reports the engine (`sqlite` or `postgres`), so which mode a
+deployment is in is never a guess.
+
 ### 1.4 Provision the database and the login — the exact steps
 
 Run these **after** the first deployment, from a machine with the repository

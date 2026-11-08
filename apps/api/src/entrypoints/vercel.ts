@@ -108,16 +108,33 @@ async function getApp() {
          * stays resolved-empty so a warm instance does not repeat the boot attempt
          * on every request. The recorded failure is what each request reports.
          */
-        recordBootFailure(bootFailureStage(err), err);
-        // eslint-disable-next-line no-console
-        console.error(
-          JSON.stringify({
-            level: 50,
-            msg: 'API cannot boot — this instance is not serving requests. Reporting the reason on every response.',
-            stage: bootFailure()?.stage,
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        );
+        /**
+         * Reporting the failure must not itself be able to fail.
+         *
+         * `recordBootFailure` and the log line are the only things standing between
+         * a misconfigured deployment and a blank 500, so a defect here would
+         * reintroduce exactly the silent response this whole path exists to remove.
+         * The classification is best-effort and falls back to `database` — the more
+         * cautious stage, because it claims less about what the operator must fix.
+         */
+        let stage: 'configuration' | 'database' = 'database';
+        try {
+          stage = bootFailureStage(err);
+        } catch { /* keep the conservative default */ }
+        try {
+          recordBootFailure(stage, err);
+        } catch { /* the request path still reports something */ }
+        try {
+          // eslint-disable-next-line no-console
+          console.error(
+            JSON.stringify({
+              level: 50,
+              msg: 'API cannot boot — this instance is not serving requests. Reporting the reason on every response.',
+              stage,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        } catch { /* logging must never mask the failure it describes */ }
         return { app: null };
       }
     })();
@@ -186,6 +203,73 @@ async function maybeSweep(): Promise<void> {
  * that shape in `app.server`, so the app is mounted rather than re-implemented.
  */
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
+  /**
+   * Nothing may escape this function unformatted.
+   *
+   * A request that never gets a JSON body produces the worst diagnostic possible:
+   * the client sees `500` with no detail, and a platform-generated error page is
+   * indistinguishable from the application crashing, from the function failing to
+   * boot, and from a proxy rejecting the request. This was observed in production —
+   * `500` with a non-JSON body on every `/api` request — with no way to tell which.
+   *
+   * So the whole handler is wrapped: any in-process failure is answered with JSON
+   * naming the stage it failed at. A genuine crash becomes a reported error rather
+   * than a silence.
+   */
+  try {
+    await handle(req, res);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    /**
+     * Read the request defensively.
+     *
+     * The error path must not depend on the thing that just failed. This is not
+     * hypothetical: a test that made `req.url` throw caught the catch block itself
+     * re-reading `req.url` and throwing again — so a handled failure escaped as the
+     * exact blank 500 this wrapper exists to prevent. Reporting code that can fail
+     * is worse than no reporting code, because it looks like it works.
+     */
+    let url = '(unreadable)';
+    try { url = String(req.url); } catch { /* the request could not be inspected */ }
+    try {
+      // eslint-disable-next-line no-console
+      console.error(
+        JSON.stringify({
+          level: 50,
+          msg: 'API handler threw before it could answer. Responding with JSON so the client sees a reason.',
+          url,
+          error: message,
+        }),
+      );
+    } catch { /* logging must not mask the failure it describes */ }
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader('content-type', 'application/json; charset=utf-8');
+      res.setHeader('cache-control', 'no-store, max-age=0');
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'handler_failed',
+            stage: 'request',
+            summary: 'The API function failed while handling this request.',
+            detail: message,
+            remedy: [
+              'This is a server-side failure, not a browser or routing problem — the request reached the API.',
+              'Check the deployment logs for the request id and the stack trace.',
+              'If it names a module or a permission, the deployment is incomplete; redeploy.',
+              'If it names the database, check DATABASE_URL and that GET /api/ready reports 200.',
+            ],
+          },
+        }),
+      );
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  }
+}
+
+/** The handler proper, separated so every failure can be caught in one place. */
+async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const { app } = await getApp();
 
   /**

@@ -5,6 +5,7 @@
  */
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, '../../..');
@@ -36,8 +37,26 @@ const env = () => ({
   internalErrorDetail: process.env.INTERNAL_ERROR_DETAIL === '1',
   host: process.env.HOST ?? '0.0.0.0',
   port: int('PORT', 4000),
-  /** SQLite file path (WAL mode). Swap to Postgres via DATABASE_URL. */
-  dbPath: process.env.DB_PATH ?? path.join(ROOT, 'data', 'relay.sqlite'),
+  /**
+   * SQLite file path (WAL mode). Swap to Postgres via DATABASE_URL.
+   *
+   * The default is deliberately writable on a read-only deployment. `ROOT` is the
+   * source tree — on Vercel that is the deployed bundle, which is mounted
+   * read-only, so opening a database inside it fails with `unable to open
+   * database file` and the API cannot boot at all. When no `DATABASE_URL` and no
+   * `DB_PATH` are provided on a serverless platform, the temp directory is the
+   * only location that exists and accepts writes.
+   *
+   * This is a fallback for a single-instance demonstration, not a production
+   * store: `/tmp` is per-instance and discarded, so data does not survive a cold
+   * start or reach a second instance concurrently. `docs/DEPLOYMENT.md` says so
+   * plainly, and `/api/health` reports the engine so it is never a mystery.
+   */
+  dbPath:
+    process.env.DB_PATH
+    ?? (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+      ? path.join(os.tmpdir(), 'relay.sqlite')
+      : path.join(ROOT, 'data', 'relay.sqlite')),
   databaseUrl: process.env.DATABASE_URL ?? '',
   /** Demo session identity — replace with SSO/OIDC in production. */
   demoUserId: process.env.DEMO_USER_ID ?? 'usr_maya',

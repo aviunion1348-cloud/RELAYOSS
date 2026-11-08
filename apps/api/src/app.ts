@@ -14,6 +14,8 @@ import path from 'node:path';
 import { config } from './config.ts';
 import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
+import { seed } from './db/seed.ts';
+import { provisionLoginFromEnv } from './auth/provision.ts';
 import { registerRoutes } from './routes/index.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerPasswordLogin } from './routes/password-login.ts';
@@ -68,8 +70,61 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
 
   const db = opts.db ?? getDb();
   if (opts.db) setDb(opts.db);
-  if (opts.migrateOnBoot ?? (process.env.SKIP_MIGRATE !== '1' && !opts.db)) {
+  const migrated = opts.migrateOnBoot ?? (process.env.SKIP_MIGRATE !== '1' && !opts.db);
+  if (migrated) {
     await migrate(db, { log: () => {} });
+    /**
+     * Seed a database that has no people in it.
+     *
+     * Without a PostgreSQL instance the API falls back to SQLite, and on Vercel
+     * that file starts empty on every cold start. An empty database is not merely
+     * sparse: there is no user to sign in as, so `AUTH_MODE=auto` finds no
+     * provisioned credential, resolves to `dev`, and a production deployment
+     * refuses to boot. The result was a sign-in screen that could never work.
+     *
+     * Seeding is gated three ways so it cannot touch real data:
+     *
+     *   - only when the database was just migrated by this boot (never for an
+     *     injected/test database, and never on a Postgres deployment, which is
+     *     migrated deliberately by `npm run db:migrate:prod`);
+     *   - only when `users` is empty, so an existing installation is left alone;
+     *   - only when `SEED_DEMO_DATA` is not `0`, so an operator can turn it off.
+     *
+     * Together that means "a demonstration instance gets its demo data", which is
+     * what the whole product already assumes on a laptop.
+     */
+    if (process.env.SEED_DEMO_DATA !== '0' && !config.databaseUrl) {
+      try {
+        const people = await db.get<{ c: number }>('SELECT COUNT(*) AS c FROM users');
+        if (Number(people?.c ?? 0) === 0) {
+          // `seed` refuses in production without FORCE, and that guard is worth
+          // keeping for the CLI — where an operator must mean it — while this call
+          // is the boot of an empty demonstration instance, already gated above.
+          const previous = process.env.FORCE;
+          process.env.FORCE = '1';
+          try {
+            await seed(db, () => {});
+          } finally {
+            if (previous === undefined) delete process.env.FORCE;
+            else process.env.FORCE = previous;
+          }
+        }
+      } catch (err) {
+        /**
+         * A failed seed must not prevent the server from starting: an operator can
+         * still reach `/api/health`, see the engine, and seed by hand. It is logged
+         * loudly because silently serving an empty database is worse.
+         */
+        // eslint-disable-next-line no-console
+        console.error(
+          JSON.stringify({
+            level: 40,
+            msg: 'Demo seeding failed. The API will start with an empty database.',
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
+    }
   }
 
   const app = Fastify({
@@ -91,6 +146,35 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
    * A provisioned credential wins over `dev` because leaving demo identities
    * reachable on a deployment that has a real password would be a bypass.
    */
+  /**
+   * Provision the shared login from the environment before the mode is resolved.
+   *
+   * Ordering is the whole point. `AUTH_MODE=auto` chooses `password` only if a
+   * credential row exists, so a credential supplied purely by configuration has to
+   * be in the database *before* that decision, or a correctly configured deployment
+   * still resolves to `dev` and refuses to boot in production.
+   *
+   * Only when this boot created the schema: a database that already existed is
+   * somebody's installation, and boot must not rewrite their credential.
+   */
+  if (migrated) {
+    try {
+      await provisionLoginFromEnv(db);
+    } catch (err) {
+      // A malformed hash is already refused by `assertStaticAuthConfiguration`
+      // above; anything reaching here is a storage problem, and it must be visible
+      // rather than quietly leaving the deployment un-signable.
+      // eslint-disable-next-line no-console
+      console.error(
+        JSON.stringify({
+          level: 50,
+          msg: 'Could not provision the shared login from the environment.',
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
+
   resetResolvedAuthMode();
   const declared = config.authMode;
   const effective =

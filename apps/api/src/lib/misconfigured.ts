@@ -62,22 +62,44 @@ export interface BootFailureBody {
   stage: 'configuration' | 'database';
   /** Human-readable, names-only explanation from the boot check itself. */
   summary: string;
-  /** Variables that are absent. Names only. */
+  /** Required variables that are absent. Names only. */
   missing: string[];
+  /** Optional variables that are absent, with what their absence costs. */
+  optional: Array<{ name: string; consequence: string }>;
   /** Variables present but unusable. Names plus the problem, never the value. */
   invalid: Array<{ name: string; problem: string }>;
   /** What to do, in order. */
   remedy: string[];
 }
 
-/** Variable, purpose, and whether it is required for this deployment shape. */
-const REQUIRED = [
-  { name: 'SESSION_SECRET', purpose: 'signs CSRF tokens and session cookies' },
-  { name: 'DATABASE_URL', purpose: 'PostgreSQL connection — SQLite cannot be written from parallel serverless instances' },
+/**
+ * Variables and what they cost when absent.
+ *
+ * `required: true` means the API cannot run at all without it.
+ * `required: false` means it runs, but with a limitation worth stating — the
+ * distinction matters because reporting a genuinely optional variable as "missing"
+ * sends an operator to provision something they do not need. `DATABASE_URL` is the
+ * case in point: without it the API falls back to SQLite in the instance's temp
+ * directory, which is a working deployment (and enough to sign in and evaluate),
+ * just not a durable one.
+ */
+const SETTINGS = [
+  {
+    name: 'SESSION_SECRET',
+    required: true,
+    purpose: 'signs CSRF tokens and session cookies',
+  },
+  {
+    name: 'DATABASE_URL',
+    required: false,
+    purpose: 'PostgreSQL. Without it data lives in ephemeral per-instance SQLite and is lost when the instance recycles',
+  },
 ] as const;
 
 export function bootFailureBody(err: BootFailure): BootFailureBody {
-  const missing = REQUIRED.filter((s) => !process.env[s.name]).map((s) => s.name);
+  const missing = SETTINGS.filter((s) => s.required && !process.env[s.name]).map((s) => s.name);
+  const optional = SETTINGS.filter((s) => !s.required && !process.env[s.name])
+    .map((s) => ({ name: s.name, consequence: s.purpose }));
 
   const invalid: Array<{ name: string; problem: string }> = [];
   const hash = process.env.RELAY_ADMIN_PASSWORD_HASH ?? '';
@@ -99,16 +121,16 @@ export function bootFailureBody(err: BootFailure): BootFailureBody {
    * that one variable is responsible for both symptoms.
    */
   const causal =
-    missing.includes('DATABASE_URL') && /AUTH_MODE=dev is refused/.test(err.error.message)
+    /AUTH_MODE=dev is refused/.test(err.error.message)
       ? [
-          'DATABASE_URL is unset, so the API fell back to an empty local SQLite file. With no provisioned credential, AUTH_MODE=auto resolves to `dev`, which production refuses. Setting DATABASE_URL is what makes the authentication error go away.',
+          'No shared login credential is provisioned, so AUTH_MODE=auto resolved to `dev`, which a production deployment refuses. Fix it either way: set DATABASE_URL (durable storage, then run the migration and assign-login commands below) OR set RELAY_LOGIN_USERNAME and RELAY_ADMIN_PASSWORD_HASH (the credential is written on boot, and SQLite in the instance temp directory is used until you add a database).',
         ]
       : [];
 
   const remedy = [
     ...causal,
     ...missing.map((name) => {
-      const purpose = REQUIRED.find((s) => s.name === name)!.purpose;
+      const purpose = SETTINGS.find((s) => s.name === name)!.purpose;
       return name === 'SESSION_SECRET'
         ? 'Set SESSION_SECRET to 32+ random bytes: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64url\'))"'
         : `Set DATABASE_URL to your provider's pooled PostgreSQL connection string (${purpose})`;
@@ -123,6 +145,7 @@ export function bootFailureBody(err: BootFailure): BootFailureBody {
     stage: err.stage,
     summary: err.error.message,
     missing,
+    optional,
     invalid,
     remedy,
   };

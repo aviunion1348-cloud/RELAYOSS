@@ -51,6 +51,20 @@ export function ApiFailure({ error, what }: { error: unknown; what: string }) {
             <span className="font-mono text-[11px] text-rose-100">{details.missing.join(', ')}</span>
           </Line>
         )}
+        {(details.optional ?? []).length > 0 && (
+          <Line>
+            <span className="text-amber-200/80">Not set (optional):</span>{' '}
+            {details.optional!.map((o, i) => (
+              <span key={o.name}>
+                {i > 0 ? ', ' : ''}
+                <span className="font-mono text-[11px] text-amber-100/90">{o.name}</span>
+              </span>
+            ))}
+            <span className="block pt-0.5 text-[11px] text-amber-200/60">
+              {details.optional![0].consequence}
+            </span>
+          </Line>
+        )}
         {details.invalid.map((i) => (
           <Line key={i.name}>
             <span className="font-mono text-[11px] text-rose-100">{i.name}</span> {i.problem}

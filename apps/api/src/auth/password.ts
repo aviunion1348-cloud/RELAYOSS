@@ -34,17 +34,71 @@
  *     were minted with, so rotating the password invalidates every existing session
  *     without needing to enumerate them.
  */
-import argon2 from 'argon2';
 import type { Db } from '../db/index.ts';
 import { unauthorized } from '../lib/http.ts';
 
+/**
+ * Argon2 is loaded lazily, and that is a deployment requirement rather than taste.
+ *
+ * `argon2` is a native module with a prebuilt binary. A static `import` places it
+ * in the module graph of every request, so if the binding fails to load — a
+ * missing prebuild for the platform, a skipped install script, a libc mismatch —
+ * the *whole function module* throws during import. That happens before any
+ * handler code exists, so no error handling in this application can run: the
+ * platform answers with a `500` and no JSON body. That is exactly the blank 500
+ * observed in production, and it is undiagnosable from the client by construction.
+ *
+ * Loading it inside the functions that need it keeps the failure where it can be
+ * reported: a login attempt returns a clear "password hashing unavailable" error,
+ * every other route keeps working, and `/api/ready` can say what is wrong.
+ *
+ * `type` and the parameters are plain numbers, so the option object needs no
+ * native binding and stays exported for callers and tests.
+ */
+const ARGON2ID = 2; // argon2.argon2id — stable public constant in the binding.
+
 /** OWASP baseline for Argon2id. Recorded in the hash itself. */
 export const ARGON2_OPTIONS = {
-  type: argon2.argon2id,
+  type: ARGON2ID,
   memoryCost: 65_536,
   timeCost: 3,
   parallelism: 4,
 } as const;
+
+type Argon2 = {
+  hash(plaintext: string, opts: typeof ARGON2_OPTIONS): Promise<string>;
+  verify(hash: string, plaintext: string): Promise<boolean>;
+};
+
+let argon2Module: Argon2 | null = null;
+let argon2Failure: Error | null = null;
+
+/** Load the native binding once, remembering a failure so it is not retried per request. */
+async function argon2(): Promise<Argon2> {
+  if (argon2Module) return argon2Module;
+  if (argon2Failure) throw argon2Failure;
+  try {
+    const mod = (await import('argon2')).default as unknown as Argon2;
+    argon2Module = mod;
+    return mod;
+  } catch (err) {
+    argon2Failure = new Error(
+      'Password hashing is unavailable: the argon2 native binding failed to load. ' +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw argon2Failure;
+  }
+}
+
+/** True when the password library can be loaded. Used by the readiness probe. */
+export async function passwordHashingAvailable(): Promise<boolean> {
+  try {
+    await argon2();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Hash a password. Used by `scripts/set-password.mjs` and by tests; the running
@@ -54,7 +108,7 @@ export async function hashPassword(plaintext: string): Promise<string> {
   if (typeof plaintext !== 'string' || plaintext.length === 0) {
     throw new Error('password must be a non-empty string');
   }
-  return argon2.hash(plaintext, ARGON2_OPTIONS);
+  return (await argon2()).hash(plaintext, ARGON2_OPTIONS);
 }
 
 /**
@@ -66,7 +120,7 @@ export async function hashPassword(plaintext: string): Promise<string> {
 export async function verifyPassword(hash: string, plaintext: string): Promise<boolean> {
   if (!hash || !plaintext) return false;
   try {
-    return await argon2.verify(hash, plaintext);
+    return await (await argon2()).verify(hash, plaintext);
   } catch {
     return false;
   }
@@ -82,9 +136,9 @@ export async function verifyPassword(hash: string, plaintext: string): Promise<b
 let dummyHash: string | null = null;
 export async function verifyAgainstDummy(plaintext: string): Promise<false> {
   if (!dummyHash) {
-    dummyHash = await argon2.hash('relay-timing-equaliser-not-a-real-password', ARGON2_OPTIONS);
+    dummyHash = await (await argon2()).hash('relay-timing-equaliser-not-a-real-password', ARGON2_OPTIONS);
   }
-  await argon2.verify(dummyHash, plaintext || 'x').catch(() => false);
+  await (await argon2()).verify(dummyHash, plaintext || 'x').catch(() => false);
   return false;
 }
 
