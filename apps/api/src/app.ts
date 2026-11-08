@@ -335,6 +335,31 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
         .code(404)
         .send({ error: { code: 'not_found', message: `No route for ${req.method} ${req.url}` } });
     }
+    /*
+     * A path that names a file is a file, and a missing one is a 404.
+     *
+     * The obvious SPA fallback — answer every unmatched path with the document —
+     * also answers `/assets/index-abc123.js` with the document and status 200. The
+     * browser then reports a MIME type error rather than a missing file, and a stale
+     * hashed reference renders a blank page instead of failing cleanly. This exact
+     * bug was prevented by a rewrite rule (`/((?!assets/)[^.]*)`) while a static host
+     * owned routing; now that this process answers browser routes itself, the rule
+     * has to live here or it does not exist.
+     *
+     * So the document is served only for paths that cannot be a file. Anything with
+     * an asset extension, anything under /assets/ or /.well-known/, is a 404 when it
+     * is not on disk.
+     */
+    const pathname = req.url.split('?')[0].split('#')[0];
+    const lastSegment = pathname.slice(pathname.lastIndexOf('/') + 1);
+    const looksLikeFile =
+      /^\/assets\//.test(pathname) ||
+      /^\/\.well-known\//.test(pathname) ||
+      /\.(?:js|mjs|css|map|json|txt|xml|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|wasm|pdf)$/i.test(lastSegment);
+    if (looksLikeFile) {
+      return reply.code(404).send({ error: { code: 'not_found', message: `No such file: ${pathname}` } });
+    }
+
     const indexFile = path.join(opts.webDist ?? config.webDist, 'index.html');
     if (fs.existsSync(indexFile)) {
       return reply.type('text/html').send(fs.readFileSync(indexFile));

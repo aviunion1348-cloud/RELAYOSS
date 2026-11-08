@@ -23,3 +23,4 @@ backups/
 # Local env variants that hold real secrets.
 .env.*
 !.env.example
+.routing-db-*/

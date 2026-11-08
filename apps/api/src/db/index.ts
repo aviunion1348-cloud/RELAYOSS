@@ -1,9 +1,20 @@
 /**
  * Database handle.
  *
- * `DATABASE_URL=postgres://…` selects the PostgreSQL driver (production);
- * otherwise a local SQLite file is used (zero-dependency development, tests).
- * Both satisfy the same async `Db` interface, so no service, route or domain
+ * PostgreSQL in every deployment, selected by `DATABASE_URL`. A local SQLite file
+ * remains available for development and the unit tests, and it has to be asked for
+ * explicitly (`DB_PATH`, or `createDb({ engine: 'sqlite' })`) — it is never chosen
+ * by omission in a runtime that is serving traffic.
+ *
+ * That distinction is the whole point of this module. The previous rule was
+ * "`DATABASE_URL` if present, otherwise SQLite in a writable directory", and on a
+ * serverless platform "a writable directory" meant `/tmp`. The consequence was not
+ * a visible failure: the API booted, accepted writes, read them back, and lost them
+ * when the instance was recycled — a database that behaves exactly like one until
+ * it does not. A deployment with no `DATABASE_URL` now refuses to start and says
+ * which variable is missing, which is a failure a person can fix in a minute.
+ *
+ * Both drivers satisfy the same async `Db` interface, so no service, route or domain
  * module needs to know which engine is running.
  */
 import { config } from '../config.ts';
@@ -54,7 +65,26 @@ async function loadSqlite(): Promise<typeof import('./sqlite.ts').SqliteDb> {
   }
 }
 
-export async function createDb(): Promise<Db> {
+/**
+ * Is this runtime a long-running server, or a one-shot script and a test?
+ *
+ * The distinction decides whether a missing `DATABASE_URL` is a misconfiguration or
+ * an ordinary local setup. A server that will serve traffic must not silently use a
+ * file; a test that passes its own `Db` instance never reaches here at all.
+ */
+function isServingRuntime(): boolean {
+  // Serverless (Vercel, Lambda, Cloud Run) is never a place for a local file:
+  // there is no durable disk, and the instance is recycled under the data.
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.K_SERVICE) return true;
+  // A production process is serving traffic by definition.
+  if (process.env.NODE_ENV === 'production') return true;
+  // Local development, the CLI and the test harnesses.
+  return false;
+}
+
+export async function createDb(opts: { engine?: 'postgres' | 'sqlite' } = {}): Promise<Db> {
+  if (opts.engine === 'sqlite') return new (await loadSqlite())(config.dbPath);
+
   if (config.databaseUrl) {
     /**
      * Serverless connection budgeting.
@@ -72,6 +102,18 @@ export async function createDb(): Promise<Db> {
     return new PostgresDb(config.databaseUrl, {
       max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 3,
     });
+  }
+  /*
+   * No DATABASE_URL. That is fine for a local script and a misconfiguration for a
+   * server, so the answer differs by runtime rather than by preference.
+   */
+  if (isServingRuntime()) {
+    throw new Error(
+      'DATABASE_URL is not set. This deployment requires PostgreSQL: there is no local-file ' +
+        'fallback, because a file inside a serverless runtime is per-instance and discarded. ' +
+        'Set DATABASE_URL to a PostgreSQL connection string (the pooled one from your provider ' +
+        'is strongly preferred) and redeploy. See docs/DEPLOYMENT.md.',
+    );
   }
   const SqliteDb = await loadSqlite();
   return new SqliteDb(config.dbPath);

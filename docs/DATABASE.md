@@ -1,17 +1,26 @@
 # Database
 
-PostgreSQL 16 is the authoritative store. SQLite is a development and test
-engine that runs the **same migrations and the same application code** — not a
-second implementation, and never a production target.
+PostgreSQL 16 is the authoritative store, and the **only** engine a deployment may
+use. SQLite is a development and test engine that runs the **same migrations and the
+same application code** — not a second implementation, and never a production target.
+
+There used to be a fallback: `DATABASE_URL` unset meant "use a SQLite file in a
+writable directory", which on a serverless runtime resolved to `/tmp`. It booted,
+it accepted writes, it served them back — and it lost every one of them when the
+instance was recycled. Nothing looked broken, which is why it lasted. A serving
+runtime now refuses to start without `DATABASE_URL` and names the variable; a local
+process may still use a file. `apps/api/test/vercel.test.mjs` asserts both halves of
+that, because a text scan for the guard cannot tell `if (isServingRuntime())` from
+`if (false)`.
 
 ---
 
 ## 1. Engines and selection
 
-| | Production | Development / tests |
+| | Any deployment | Local development / tests |
 | --- | --- | --- |
 | Engine | PostgreSQL 16 | SQLite (`node:sqlite`, WAL) |
-| Selected by | `DATABASE_URL` set | `DATABASE_URL` unset |
+| Selected by | `DATABASE_URL` — **required**, or the process refuses to start | `DATABASE_URL` absent, or `createDb({ engine: 'sqlite' })` |
 | Driver | `apps/api/src/db/postgres.ts` (`pg`) | `apps/api/src/db/sqlite.ts` |
 | Migrations | `db/migrations/pg/*.sql` | `db/migrations/*.sql` |
 

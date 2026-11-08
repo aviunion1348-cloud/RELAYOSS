@@ -175,12 +175,14 @@ jobs:
             apps/api/dist
           retention-days: 7
 
-  service-builds:
-    # Reproduces what Vercel actually does: each service installed and built on its
-    # own, from a clean tree, with production NODE_ENV. The main `verify` job builds
-    # the workspaces from a root install, which is a different thing — it is exactly
-    # how a missing build tool reached production while CI stayed green.
-    name: Vercel service builds (independent, production install)
+  single-service-build:
+    # Reproduces what the platform actually does now: one service, installed from a
+    # clean tree with production NODE_ENV, whose single build command must produce
+    # *both* artefacts. The API serves `apps/web/dist` itself, so a build that
+    # compiles only the workspace it is standing in deploys a working API behind a
+    # page that 404s — a failure the root `verify` job cannot see, because there the
+    # workspaces are already built from a root install.
+    name: Vercel service build (single service, production install)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -189,28 +191,29 @@ jobs:
         with:
           node-version: 22
 
-      # Deliberately no `cache: npm` and no root `npm ci`: the harness wipes
-      # node_modules and lets each service run its own installCommand.
-      # Order matters and is the point: the api service installs and builds first, then
-      # the web service. The web step asserts the api tree is still on disk afterwards,
-      # which is what the platform's `Deploying outputs` step needs.
-      - name: API service — install and build in isolation
-        run: node scripts/verify-service-builds.mjs . api
+      # Deliberately no `cache: npm` and no root `npm ci`: the service's own
+      # installCommand runs, exactly as the platform runs it.
+      - name: Install (production mode, dev dependencies included)
+        run: npm ci --include=dev --no-audit --no-fund
+        env:
+          NODE_ENV: production
 
-      - name: Web service — install and build, then assert the api tree survived
-        run: node scripts/verify-service-builds.mjs . web
+      - name: Build with the service's declared build command
+        run: npm run build:service
+        env:
+          NODE_ENV: production
 
-      - name: Web build is a complete SPA (document + hashed assets)
+      # Both artefacts, asserted independently: the handler the platform invokes and
+      # the document the SPA is served from.
+      - name: The build produced both artefacts
         run: |
+          test -f apps/api/dist/entrypoints/vercel.js
+          test -f apps/api/dist/index.js
           test -f apps/web/dist/index.html
           test -d apps/web/dist/assets
           grep -q '<div id="root">' apps/web/dist/index.html
-          echo "✓ SPA document and assets present"
+          echo "✓ serverless handler, container entry, SPA document and assets all present"
 
-      # The rewrite table is applied to the real build here, because `vercel dev`
-      # cannot answer this: it proxies the Vite dev server, which serves index.html for
-      # every unmatched path itself. A naive /(.*) fallback would make a missing asset
-      # return the SPA document with status 200 instead of a 404.
       - name: Built output routes correctly (deep links, asset 404s, /api not HTML)
         run: npm run verify:routing
 
