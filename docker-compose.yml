@@ -1,6 +1,14 @@
 # ============================================================================
-# Local / staging stack. `docker compose up` gives you the whole product:
-# API + SPA on :4000, Postgres 16 for parity testing.
+# Local production-parity stack: API + SPA on :4000, PostgreSQL 16 as the
+# database of record, migrations applied from the application itself.
+#
+#   docker compose up --build
+#   → http://localhost:4000            (health: /api/ready, metrics: /api/metrics)
+#
+# This stack runs with AUTH_MODE=dev because there is no identity provider in a
+# local environment; that is opt-in via ALLOW_DEV_AUTH_IN_PRODUCTION and is
+# announced loudly at boot. Set AUTH_MODE=oidc and the OIDC_* variables to run
+# the real authentication path.
 # ============================================================================
 services:
   app:
@@ -10,38 +18,59 @@ services:
     environment:
       NODE_ENV: production
       PORT: "4000"
-      DB_PATH: /data/relay.sqlite
+      HOST: 0.0.0.0
+      # PostgreSQL 16 is the production database, not an optional extra.
+      DATABASE_URL: postgres://relay:relay_local_only@postgres:5432/relay
+      AUTH_MODE: dev
+      ALLOW_DEV_AUTH_IN_PRODUCTION: "1"
+      SESSION_SECRET: ${SESSION_SECRET:-local-compose-session-secret-change-me}
       DEMO_USER_ID: usr_maya
       LOG_LEVEL: info
-      CORS_ORIGIN: "*"
-    volumes:
-      - relay-data:/data
+      CORS_ORIGIN: http://localhost:4000
+      SWEEP_INTERVAL_MS: "60000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 20s
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/api/ready"]
       interval: 30s
       timeout: 4s
       retries: 3
+      start_period: 20s
 
-  # Production-parity database. Point DATABASE_URL here when running the
-  # Postgres adapter (see db/postgres/README.md).
+  # One-shot: seeds the demo dataset after the schema is migrated by the app.
+  seed:
+    build: .
+    command: ["node", "apps/api/dist/db/cli.js", "seed"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://relay:relay_local_only@postgres:5432/relay
+      AUTH_MODE: dev
+      ALLOW_DEV_AUTH_IN_PRODUCTION: "1"
+      SESSION_SECRET: ${SESSION_SECRET:-local-compose-session-secret-change-me}
+      FORCE: "1"
+    depends_on:
+      app:
+        condition: service_started
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: relay
       POSTGRES_PASSWORD: relay_local_only
       POSTGRES_DB: relay
-    ports:
-      - "5432:5432"
     volumes:
       - relay-pg:/var/lib/postgresql/data
-      - ./db/postgres/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    # No credentials in the image; this value is local-only and documented as such.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U relay -d relay"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+      start_period: 10s
 
 volumes:
-  relay-data:
   relay-pg:

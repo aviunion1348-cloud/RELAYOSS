@@ -321,8 +321,21 @@ export function verifyCsrf(sessionId: string, token: string | undefined, secret:
 export function assertAuthConfiguration(): void {
   const prod = config.env === 'production';
   if (prod && config.authMode === 'dev') {
-    throw new Error(
-      'AUTH_MODE=dev is refused in production. Configure OIDC (OIDC_ISSUER, OIDC_AUDIENCE, OIDC_JWKS_URI) or set AUTH_MODE=dev explicitly for a non-production deployment.',
+    // The escape hatch exists for one case: a local/demo container stack that
+    // runs with NODE_ENV=production to exercise the production build. It must be
+    // opted into explicitly, and it announces itself at boot and in /api/health.
+    if (process.env.ALLOW_DEV_AUTH_IN_PRODUCTION !== '1') {
+      throw new Error(
+        'AUTH_MODE=dev is refused in production. Configure OIDC (OIDC_ISSUER, OIDC_AUDIENCE, OIDC_JWKS_URI), ' +
+          'or set ALLOW_DEV_AUTH_IN_PRODUCTION=1 for a local demonstration stack.',
+      );
+    }
+    // eslint-disable-next-line no-console
+    console.warn(
+      JSON.stringify({
+        level: 40,
+        msg: 'INSECURE AUTHENTICATION: AUTH_MODE=dev in a production build. Demo identities only — do not expose this instance.',
+      }),
     );
   }
   if (config.authMode === 'oidc' && (!config.oidcIssuer || !config.oidcAudience || !config.oidcJwksUri)) {

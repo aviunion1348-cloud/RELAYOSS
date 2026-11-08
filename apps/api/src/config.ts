@@ -17,7 +17,16 @@ function int(name: string, fallback: number): number {
   return n;
 }
 
-export const config = {
+/**
+ * Values that are read at *use* time, not at import time.
+ *
+ * ESM hoists imports above module body code, so a test (or `dotenv`-style
+ * loader) that sets `process.env` after its import statements would otherwise
+ * be too late: the frozen `config` object would already hold the empty value.
+ * That produced a real, order-dependent bug — `SESSION_SECRET` set at the top
+ * of a test file was ignored because `config.ts` was imported first.
+ */
+const env = () => ({
   env: process.env.NODE_ENV ?? 'development',
   host: process.env.HOST ?? '0.0.0.0',
   port: int('PORT', 4000),
@@ -48,6 +57,30 @@ export const config = {
   corsOrigin: (process.env.CORS_ORIGIN ?? '*').split(',').map((s) => s.trim()),
   /** Absolute path of the built SPA served by the API in production. */
   webDist: process.env.WEB_DIST ?? path.join(ROOT, 'apps', 'web', 'dist'),
-} as const;
+});
 
-export type AppConfig = typeof config;
+type Env = ReturnType<typeof env>;
+
+/**
+ * `config` is a live view over the environment: every property is resolved on
+ * access, so `process.env` set after import (tests, container entrypoints) is
+ * honoured, and nothing is cached across a restart-shaped config change.
+ */
+export const config: Env = new Proxy({} as Env, {
+  get(_target, prop: string | symbol) {
+    if (typeof prop === 'symbol') return undefined;
+    return (env() as Record<string, unknown>)[prop];
+  },
+  has(_target, prop: string | symbol) {
+    return typeof prop === 'string' && prop in env();
+  },
+  ownKeys() {
+    return Reflect.ownKeys(env());
+  },
+  getOwnPropertyDescriptor(_target, prop: string | symbol) {
+    if (typeof prop !== 'string' || !(prop in env())) return undefined;
+    return { configurable: true, enumerable: true, value: (env() as Record<string, unknown>)[prop] };
+  },
+});
+
+export type AppConfig = Env;

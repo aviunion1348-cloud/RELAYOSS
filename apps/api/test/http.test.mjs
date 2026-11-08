@@ -13,6 +13,12 @@
  */
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
+
+// A suite must be runnable on its own (`node --test apps/api/test/http.test.mjs`).
+// The API refuses to boot without a signing secret, so each suite provides its
+// own throwaway one instead of relying on another file in the same run.
+process.env.SESSION_SECRET ||= 'test-session-secret-do-not-use-in-production';
+
 import { buildApp } from '../src/app.ts';
 import { SqliteDb } from '../src/db/sqlite.ts';
 import { PostgresDb } from '../src/db/postgres.ts';

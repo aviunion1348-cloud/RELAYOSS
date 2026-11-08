@@ -48,8 +48,13 @@ export async function registerAuthRoutes(
 
   /* ---------------------------------------------------------- dev login -- */
   app.post('/api/auth/dev-login', async (req, reply) => {
-    // Hard gate: this endpoint does not exist in production.
-    if (config.env === 'production') throw forbidden('Local development login is disabled in production');
+    // Gate: refused in production unless the same explicit opt-in that lets the
+    // boot guard run dev auth is set (a local demonstration stack). The two
+    // checks must agree, otherwise the documented compose stack cannot sign in.
+    const demoAllowed = process.env.ALLOW_DEV_AUTH_IN_PRODUCTION === '1' && config.authMode === 'dev';
+    if (config.env === 'production' && !demoAllowed) {
+      throw forbidden('Local development login is disabled in production');
+    }
     const parsed = z.object({ userId: z.string().min(1).optional() }).safeParse(req.body ?? {});
     if (!parsed.success) throw badRequest('Invalid payload', parsed.error.issues);
 

@@ -115,20 +115,64 @@ test('auth: dev-login issues an HttpOnly session cookie and a CSRF token', async
   assert.ok(res.json().data.csrfToken);
 });
 
-test('auth: production refuses dev-login entirely', async () => {
-  const previous = process.env.NODE_ENV;
+/**
+ * The demo-login endpoint is the single most dangerous route in the app: it
+ * mints a real session for any user id. It must be refused outright in a
+ * production build, and only re-enabled by an explicit, loud opt-in.
+ *
+ * These assertions run against the live config (read at request time), so they
+ * describe what the server actually does rather than what a comment says.
+ */
+async function inProduction(fn) {
+  const prev = { NODE_ENV: process.env.NODE_ENV, ALLOW: process.env.ALLOW_DEV_AUTH_IN_PRODUCTION, MODE: process.env.AUTH_MODE };
   process.env.NODE_ENV = 'production';
-  // config is frozen at import time, so assert the guard's logic directly.
-  const { config } = await import('../src/config.ts');
-  const wasProd = config.env === 'production';
-  process.env.NODE_ENV = previous;
-  if (wasProd) {
-    const res = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_admin' } });
-    assert.equal(res.statusCode, 403);
-  } else {
-    // Non-production: the endpoint exists, so assert the guard exists in source.
-    assert.ok(true, 'guard verified by config.env: production check in routes/auth.ts');
+  process.env.AUTH_MODE = 'dev';
+  delete process.env.ALLOW_DEV_AUTH_IN_PRODUCTION;
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of [['NODE_ENV', prev.NODE_ENV], ['AUTH_MODE', prev.MODE], ['ALLOW_DEV_AUTH_IN_PRODUCTION', prev.ALLOW]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
+}
+
+test('auth: production boot refuses AUTH_MODE=dev without an explicit opt-in', async () => {
+  const { assertAuthConfiguration } = await import('../src/auth/index.ts');
+  await inProduction(async () => {
+    assert.throws(() => assertAuthConfiguration(), /AUTH_MODE=dev is refused in production/);
+  });
+});
+
+test('auth: production refuses dev-login even with the opt-in unless it is exactly 1', async () => {
+  await inProduction(async () => {
+    for (const value of [undefined, '0', 'true', 'yes']) {
+      if (value === undefined) delete process.env.ALLOW_DEV_AUTH_IN_PRODUCTION;
+      else process.env.ALLOW_DEV_AUTH_IN_PRODUCTION = value;
+      const res = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_admin' } });
+      assert.equal(res.statusCode, 403, `expected 403 for ALLOW_DEV_AUTH_IN_PRODUCTION=${value}`);
+      assert.equal(res.json().error.code, 'forbidden');
+    }
+  });
+});
+
+test('auth: the explicit demo opt-in re-enables dev-login and is announced, not silent', async () => {
+  await inProduction(async () => {
+    process.env.ALLOW_DEV_AUTH_IN_PRODUCTION = '1';
+    const res = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_admin' } });
+    assert.equal(res.statusCode, 200);
+    const { assertAuthConfiguration } = await import('../src/auth/index.ts');
+    const warn = [];
+    const original = console.warn;
+    console.warn = (...args) => warn.push(args.join(' '));
+    try {
+      assertAuthConfiguration();
+    } finally {
+      console.warn = original;
+    }
+    assert.match(warn.join(' '), /INSECURE AUTHENTICATION/, 'a demo-auth production boot must announce itself');
+  });
 });
 
 test('auth: /api/auth/me returns the verified identity and capability map', async () => {
