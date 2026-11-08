@@ -6,7 +6,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getDb } from '../db/index.ts';
 import { config } from '../config.ts';
-import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized } from '../lib/http.ts';
+import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized, optionalString, optionalNumber } from '../lib/http.ts';
 import type { Identity } from '../auth/index.ts';
 import { requireProjectAccess } from '../auth/middleware.ts';
 import { resolveReadScope, tasksWhere, projectsWhere, docsWhere, clientsWhere, dealsWhere, assertProjectInScope } from '../auth/scope.ts';
@@ -27,6 +27,9 @@ import {
   setDocumentStatus, uploadSignedCopy, createChangeRequest, decideChangeRequest,
   expiringDocuments, esignStatus,
 } from '../services/legal.ts';
+import {
+  entitlementState, registerDevice, activateDevice, revokeDevice, recordApiUsage,
+} from '../services/partners.ts';
 import { setGauge, renderMetrics, sweeperStats } from '../lib/metrics.ts';
 import { evaluateShipGate, markShipped } from '../services/shipgate.ts';
 
@@ -443,7 +446,19 @@ export async function registerRoutes(
   /* ------------------------------------------------------------- clocks --- */
   app.get('/api/clocks', async () => ok({ clocks: await clockHealth(db()), timers: await liveTimers(db(), 40) }));
 
-  app.post('/api/clocks/sweep', async () => {
+  /**
+   * Force a clock sweep.
+   *
+   * This route previously had no authorisation check at all: any authenticated
+   * identity, including a client portal user, could trigger it. That is not a data
+   * leak — the sweeper only transitions timers whose deadline has already passed,
+   * and it is idempotent — but it is a global, side-effecting operation being
+   * exposed to every tenant, and it lets an external party drive load and
+   * notification volume at will. The background sweeper runs on its own interval,
+   * so nobody needs this route to keep clocks honest; it exists for operators.
+   */
+  app.post('/api/clocks/sweep', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
     const swept = await sweepTimers(db());
     return ok({ swept, at: nowIso() });
   });
@@ -873,6 +888,100 @@ export async function registerRoutes(
         usage: last30.map((u) => ({ day: u.day, apiCalls: u.api_calls, activeUsers: u.active_users })),
       };
     }));
+  });
+
+  /**
+   * Device entitlements. Every route here is partner-scoped: a caller may only
+   * act on a partner they belong to, and another partner's identifiers are a 404
+   * rather than a 403 so the endpoint cannot be used to enumerate tenants.
+   *
+   * The limit enforcement lives in `services/partners.ts`, inside the same
+   * transaction as the write — a check that runs in a separate round trip can be
+   * raced by two concurrent registrations.
+   */
+  const assertPartner = async (identity: Identity, partnerId: string) => {
+    if (identity.role === 'admin' || identity.role === 'lead') return;
+    const row = await db().get(
+      "SELECT 1 AS ok FROM partner_iam_users WHERE partner_id = ? AND user_id = ? AND status = 'active'",
+      [partnerId, identity.userId],
+    );
+    if (!row) throw notFound(`Partner "${partnerId}" does not exist.`);
+  };
+
+  app.get('/api/partners/:id/entitlements', async (req) => {
+    const identity = await currentIdentity(req);
+    const partnerId = String((req.params as { id: string }).id);
+    await assertPartner(identity, partnerId);
+    return ok(await entitlementState(db(), partnerId));
+  });
+
+  app.get('/api/partners/:id/devices', async (req) => {
+    const identity = await currentIdentity(req);
+    const partnerId = String((req.params as { id: string }).id);
+    await assertPartner(identity, partnerId);
+    const rows = await db().all<Record<string, any>>(
+      `SELECT d.*, u.full_name AS registered_by_name FROM device_licenses d
+       LEFT JOIN users u ON u.id = d.assigned_to
+       WHERE d.partner_id = ?
+       ORDER BY CASE d.status WHEN 'active' THEN 0 WHEN 'unassigned' THEN 1 ELSE 2 END, d.device_name`,
+      [partnerId],
+    );
+    return ok(rows.map((d) => ({
+      id: d.id,
+      deviceId: d.device_id,
+      deviceName: d.device_name,
+      platform: d.platform,
+      status: d.status,
+      activatedAt: d.activated_at,
+      assignedTo: d.assigned_to,
+    })));
+  });
+
+  app.post('/api/partners/:id/devices', async (req, reply) => {
+    const identity = await currentIdentity(req);
+    const partnerId = String((req.params as { id: string }).id);
+    await assertPartner(identity, partnerId);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await registerDevice(
+      db(),
+      partnerId,
+      {
+        deviceId: optionalString(body.deviceId, 'deviceId'),
+        deviceName: optionalString(body.deviceName, 'deviceName'),
+        platform: optionalString(body.platform, 'platform'),
+      },
+      identity.userId,
+    );
+    return reply.code(201).send({ data: result });
+  });
+
+  app.post('/api/partners/:id/devices/:deviceId/activate', async (req) => {
+    const identity = await currentIdentity(req);
+    const partnerId = String((req.params as { id: string }).id);
+    await assertPartner(identity, partnerId);
+    const deviceRowId = String((req.params as { deviceId: string }).deviceId);
+    return ok(await activateDevice(db(), partnerId, deviceRowId, identity.userId));
+  });
+
+  app.post('/api/partners/:id/devices/:deviceId/revoke', async (req) => {
+    const identity = await currentIdentity(req);
+    const partnerId = String((req.params as { id: string }).id);
+    await assertPartner(identity, partnerId);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const deviceRowId = String((req.params as { deviceId: string }).deviceId);
+    return ok(await revokeDevice(db(), partnerId, deviceRowId, optionalString(body.reason, 'reason') ?? '', identity.userId));
+  });
+
+  app.post('/api/partners/:id/usage', async (req, reply) => {
+    const identity = await currentIdentity(req);
+    const partnerId = String((req.params as { id: string }).id);
+    await assertPartner(identity, partnerId);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const calls = optionalNumber(body.calls, 'calls') ?? 0;
+    const result = await recordApiUsage(db(), partnerId, calls);
+    // 429 when the quota is breached: the call is recorded, but the caller is told
+    // to stop rather than being given a cheerful 200 and an invisible overage.
+    return (reply as any).code(result.overQuota ? 429 : 200).send({ data: result });
   });
 
   /* --------------------------------------------------------------- QA ----- */

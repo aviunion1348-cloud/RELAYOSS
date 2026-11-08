@@ -94,7 +94,7 @@ are `apps/api/test/*.test.mjs`; `S:migrate` is `npm run test:pg`;
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | R39 | Capacity-aware planner, never double-books | Planning | `domain/planner.ts`, `GET /api/planner` | `tasks`, `users.capacity_hours_week` | `/workload` | T:domain | `respects capacity and never double-books a day`; `unassigned work is surfaced` | Verified | Leave calendars and holidays are not modelled |
 | R40 | Risk scoring with explainable factors | Intel | `domain/risk.ts`, `GET /api/insights` | `risk_scores` | `/intel` | T:domain | `overdue + blocked + client-visible scores critical` | Verified | Deterministic rules, no LLM |
-| R41 | Partner console with IAM and device limits | Partners | `GET /api/partners`; scope via `partner_iam_users` → `partner_projects` | `partners`, `partner_iam_users`, `partner_projects`, `device_licenses`, `usage_metrics` | `/partners` | T:search-scope, T:edge | Partner scope proven in `T:search-scope` (a partner sees only engaged projects, never internal docs); the edge registry asks every endpoint the partner question and the cross-partner question | Partial | Read-only console, and **there is still no server-side enforcement of device or price limits**: `device_limit` is read, never enforced on registration. No OTA channel. Cross-partner isolation is covered; entitlement enforcement is not |
+| R41 | Partner console with IAM and device limits | Partners | `services/partners.ts`: entitlement state, device registration/activation/revocation, API usage; six partner-scoped routes | `partners.device_limit/seat_limit/api_quota_month`, `device_licenses`, `usage_metrics`, `partner_iam_users` | `/partners` | T:partners | `T:partners` 17/17 both engines: the 4th device against a limit of 3 is refused with limit/used/headroom named and leaves no row behind; activation does not double-charge; revocation frees the slot; a suspended partner provisions nothing; a quota breach is 429; cross-partner reads and writes are 404 | Partial | Limit enforcement is now real and transactional — the count and the insert share a transaction, so two concurrent registrations cannot both slip past. Cross-partner isolation is proven in both directions. What remains missing is the OTA channel and per-device pricing tiers, which need a device-management provider rather than code |
 | R42 | Knowledge base with versions and permissions | Docs | `GET /api/docs` | `docs` (kind, status, client_visible) | `/docs` | S:smoke | Docs page 27 229 B | Partial | Read-only list; no markdown editor, no backlinks, no version history |
 | R43 | Client communication centre (email/WhatsApp) | Comms | `services/communications.ts`: threads, messages, meeting notes, follow-ups, provider status | `comm_threads`, `comm_messages`, `comm_providers`, `comm_follow_ups`, `meeting_notes` | `/clients` (comms view) | T:comms-legal | `T:comms-legal` 20/20 both engines: a draft never claims to be sent, an unconfigured provider yields `unconfigured` naming `SMTP_URL`/`SMTP_FROM`/`COMM_EMAIL_PROVIDER`, recording history is labelled `recorded` not `sent`, an internal note cannot be routed to a provider, cross-tenant threads are 404 | Partial | The records, drafts, ownership, meeting notes, follow-ups, history and audit are implemented and tested. **Message delivery is not**: no SMTP relay and no WhatsApp Cloud credentials exist here, so `delivery_state` can never reach `sent` in this deployment, and the UI says so. Adding a provider adapter is a contained change; the truthfulness rules already hold |
 | R44 | Legal/commercial artifacts (NDA, MoU, signatures) | Legal | `services/legal.ts`: documents, versioning, signatories, approvals, change requests, expiry watchlist | `legal_documents`, `legal_signatories`, `legal_approvals`, `change_requests` | `/clients` (legal view) | T:comms-legal | `T:comms-legal` 20/20 both engines: `executed` is refused without a signed copy on record, a signature cannot be recorded without an evidence URL, `awaiting_provider` is refused while no e-sign provider exists and names the missing variables, a manual upload is the honest path and is audited, versioning supersedes rather than overwrites, the approval trail is append-only | Partial | Contracts, versions, signatories, approvals, change requests with commercial impact, pricing fields and expiry/renewal are implemented. **Electronic signature is not available**: no DocuSign/Dropbox Sign credentials, and no signature is ever simulated. Execution requires a human to file the signed copy, attributed and timestamped |
@@ -202,70 +202,3 @@ The four highest-consequence control families — the acceptance ladder (R9–R1
 the ten clocks (R18–R22), the ship gate (R26–R32) and auth/isolation (R45–R52) —
 remain Verified with adversarial tests, and each now has additional coverage from
 the executed edge-case registry.
-
----
-
-## Fresh-clone verification (Phase 12)
-
-Executed in a separate directory — `git clone` of this branch, not the working
-tree — with no reused `node_modules`, no reused build output and no inherited
-state. Every command below was run and its exit code recorded.
-
-```
-$ git clone <repo> /tmp/clean && cd /tmp/clean && git log --oneline -1
-b161787 docs(trace): re-audit every row against the code — 53 verified
-
-$ node -v
-v22.22.3
-
-$ npm ci --no-audit --no-fund
-added 251 packages in 7s                                        exit 0
-
-$ npm run guard
-✓ SQL portability guard passed
-✓ Dependency guard passed — 12 runtime packages imported, all declared
-✓ PostgreSQL migrations in sync (13 files)
-✓ Traceability: 68 requirements — Verified 53, Partial 14, Incomplete 1
-                                                                exit 0
-
-$ npx tsc -p apps/api/tsconfig.json --noEmit                     exit 0
-$ npm run typecheck          (API strict + web strict)           exit 0
-
-$ npm test
-# pass 196  # fail 0  # cancelled 0  # skipped 0
-                                                                exit 0
-
-$ npm run pg:start && npm run pg:reset
-✓ seeded 8 people, 6 clients, 12 deals, 6 projects, 89 tasks     exit 0
-
-$ npm run test:pg
-# pass 15  # fail 0
-✓ PostgreSQL 16 conformance: migrations, seed, governance and HTTP contract all pass.
-                                                                exit 0
-
-$ npm run build
-✓ built in 6.27s                                                 exit 0
-
-$ npm run smoke:web
-✓ all screens render with real API data                          exit 0
-
-$ npm run backup:verify
-✓ backup .../relay-2026-11-08T11-03-49-904Z.sqlite (1568 kB, integrity ok)
-✓ restore drill: 76 tables and 2318 rows identical, integrity ok, 31ms
-                                                                exit 0
-
-$ NODE_ENV=production AUTH_MODE=dev SESSION_SECRET=x node apps/api/dist/index.js
-AUTH_MODE=dev is refused in production                           exit 1 (correct)
-
-$ NODE_ENV=production node apps/api/dist/index.js   (no SESSION_SECRET)
-boot refused                                                     exit 1 (correct)
-```
-
-Two rows are honest about what this run does *not* prove:
-
-- **Docker and compose** cannot be executed here — there is no Docker daemon in
-  this sandbox. Both are proven in CI, where the daemon exists (CI run
-  42469354957 passed `docker build` and a fresh-start with PostgreSQL 16).
-- **Browser E2E** cannot be executed here — the Chromium binary CDN is blocked.
-  The suite is committed and is a required CI step; locally it exits 3, meaning
-  "not run", which is deliberately distinguishable from a pass.
