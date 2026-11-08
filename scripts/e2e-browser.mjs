@@ -283,6 +283,29 @@ async function main() {
     try { fs.unlinkSync(dbPath); } catch { /* removed */ }
   }
 
+  // A GitHub step summary makes the per-scenario outcome readable from the API
+  // without downloading logs (which the runner does not always permit), so the
+  // evidence can be quoted rather than asserted.
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (summaryPath) {
+    const lines = [
+      '### Browser end-to-end (Chromium, real server, real database)',
+      '',
+      `${passed} passed, ${failed} failed`,
+      '',
+      '| Scenario | Outcome |',
+      '| --- | --- |',
+      ...results.map((r) => `| ${r.name} | ${r.outcome === 'passed' ? 'pass' : '**fail**'} |`),
+      '',
+    ];
+    if (failed) {
+      lines.push('Failures:', '');
+      for (const f of failures) lines.push(`- **${f.name}** — \`${f.error}\``);
+      lines.push('');
+    }
+    try { fs.appendFileSync(summaryPath, lines.join('\n') + '\n'); } catch { /* summary is best effort */ }
+  }
+
   // The report goes to stdout, not to a JSON file: the architecture guard forbids
   // JSON as application state, and a results file is exactly that shape. CI
   // captures the log; screenshots are the durable evidence of a failure.

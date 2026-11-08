@@ -122,7 +122,7 @@ are `apps/api/test/*.test.mjs`; `S:migrate` is `npm run test:pg`;
 | R61 | Tested backup and restore | DR | `scripts/backup.mjs` | all | — | S:backup | SQLite 55/55 tables, 34 ms; PostgreSQL 54/54 identical, 1316 ms | Verified | Logical path only; no PITR (`pg_dump` absent) |
 | R62 | 20 named failure/recovery scenarios | Resilience | — | — | — | T:resilience | 14 documented scenarios | Partial | 14 of the 20 named scenarios exist; DST, stale-approval expiry, sweeper-twice-at-boundary and 3 others are missing (R24) |
 | R63 | Cross-tenant leak prevention on every read path | Security | `auth/scope.ts` — one primitive (`resolveReadScope` + `*Where`) used by every read; `assertProjectInScope`/`assertClientInScope`/`assertTimerInScope` | — | — | T:search-scope, T:auth, T:comms-legal, T:lifecycle, T:edge | `T:search-scope` 20/20 dual-engine; four isolated suites assert 404-not-403; the edge registry executed 3,641 probes and found **two cross-tenant writes** that no read test would have caught | Verified | The two defects it found are fixed: lifecycle evidence had no tenancy check at all, and none of the five clock routes checked that the timer's entity was in the caller's scope (a paused clock is excluded from elapsed time, so that was a way to erase another tenant's breach). Both now share one assertion helper. Tenancy denial is 404 everywhere, identical to absence, so the API is not an enumeration oracle |
-| R64 | 13-screen UX regression | UX | `scripts/smoke-web.mjs`; `scripts/e2e-browser.mjs` | — | 14 routes | S:smoke, S:e2e | `S:smoke`: all 13 screens render with live API data (17 811–170 636 B), no crashes, no undefined access | Partial | SSR proves component rendering and real data flow but **is not a browser**: hydration, clicks, layout and dead buttons are invisible to it. A real Playwright suite (`scripts/e2e-browser.mjs`, 11 scenarios incl. cross-tenant deep links, duplicate submission, validation surfacing, API-reachability) is written and wired into CI, but **it cannot run in this sandbox**: the Chromium binary CDN is blocked. It exits 3 (not run) here and is a required CI step there |
+| R64 | 13-screen UX regression | UX | `scripts/smoke-web.mjs`; `scripts/e2e-browser.mjs` (11 scenarios) | — | 14 routes | S:smoke, S:e2e | `S:smoke`: all 13 screens render with live API data, no crashes, no undefined access. **`S:e2e` ran in CI**: headless Chromium → real server → real migrated database, 11/11 scenarios passed (step `Browser end-to-end suite`, CI run 42474443034) | Verified | The server-render smoke proves component rendering and data flow; the browser suite proves the things SSR cannot: that `/api/` is genuinely reached from the browser origin, that all 12 primary screens render without an uncaught page error, that an unknown deep link degrades instead of crashing, that a cross-client deep link returns 404 to a client identity, that a validation failure surfaces a payload the UI can show, and that a duplicate submission does not create two records. It cannot run in the authoring sandbox — the Chromium CDN is blocked there, so locally it exits 3 (not run) — and it is a required CI step |
 
 ## H. Documentation and evidence
 
@@ -131,7 +131,7 @@ are `apps/api/test/*.test.mjs`; `S:migrate` is `npm run test:pg`;
 | R65 | SECURITY / DATABASE / DEPLOYMENT / BACKUP-RECOVERY / RUNBOOK | Docs | — | — | — | — | `docs/*.md` | Verified | Written this session, with gaps stated in each |
 | R66 | Requirement traceability with stable IDs and statuses | Docs | — | — | — | CI | this file; `audit-trail` job | Verified | |
 | R67 | No fabricated evidence, no suppressed failures | Process | — | — | — | — | failures fixed, not hidden: 4 real defects found and corrected this session | Verified | See "Defects fixed" below |
-| R68 | Clean-checkout evidence pack | Process | — | — | — | `npm run verify` | a pristine clone ran guard · typecheck · 196 tests · PG conformance · build · smoke · backup drill to exit 0 | Partial | A pristine clone was verified end to end. The browser E2E step is written but cannot execute here (no Chromium), and Docker/compose cannot execute here (no daemon), so those two steps are proven only in CI |
+| R68 | Clean-checkout evidence pack | Process | — | — | — | `npm run verify`, CI | pristine clone: guard · typecheck · **213 tests** · PG 16 conformance · build · smoke · backup drill (76 tables, 2318 rows) all exit 0; CI runs the full pipeline including Docker and browser E2E | Verified | A separate `git clone` with no reused `node_modules` or build output, every exit code recorded in this document. Docker image build, Docker fresh-start with PostgreSQL 16 and the browser suite were executed by CI on the same commit — those three cannot run in the authoring sandbox (no daemon, no browser) and are proven there |
 
 ---
 
@@ -155,12 +155,12 @@ not evidence of anything.
 
 | Status | Count | IDs |
 | --- | --- | --- |
-| Verified | 53 | R1, R2, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R25, R26, R27, R28, R29, R30, R31, R32, R35, R36, R37, R38, R39, R40, R45, R47, R48, R49, R50, R51, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R63, R65, R66, R67 |
-| Partial | 14 | R3, R4, R5, R24, R33, R34, R41, R42, R43, R44, R46, R62, R64, R68 |
+| Verified | 55 | R1, R2, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R25, R26, R27, R28, R29, R30, R31, R32, R35, R36, R37, R38, R39, R40, R45, R47, R48, R49, R50, R51, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R63, R64, R65, R66, R67, R68 |
+| Partial | 12 | R3, R4, R5, R24, R33, R34, R41, R42, R43, R44, R46, R62 |
 | Incomplete | 1 | R6 |
 | Blocked | 0 | — |
 
-**68 requirements: 53 verified (78%), 14 partial, 1 incomplete, 0 blocked.**
+**68 requirements: 55 verified (81%), 12 partial, 1 incomplete, 0 blocked.**
 
 ### What moved, and what it cost
 
@@ -179,7 +179,7 @@ on documentation:
 
 ### What is still not verified, and why
 
-Fourteen rows remain Partial and one Incomplete. None of them is a documentation gap;
+Twelve rows remain Partial and one Incomplete. None of them is a documentation gap;
 each is a named missing dependency or a named missing feature:
 
 | Requirement | What is missing | Category |
@@ -189,7 +189,7 @@ each is a named missing dependency or a named missing feature:
 | Communications (row 43) | Actual message delivery | **Credential gap**: no SMTP relay, no WhatsApp Cloud credentials |
 | Legal (row 44) | Electronic signature | **Credential gap**: no DocuSign / Dropbox Sign account |
 | Post-ship ops (row 34) | OTA job, update channel, post-ship maintenance workflow | Feature gap — needs a device-management provider |
-| UX regression / clean checkout (rows 64, 68) | The browser E2E suite | **Environment gap**: the Chromium binary CDN is blocked in this sandbox; the suite is written and is a required CI step |
+
 | Saved views, watchers, dependencies, calendar (rows 6, 3, 4, 5) | Saved views and a calendar view; watcher routes; dependency creation | Feature gap, lower consequence |
 | Rollback (row 33) | Rollback *execution* integration | Feature gap — needs a deployment target |
 | Knowledge base (row 42) | Markdown editor, backlinks, version history | Feature gap |
