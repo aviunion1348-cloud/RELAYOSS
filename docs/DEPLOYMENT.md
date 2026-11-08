@@ -10,43 +10,46 @@ directly**, and **Docker Compose**.
 > The requester imports the repository into their own Vercel account and generates
 > the URL. Section 8 states exactly what that requires.
 
-## 1. Vercel — multi-service
+## 1. Vercel — two services
 
-The repository deploys as **one Vercel project containing three services**. Vercel
+The repository deploys as **one Vercel project containing two services**. Vercel
 builds each independently and routes to them from a single top-level rewrite table,
 so the deployment has one domain and one set of environment variables.
 
 ```
 vercel.json
 ├── services
-│   ├── app   runtime: container   Dockerfile.vercel   → the SPA over HTTP
 │   ├── api   framework: fastify   apps/api/src/entrypoints/index.ts → /api/*
-│   └── web   framework: vite      apps/web/           (internal, no public rewrite)
+│   └── web   framework: vite      apps/web/  + /(.*) → /index.html  → everything else
 └── rewrites
     ├── /api/(.*) → api      (specific first)
-    └── /(.*)     → app      (catch-all last)
+    └── /(.*)     → web      (catch-all last)
 ```
 
-Read that table carefully, because two entries are counter-intuitive:
+Both services are public, and each one receives exactly the traffic it is built for:
 
-* **`web` is built but not routed.** The `app` container serves the same bundle the
-  `web` service produces. That looks like duplication and is: Vercel has no way to
-  mount one service's build output inside another's image, so the container builds
-  the SPA itself from `apps/web/` and the `web` service exists to produce the
-  artifact with full framework detection. Routing to `web` as well would give two
-  public paths to the same files. It is deletable — see §1.5 — and the cost of
-  deleting it is that the SPA is then built only inside the container image, with no
-  framework-native preview.
-* **`api` is public only through `/api/(.*)`.** It is not reachable at `/` and has no
-  rewrite of its own. The same is true of `web`: a service without a rewrite receives
-  no public traffic at all.
+* **`api`** is reachable only under `/api/*`. It has no rewrite of its own; the
+  top-level `/api/(.*)` rule is the only way in.
+* **`web`** is the catch-all. Because routing into a service is final, the service
+  owns its own deep-link behaviour — `web` declares a service-level
+  `/(.*) → /index.html` fallback so that reloading `/projects/pr_northwind` returns
+  the document rather than a 404.
+* Order matters. Vercel routes to the first match, so a catch-all listed first would
+  swallow `/api` entirely. The guard asserts the order.
+
+There is **no container service**, and no `Dockerfile.vercel`. An earlier revision
+ran an `app` container serving the SPA while `web` built the same bundle: two
+artifacts for one frontend, and `vercel dev` could not even start the container
+(`DEV_SERVICE_START_FAILED`), so the primary deployment path was untestable locally.
+The root `Dockerfile` and `docker-compose.yml` are untouched and remain the local
+and CI path — see §1.6.
 
 ### 1.1 Architecture on Vercel
 
 | Concern | How it is handled | Why not the obvious way |
 | --- | --- | --- |
 | API | The `api` service, entrypoint `apps/api/src/entrypoints/index.ts` → `entrypoints/vercel.ts`, compiled to `apps/api/dist/entrypoints/vercel.js` | Vercel's Fastify preset discovers entrypoints by filename, and `src/index.ts` is on that list — but that file calls `app.listen()` and starts a `setInterval`. The handler lives in `entrypoints/` precisely so the preset cannot resolve to the long-lived entry. `api/index.js` is retained as the wrapper and delegates to the same artefact. |
-| SPA | The `app` service — a container running `deploy/web-server.mjs` over the built bundle | A container service is still request/response. It serves the document for client routes, 404s a missing asset, refuses `/api`, and blocks path traversal. |
+| SPA | The `web` service — `vite build` to `apps/web/dist`, declared with `framework: "vite"` | The same bundle the frontend is developed as, built once. The service-level `/(.*) → /index.html` fallback handles deep links; Vite's asset hashing means a real asset either resolves or is genuinely absent. |
 | Listening | Never. The handler mounts `app.server` and returns | `app.listen()` binds a port nothing routes to. It works locally and fails silently on the platform. |
 | `app.ready()` | Called once per instance, explicitly | Fastify installs its hook pipeline here. `listen()` does that for you; without `listen()` the first request crashes inside the hook runner. |
 | Background sweeper | Removed. Replaced by a lazy sweep on real requests + `/api/cron/sweep` | `setInterval` does not survive between invocations, and instances are concurrent — a timer would either never fire or double-fire. |
@@ -64,7 +67,7 @@ source needs to change.
 
 | Setting | Value |
 | --- | --- |
-| Framework preset | Leave to `vercel.json` — per service: **Other/container** (`app`), **Fastify** (`api`), **Vite** (`web`) |
+| Framework preset | Leave to `vercel.json` — per service: **Fastify** (`api`), **Vite** (`web`) |
 | Root directory | Repository root — **leave blank** |
 | Build command, output directory, install command | **Per service in `vercel.json`** — these keys are *invalid* at the top level in services mode |
 | Node.js version | **22.x** (`engines.node` is `>=22`; verified on v22.22.3) |
@@ -79,15 +82,25 @@ either way it is a confusing build failure rather than a config error.
 
 | Service | Builds | Serves | Public path |
 | --- | --- | --- | --- |
-| `api` | `tsc -p apps/api` (part of the service build) | The Fastify application | `/api/*` |
-| `web` | `vite build` → `apps/web/dist` | Nothing directly | none — internal |
-| `app` | `Dockerfile.vercel` → static bundle + `deploy/web-server.mjs` | The SPA document and its assets | everything except `/api/*` |
+| `api` | The Fastify application from `apps/api/src/entrypoints/index.ts` | The API | `/api/*` |
+| `web` | `vite build` → `apps/web/dist` | The SPA document and its assets | `/` and every other path |
 
-`Dockerfile` (the repository root one) is **not** used by any service. It remains
-the long-lived single-process deployment — API and SPA in one process on :4000,
-with a `setInterval` sweeper — and `docker compose up` still uses it. The guard
-fails if the `app` service is ever pointed at it, because that image runs
-`apps/api/dist/index.js`, which calls `app.listen()` and starts an interval.
+Both are public because both need public traffic: the browser fetches the document
+and then calls `/api` same-origin. Only `web` needs a fallback, and only `web` has
+one.
+
+The root `Dockerfile` is **not** used by any service. It remains the long-lived
+single-process deployment — API and SPA in one process on :4000, with a
+`setInterval` sweeper — and `docker compose up` still uses it. It is not a Vercel
+service, and nothing routes to it.
+
+**Workspace dependencies.** Each service builds from its own `root`, but the
+repository is an npm workspace. npm resolves `apps/web`'s dependencies by walking up
+to the repo-root `package-lock.json`, so `npm ci` run from `apps/web` installs the
+correct tree without any per-service `installCommand`. This was verified directly
+(`npm ci` from `apps/web` in a scratch directory with no local manifest: 134
+packages, resolved through the workspace root). No service needs an
+`installCommand`, and no duplicate container is needed to work around one.
 
 ### 1.3 Environment variables
 
@@ -212,40 +225,30 @@ mechanism. Deadline processing also runs inline on real requests, throttled by
   nothing twice, because the sweep only touches timers whose deadline has passed
   and whose outcome is still `running`.
 
-### 1.5.1 Running this locally, and the two-service variant
+### 1.5.1 Running this locally
 
-`vercel dev` runs all three services together and injects the routing table, which
-is the only way to test the rewrites before deploying. It needs the Vercel CLI
-(`npm i -g vercel@latest`, or `npx vercel dev`) and a linked project — which this
-repository deliberately does not commit.
+`vercel dev` starts both services and injects the routing table, which is the only
+way to exercise the rewrites, the SPA fallback and the `/api` split before
+deploying. Local mode needs no login and no link:
 
-`npm run dev` remains the normal local loop: Vite on :5173 proxying `/api` to
-Fastify on :4000. That path does not exercise the container image or the rewrites.
-
-**If you would rather not run a container**, delete the `app` service and point the
-catch-all at `web` instead:
-
-```json
-  "services": { "api": { ... }, "web": { "root": "apps/web/", "framework": "vite" } },
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": { "service": "api" } },
-    { "source": "/(.*)",     "destination": { "service": "web" } }
-  ]
+```bash
+npx vercel@latest dev --local
 ```
 
-That is a genuinely viable configuration and it removes `Dockerfile.vercel` from the
-deployment entirely. What it changes: the SPA is served by Vercel's static CDN
-rather than a container, and the deep-link fallback becomes the framework's own
-(`framework: "vite"` sets it up) rather than `deploy/web-server.mjs`. What it costs:
-the traversal and asset-404 rules become Vercel's behaviour rather than ours, and you
-lose the explicit `/api`-refusal-on-the-wrong-service check. It is **not** the
-default here because the container keeps the fallback rules testable in this
-repository (`apps/api/test/web-server.test.mjs`), and because I could not run
-`vercel dev` to compare the two.
+`--local` reads `vercel.json` and the environment from your shell instead of from a
+linked project, so it does not touch any Vercel account. Give the API an
+**absolute** `DB_PATH`: the `dev:api` script runs with `apps/api` as its working
+directory, so a relative path resolves inside `apps/api` and quietly creates an
+empty database — which then answers `Invalid credentials` rather than telling you
+the database is wrong.
 
-If you choose it, delete the `app` block and change one rewrite; the deployment
-guard will not object, because it only requires that every service is either routed
-or deliberately internal.
+`npm run dev` remains the normal local loop: Vite on :5173 proxying `/api` to
+Fastify on :4000. That path does not exercise the rewrites or the service split.
+
+`vercel build` is *not* an offline check — it contacts `api.vercel.com`, so it
+cannot be run in a sandbox without egress to Vercel. The static guard plus
+`vercel dev --local` are the substitute, and between them they cover the routing,
+the fallback and the entrypoint.
 
 ### 1.5.2 Verifying the services configuration without deploying
 
@@ -255,12 +258,16 @@ or deliberately internal.
 * no `buildCommand`/`outputDirectory`/`framework`/`functions` stranded at the top
   level, where services mode does not honour them;
 * every rewrite targets a service that exists, and the catch-all is last;
+* both services receive public traffic — a service that is neither routed nor
+  deliberately internal is a service nobody can reach;
+* `web` declares its own `/(.*) → /index.html` fallback, so a deep-link refresh
+  cannot 404;
+* **no container service**, and no `Dockerfile.vercel` / `deploy/web-server.mjs`
+  left behind as dead configuration — the duplicate SPA build that motivated its
+  removal;
 * `api`'s declared entrypoint exists and does **not** call `app.listen()` or start a
-  timer — the failure that would land the Fastify preset on the container entry;
-* `app`'s Dockerfile is not the long-lived `Dockerfile`, and it does run
-  `deploy/web-server.mjs`, which must guard `decodeURIComponent` and check path
-  traversal;
-* `web`'s output directory agrees with the path the container image copies;
+  timer — the failure that would land the Fastify preset on the long-lived entry;
+* `web`'s output directory is `dist`, matching the service build;
 * every binding (there are none today) names a real service, is not self-referential,
   and does not have its variable set in `.env.example`;
 * no server-side source file contains a hardcoded loopback URL.
@@ -273,7 +280,7 @@ never failed is a guard you do not know works.
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `deployment_misconfigured` from `/api` | `apps/api/dist/entrypoints/vercel.js` is absent because the api service's build did not compile the API | Check the `api` service build; redeploy |
-| `/` returns JSON `not_found` instead of a page | The catch-all rewrite is missing or points at `api`, so a browser route reached the API function | Confirm `/(.*) → app` is last in `rewrites` |
+| `/` returns JSON `not_found` instead of a page | The catch-all rewrite is missing or points at `api`, so a browser route reached the API function | Confirm `/(.*) → web` is last in `rewrites` |
 | Every `/api/*` call returns HTML | The `/api` rewrite is missing, or the catch-all is listed before it | Order the rewrites specific-first; the guard checks this |
 | 500 with `Cannot read properties of undefined (reading 'length')` | `app.ready()` was skipped — a stale build | Rebuild; this is fixed in `apps/api/src/vercel.ts` |
 | Every login returns 401 | Credential never provisioned, or a hash for a different password | Re-run step 1.4 from 3 |
@@ -281,7 +288,7 @@ never failed is a guard you do not know works.
 | `/api/ready` returns 503 | `DATABASE_URL` wrong, or TLS required but not requested | Add `?sslmode=require`; check the pooled host |
 | Random timeouts under load | Pool exhaustion — too many instances × pool size | Use the pooled endpoint; lower `DATABASE_POOL_MAX` |
 | `/api/cron/sweep` returns 503 | `CRON_SECRET` unset | Set it; redeploy |
-| Deep links 404 but the root works | The static server is not falling back to the document | `deploy/web-server.mjs` returns `index.html` for non-asset paths; check the route reached the `app` service |
+| Deep links 404 but the root works | The `web` service is not falling back to the document | `web` must declare `rewrites: [{source: "/(.*)", destination: "/index.html"}]`; confirm the request reached `web` and not `api` |
 | `/api/*` returns the HTML page | The `/api` rewrite is missing | Check `vercel.json` rewrites are present and ordered |
 
 ### 1.7 What is not proven about the Vercel path

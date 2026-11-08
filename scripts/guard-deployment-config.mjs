@@ -215,54 +215,28 @@ if (cfg) {
       }
     }
 
-    /* ---------------------------------------------------------- app service -- */
-    const app = services.app;
-    if (app && app.runtime === 'container') {
-      /**
-       * `app` is a container service. The image is built from the Dockerfile named in
-       * `entrypoint`, and that Dockerfile must not be the long-lived production one:
-       * `Dockerfile` runs `node apps/api/dist/index.js`, which calls `app.listen()` and
-       * starts an interval — both wrong behind Vercel's router, where nothing routes to
-       * a port the container opens for itself.
-       *
-       * The `app` service exists to serve the SPA. In the single-process layout the API
-       * served it (`serveStatic`), and in services mode `entrypoints/vercel.ts` turns
-       * that off; the two must not both do it, or neither.
-       */
-      const dockerfile = String(app.entrypoint ?? 'Dockerfile');
-      if (!exists(dockerfile)) {
-        fail(`the app service builds from "${dockerfile}", which does not exist`);
-      } else {
-        const df = stripDockerComments(read(dockerfile));
-        if (/dist\/index\.js/.test(df)) {
-          fail(
-            `the app service Dockerfile ("${dockerfile}") runs apps/api/dist/index.js — a long-lived ` +
-              'server that calls app.listen() and starts a setInterval. Use the static web image.',
-          );
-        }
-        if (dockerfile === 'Dockerfile') {
-          fail(
-            'the app service must not build from "Dockerfile": that image is the long-lived ' +
-              'single-process deployment and remains the documented non-Vercel path',
-          );
-        }
-        if (!/deploy\/web-server\.mjs/.test(df)) {
-          fail(`the app service Dockerfile ("${dockerfile}") does not run deploy/web-server.mjs`);
-        }
-      }
-      const server = exists('deploy/web-server.mjs') ? stripComments(read('deploy/web-server.mjs')) : '';
-      if (!server) {
-        fail('deploy/web-server.mjs is missing — the app service has no document to serve');
-      } else {
-        if (!/decodeURIComponent/.test(server) || !/catch\s*\{[\s\S]{0,200}return null/.test(server)) {
-          fail(
-            'deploy/web-server.mjs decodes a URL without guarding the throw: a malformed ' +
-              'percent-encoding escapes the request handler and kills the process',
-          );
-        }
-        if (!/startsWith\(ROOT \+ path\.sep\)/.test(server)) {
-          fail('deploy/web-server.mjs has no path-traversal check against the web root');
-        }
+    /*
+     * No container service.
+     *
+     * The `app` service existed to serve the SPA from an image while the `web`
+     * service built the same bundle — two artifacts for one frontend. It is gone,
+     * and this check keeps it gone: a container service here would reintroduce the
+     * duplicate, and the Dockerfile it would use runs `apps/api/dist/index.js`,
+     * which calls `app.listen()` and starts an interval behind a router that never
+     * routes to that port.
+     */
+    if (services.app) {
+      fail(
+        'the "app" container service duplicates the web service: both build the same SPA. ' +
+          'Serve the frontend from "web" alone and route /(.*) to it',
+      );
+    }
+    if (Object.values(services).some((svc) => svc?.runtime === 'container')) {
+      fail('a container service is declared, but this project serves the SPA from the static web service');
+    }
+    for (const stale of ['Dockerfile.vercel', 'deploy/web-server.mjs']) {
+      if (exists(stale)) {
+        fail(`${stale} is no longer part of the deployment and must not be left behind as dead configuration`);
       }
     }
 
@@ -282,6 +256,22 @@ if (cfg) {
       }
       if (web.framework !== 'vite') {
         note(`the web service framework is "${web.framework ?? '(auto)'}" rather than "vite"`);
+      }
+      /*
+       * The service owns its deep-link fallback.
+       *
+       * A top-level `/(.*) → web` rewrite routes a request into the service, and then
+       * the service's own routing decides what to do. Without a fallback to the
+       * document, `/projects/pr_northwind` is a hard 404 after a browser refresh —
+       * the classic SPA-on-a-static-host failure, and one that only appears when
+       * someone reloads a deep link rather than clicking through the app.
+       */
+      const webRewrites = Array.isArray(web.rewrites) ? web.rewrites : [];
+      const fallback = webRewrites.find((r) => String(r.source ?? '') === '/(.*)');
+      if (!fallback) {
+        fail('the web service has no "/(.*)" SPA fallback — a deep-link refresh would 404');
+      } else if (String(fallback.destination ?? '') !== '/index.html') {
+        fail(`the web service fallback targets "${fallback.destination}", not /index.html`);
       }
     }
 

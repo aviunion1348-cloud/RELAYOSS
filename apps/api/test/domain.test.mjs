@@ -309,3 +309,45 @@ test('schema: foreign keys are enforced (no orphan rows)', async () => {
   // project_id omitted (nullable) → must still fail on the missing board/column FK.
   await assert.rejects(() => db.run("INSERT INTO tasks (id,key,board_id,column_id,title) VALUES ('x','X-1','ghost-board','ghost-col','orphan')"), /FOREIGN KEY|foreign key|violates/);
 });
+
+/* ------------------------------------------------------- task key sequence -- */
+
+test('task keys: creation works in a project that already has tasks', async () => {
+  // `nextKey` used to return `100 + COUNT(*)`, which for N rows numbered
+  // 101..100+N is the *last existing key*. Every creation in a project with any
+  // tasks therefore failed on `UNIQUE (board_id, key)` — and it surfaced as a 500,
+  // because a constraint violation is not a validation error. Seeding masked it:
+  // a seeded project is exactly the state that triggers the collision.
+  const fresh = await memoryDb();
+  const made = [];
+  for (let i = 0; i < 4; i += 1) {
+    made.push(await createTask(fresh, { title: `Task number ${i}`, boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1'));
+  }
+  const keys = (await fresh.all("SELECT key FROM tasks WHERE project_id = 'p1' ORDER BY key")).map((r) => r.key);
+  assert.deepEqual(keys, ['ACM-101', 'ACM-102', 'ACM-103', 'ACM-104'], 'keys must advance, not repeat');
+  assert.equal(new Set(keys).size, keys.length, 'a duplicate key was generated');
+  assert.equal(made.length, 4);
+});
+
+test('task keys: a deleted task does not make the sequence go backwards', async () => {
+  // Counting rows cannot distinguish "the highest key is 104" from "there are four
+  // rows". Delete one and a count-based generator reissues a live key.
+  const fresh = await memoryDb();
+  for (let i = 0; i < 3; i += 1) {
+    await createTask(fresh, { title: `Task number ${i}`, boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  }
+  await fresh.run("DELETE FROM tasks WHERE key = 'ACM-102'");
+  const fourth = await createTask(fresh, { title: 'After a deletion', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  const row = await fresh.get('SELECT key FROM tasks WHERE id = ?', [fourth]);
+  assert.equal(row.key, 'ACM-104', 'the key after a deletion must continue past the highest existing key');
+});
+
+test('task keys: a gapped or non-conforming key does not poison the sequence', async () => {
+  const fresh = await memoryDb();
+  await createTask(fresh, { title: 'Seed task one', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  // An imported row with a hand-written key, and a gap above it.
+  await fresh.run("INSERT INTO tasks (id,key,board_id,column_id,project_id,title,status) VALUES ('imported','ACM-250','b1','b1_todo','p1','Imported','todo')");
+  const next = await createTask(fresh, { title: 'After import', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  const row = await fresh.get('SELECT key FROM tasks WHERE id = ?', [next]);
+  assert.equal(row.key, 'ACM-251', 'the sequence must continue past an imported high-water mark');
+});
