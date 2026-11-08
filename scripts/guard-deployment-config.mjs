@@ -309,6 +309,25 @@ if (cfg) {
     }
 
     /*
+     * `services` vs `experimentalServices`.
+     *
+     * There are two related-but-distinct configuration models. `services` (the one used
+     * here) pairs with "build and runtime settings belong in the service" and public
+     * routing at the top level. `experimentalServices` is the earlier model, keyed by
+     * `entrypoint` + `routePrefix`.
+     *
+     * Vercel rejects declaring both, and a project still configured against the old model
+     * fails to build as services. Either way the symptom appears far from the cause, which
+     * is why this is asserted rather than remembered.
+     */
+    if (cfg.experimentalServices) {
+      fail(
+        'vercel.json declares "experimentalServices"; this project uses the current "services" ' +
+          'model, and the two cannot be declared together',
+      );
+    }
+
+    /*
      * No container service.
      *
      * The `app` service existed to serve the SPA from an image while the `web`
@@ -475,7 +494,22 @@ if (cfg) {
 
   const engines = String(pkg.engines?.node ?? '');
   if (!engines) fail('package.json declares no engines.node, so Vercel cannot pin the runtime');
-  else note(`engines.node ${engines}`);
+  else if (!/<\d+|\s/.test(engines) || !/^[><=~^]*\s*\d+/.test(engines)) {
+    fail(`engines.node "${engines}" is not a usable range`);
+  } else if (!/\s<|\|\||\^22\.\d+\.\d+$/.test(engines)) {
+    /*
+     * An open-ended lower bound is not a pin. `>=22.5.0` is satisfied by every future
+     * major too, so when a new Node major ships Vercel upgrades the build image and the
+     * runtime changes without anyone deciding to. The deploy log warned about exactly
+     * this. A bounded range keeps the project on the line it was verified against.
+     */
+    fail(
+      `engines.node "${engines}" has no upper bound; Vercel will auto-upgrade to a future ` +
+        'major Node version. Pin the supported LTS line, e.g. ">=22.5.0 <23"',
+    );
+  } else {
+    note(`engines.node ${engines} (bounded to the Node 22 LTS line)`);
+  }
 }
 
 // --------------------------------------------------------- secrets and state
@@ -625,6 +659,31 @@ if (!exists(DEPLOY_DOC)) {
           'Keep the allowlist to the scripts the build actually requires',
       );
     }
+  }
+}
+
+/**
+ * The Services framework preset is a dashboard setting, so it cannot be asserted from
+ * here — but the *documentation* of it can be, and that is the deliverable the requester
+ * follows. A guide that stops saying "set the preset to Services" leaves the next person
+ * with a silent fallback and no stated cause.
+ */
+if (exists(DEPLOY_DOC)) {
+  const doc = read(DEPLOY_DOC);
+  const presetRow = /\|\s*\*\*Framework Preset\*\*\s*\|\s*\*\*`Services`\*\*/i.test(doc);
+  if (!presetRow) {
+    fail(
+      'docs/DEPLOYMENT.md no longer instructs the reader to set the Framework Preset to ' +
+        'Services — without that preset Vercel silently ignores the services block',
+    );
+  } else {
+    notes.push('deployment guide states the Services framework preset requirement');
+  }
+  if (/\|\s*Framework preset\s*\|\s*Leave to `vercel\.json`/i.test(doc)) {
+    fail(
+      'docs/DEPLOYMENT.md claims the framework preset can be left to vercel.json; it is a ' +
+        'project-level setting and Services mode is required',
+    );
   }
 }
 
