@@ -27,6 +27,14 @@ export const config = {
   /** Demo session identity — replace with SSO/OIDC in production. */
   demoUserId: process.env.DEMO_USER_ID ?? 'usr_maya',
   logLevel: process.env.LOG_LEVEL ?? 'info',
+  /** Background clock sweeper cadence. */
+  sweepIntervalMs: int('SWEEP_INTERVAL_MS', 60_000),
+  /** Auth: 'oidc' enforces bearer/cookie sessions; 'dev' is local-only. */
+  authMode: (process.env.AUTH_MODE ?? 'dev') as 'oidc' | 'dev',
+  oidcIssuer: process.env.OIDC_ISSUER ?? '',
+  oidcAudience: process.env.OIDC_AUDIENCE ?? '',
+  oidcJwksUri: process.env.OIDC_JWKS_URI ?? '',
+  sessionSecret: process.env.SESSION_SECRET ?? '',
   corsOrigin: (process.env.CORS_ORIGIN ?? '*').split(',').map((s) => s.trim()),
   /** Absolute path of the built SPA served by the API in production. */
   webDist: process.env.WEB_DIST ?? path.join(ROOT, 'apps', 'web', 'dist'),

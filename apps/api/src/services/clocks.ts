@@ -13,8 +13,8 @@ import { toDate } from '../lib/dates.ts';
 
 const HOUR = 3600_000;
 
-export function getClock(db: Db, key: string) {
-  const clock = db.get<Record<string, any>>('SELECT * FROM sla_clocks WHERE key = ?', [key]);
+export async function getClock(db: Db, key: string) {
+  const clock = await db.get<Record<string, any>>('SELECT * FROM sla_clocks WHERE key = ?', [key]);
   if (!clock) throw notFound(`Unknown clock: ${key}`);
   return clock;
 }
@@ -24,17 +24,17 @@ export function getClock(db: Db, key: string) {
  * must never block a legitimate workflow transition — observability should not
  * be able to break delivery. Returns null when the policy is absent.
  */
-export function startTimer(
+export async function startTimer(
   db: Db,
   clockKey: string,
   entityType: string,
   entityId: string,
   label = '',
   startedAt = new Date(),
-): string | null {
-  const clock = db.get<Record<string, any>>('SELECT * FROM sla_clocks WHERE key = ?', [clockKey]);
+): Promise<string | null> {
+  const clock = await db.get<Record<string, any>>('SELECT * FROM sla_clocks WHERE key = ?', [clockKey]);
   if (!clock) return null;
-  const existing = db.get<{ id: string }>(
+  const existing = await db.get<{ id: string }>(
     "SELECT id FROM sla_timers WHERE clock_key = ? AND entity_type = ? AND entity_id = ? AND outcome = 'running'",
     [clockKey, entityType, entityId],
   );
@@ -42,7 +42,7 @@ export function startTimer(
   const due = new Date(startedAt.getTime() + clock.target_hours * HOUR);
   const warn = new Date(startedAt.getTime() + clock.warn_hours * HOUR);
   const timerId = id('tmr');
-  db.run(
+  await db.run(
     `INSERT INTO sla_timers (id,clock_key,entity_type,entity_id,label,started_at,due_at,warn_at,outcome)
      VALUES (?,?,?,?,?,?,?,?,'running')`,
     [timerId, clockKey, entityType, entityId, label,
@@ -53,21 +53,21 @@ export function startTimer(
   return timerId;
 }
 
-export function closeTimersFor(db: Db, entityType: string, entityId: string, outcome: 'met' | 'missed' | 'waived' = 'met') {
-  db.run(
+export async function closeTimersFor(db: Db, entityType: string, entityId: string, outcome: 'met' | 'missed' | 'waived' = 'met'): Promise<void> {
+  await db.run(
     "UPDATE sla_timers SET outcome = ?, met_at = CASE WHEN ? = 'met' THEN ? ELSE met_at END, missed_at = CASE WHEN ? = 'missed' THEN ? ELSE missed_at END WHERE entity_type = ? AND entity_id = ? AND outcome = 'running'",
     [outcome, outcome, nowIso(), outcome, nowIso(), entityType, entityId],
   );
 }
 
-export function resolveTimer(db: Db, timerId: string, outcome: 'met' | 'missed' | 'paused' | 'waived', note = '') {
-  const timer = db.get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
+export async function resolveTimer(db: Db, timerId: string, outcome: 'met' | 'missed' | 'paused' | 'waived', note = '') {
+  const timer = await db.get<Record<string, any>>('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
   if (!timer) throw notFound('Timer not found');
   const now = new Date();
   const due = toDate(timer.due_at) ?? now;
   const minutesUsed = Math.round((now.getTime() - (toDate(timer.started_at)?.getTime() ?? now.getTime())) / 60000);
   const finalOutcome = outcome === 'met' && now > due ? 'missed' : outcome;
-  db.run('UPDATE sla_timers SET outcome = ?, met_at = ?, missed_at = ?, exception_note = ?, minutes_used = ? WHERE id = ?', [
+  await db.run('UPDATE sla_timers SET outcome = ?, met_at = ?, missed_at = ?, exception_note = ?, minutes_used = ? WHERE id = ?', [
     finalOutcome,
     finalOutcome === 'met' ? nowIso() : null,
     finalOutcome === 'missed' ? nowIso() : null,
@@ -75,20 +75,20 @@ export function resolveTimer(db: Db, timerId: string, outcome: 'met' | 'missed' 
     minutesUsed,
     timerId,
   ]);
-  return db.get('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
+  return await db.get('SELECT * FROM sla_timers WHERE id = ?', [timerId]);
 }
 
 /** Sweep: mark every overdue running timer as missed and raise notifications. */
-export function sweepTimers(db: Db) {
+export async function sweepTimers(db: Db): Promise<number> {
   const now = nowIso();
-  const overdue = db.all<Record<string, any>>(
+  const overdue = await db.all<Record<string, any>>(
     "SELECT * FROM sla_timers WHERE outcome = 'running' AND due_at < ?",
     [now],
   );
-  db.tx(() => {
+  await db.tx(async () => {
     for (const t of overdue) {
-      db.run("UPDATE sla_timers SET outcome = 'missed', missed_at = ? WHERE id = ?", [now, t.id]);
-      db.run('INSERT INTO activity (entity_type,entity_id,actor_id,verb,summary) VALUES (?,?,?,?,?)', [
+      await db.run("UPDATE sla_timers SET outcome = 'missed', missed_at = ? WHERE id = ?", [now, t.id]);
+      await db.run('INSERT INTO activity (entity_type,entity_id,actor_id,verb,summary) VALUES (?,?,?,?,?)', [
         t.entity_type, t.entity_id, null, 'clock_missed', `missed ${t.clock_key} — ${t.label || t.entity_id}`,
       ]);
     }
@@ -115,11 +115,12 @@ export interface ClockHealth {
   atRisk: number;
 }
 
-export function clockHealth(db: Db): ClockHealth[] {
-  const clocks = db.all<Record<string, any>>('SELECT * FROM sla_clocks ORDER BY target_hours ASC');
+export async function clockHealth(db: Db): Promise<ClockHealth[]> {
+  const clocks = await db.all<Record<string, any>>('SELECT * FROM sla_clocks ORDER BY target_hours ASC');
   const now = Date.now();
-  return clocks.map((c) => {
-    const timers = db.all<Record<string, any>>('SELECT * FROM sla_timers WHERE clock_key = ?', [c.key]);
+  const out: ClockHealth[] = [];
+  for (const c of clocks) {
+    const timers = await db.all<Record<string, any>>('SELECT * FROM sla_timers WHERE clock_key = ?', [c.key]);
     const met = timers.filter((t) => t.outcome === 'met').length;
     const missed = timers.filter((t) => t.outcome === 'missed').length;
     const waived = timers.filter((t) => t.outcome === 'waived').length;
@@ -135,7 +136,7 @@ export function clockHealth(db: Db): ClockHealth[] {
           }, 0) / completed.length / HOUR) * 10,
         ) / 10
       : null;
-    return {
+    const health: ClockHealth = {
       key: c.key,
       name: c.name,
       scope: c.scope,
@@ -153,11 +154,13 @@ export function clockHealth(db: Db): ClockHealth[] {
       avgHours,
       atRisk: running.filter((t) => (toDate(t.due_at)?.getTime() ?? now) - now < c.warn_hours * 0.3 * HOUR).length,
     };
-  });
+    out.push(health);
+  }
+  return out;
 }
 
-export function liveTimers(db: Db, limit = 50) {
-  const rows = db.all<Record<string, any>>(
+export async function liveTimers(db: Db, limit = 50) {
+  const rows = await db.all<Record<string, any>>(
     `SELECT t.*, c.name AS clock_name, c.scope, c.escalation, c.target_hours
      FROM sla_timers t JOIN sla_clocks c ON c.key = t.clock_key
      WHERE t.outcome IN ('running','missed')

@@ -28,12 +28,12 @@ const daysAgo = (n: number) => addDays(new Date(), -n).toISOString().slice(0, 19
 const daysAhead = (n: number) => addDays(new Date(), n).toISOString().slice(0, 10);
 const isoNow = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-export function seed(db: Db, log: (m: string) => void = console.log) {
+export async function seed(db: Db, log: (m: string) => void = console.log): Promise<void> {
   if (config.env === 'production' && process.env.FORCE !== '1') {
     throw new Error('Refusing to seed a production database. Set FORCE=1 if this is intentional.');
   }
 
-  db.tx(() => {
+  await db.tx(async () => {
     // Wipe in FK-safe order.
     const tables = [
       'acceptance_records','sla_timers','qa_reports','edge_cases','usage_metrics','device_licenses',
@@ -45,7 +45,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       'client_contacts','clients','team_members','teams','retention_policies','sla_policies',
       'turnover_gates','phases','users',
     ];
-    for (const t of tables) db.exec(`DELETE FROM ${t};`);
+    for (const t of tables) await db.exec(`DELETE FROM ${t};`);
 
     /* ------------------------------------------------------------- people -- */
     const users = [
@@ -60,7 +60,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
     ] as const;
 
     for (const [idv, email, name, title, role, color, initials, cap, cost, bill, skills] of users) {
-      db.run(
+      await db.run(
         `INSERT INTO users (id,email,full_name,title,role,avatar_color,initials,capacity_hours_week,cost_rate_cents,bill_rate_cents,skills_json)
          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         [idv, email, name, title, role, color, initials, cap, cost, bill, JSON.stringify(skills)],
@@ -74,8 +74,10 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['tm_growth', 'Growth', 'growth', 'Pipeline & commercials', ['usr_kabir', 'usr_maya']],
     ];
     for (const [tid, name, slug, desc, members] of teams) {
-      db.run('INSERT INTO teams (id,name,slug,description) VALUES (?,?,?,?)', [tid, name, slug, desc]);
-      for (const m of members) db.run('INSERT INTO team_members (team_id,user_id) VALUES (?,?)', [tid, m]);
+      await db.run('INSERT INTO teams (id,name,slug,description) VALUES (?,?,?,?)', [tid, name, slug, desc]);
+      for (const memberId of members) {
+        await db.run('INSERT INTO team_members (team_id,user_id) VALUES (?,?)', [tid, memberId]);
+      }
     }
 
     /* ------------------------------------------------------------ clients -- */
@@ -88,12 +90,12 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['cl_atlas', 'Atlas Energy', 'atlas-energy', 'Energy', 'AE', '#a78bfa', 'strategic', 'churn', 'Daniel Okoye', 'daniel@atlasenergy.com', 'Director IT', 2_100_000],
     ] as const;
     for (const [cid, name, slug, ind, initials, color, tier, health, contact, email, crole, mrr] of clients) {
-      db.run(
+      await db.run(
         `INSERT INTO clients (id,name,slug,industry,initials,accent_color,tier,health,primary_contact_name,primary_contact_email,primary_contact_role,mrr_cents)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         [cid, name, slug, ind, initials, color, tier, health, contact, email, crole, mrr],
       );
-      db.run('INSERT INTO client_contacts (id,client_id,name,email,role,is_primary) VALUES (?,?,?,?,?,1)', [
+      await db.run('INSERT INTO client_contacts (id,client_id,name,email,role,is_primary) VALUES (?,?,?,?,?,1)', [
         id('ct'), cid, contact, email, crole,
       ]);
     }
@@ -126,9 +128,8 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
         'Decision made', 'Loss reason + revisit date recorded', 0, 0, '#475569', 'archive'],
     ];
     for (const [sid, key, name, phase, pos, desc, entry, exit, sla, val, color, icon] of stages) {
-      db.run(
-        `INSERT OR REPLACE INTO pipeline_stages (id,key,name,phase,position,description,entry_criteria,exit_criteria,default_sla_days,default_value_cents,color,icon)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      await db.run(
+        `INSERT INTO pipeline_stages (id,key,name,phase,position,description,entry_criteria,exit_criteria,default_sla_days,default_value_cents,color,icon) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (key) DO UPDATE SET name = excluded.name, description = excluded.description, position = excluded.position, entry_criteria = excluded.entry_criteria, exit_criteria = excluded.exit_criteria, default_sla_days = excluded.default_sla_days, default_value_cents = excluded.default_value_cents`,
         [sid, key, name, phase, pos, desc, entry, exit, sla, val, color, icon],
       );
     }
@@ -145,8 +146,8 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['ph_growth', 'growth', 'Growth Iterations', 80, 'Monthly iteration cycles against the roadmap and retention metrics.', 14, 1, '#a855f7', 'Quarterly roadmap review completed with client stakeholder.'],
     ];
     for (const [pid, key, name, pos, desc, sla, billable, color, policy] of phases) {
-      db.run(
-        'INSERT OR REPLACE INTO phases (id,key,name,position,description,sla_days,billable,color,turnover_policy) VALUES (?,?,?,?,?,?,?,?,?)',
+      await db.run(
+        'INSERT INTO phases (id,key,name,position,description,sla_days,billable,color,turnover_policy) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT (key) DO UPDATE SET name = excluded.name, description = excluded.description, sla_days = excluded.sla_days, turnover_policy = excluded.turnover_policy',
         [pid, key, name, pos, desc, sla, billable, color, policy],
       );
     }
@@ -170,8 +171,8 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['tg_x3', 'TG-15', 'Support runbook approved', 'project', 'Severity matrix, escalation and on-call rota documented.', 1, 'lead', ''],
     ];
     for (const [gid, key, name, scope, desc, required, role, rule] of gates) {
-      db.run(
-        'INSERT OR REPLACE INTO turnover_gates (id,key,name,scope,description,required,owner_role,auto_rule) VALUES (?,?,?,?,?,?,?,?)',
+      await db.run(
+        'INSERT INTO turnover_gates (id,key,name,scope,description,required,owner_role,auto_rule) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (key) DO UPDATE SET name = excluded.name, description = excluded.description, required = excluded.required, owner_role = excluded.owner_role, auto_rule = excluded.auto_rule',
         [gid, key, name, scope, desc, required, role, rule],
       );
     }
@@ -182,7 +183,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['sla_3', 'task', 'medium', 12, 72],
       ['sla_4', 'task', 'low', 24, 168],
     ] as const) {
-      db.run('INSERT OR REPLACE INTO sla_policies (id,scope,priority,response_hours,resolve_hours,escalate_to) VALUES (?,?,?,?,?,?)', [
+      await db.run('INSERT INTO sla_policies (id,scope,priority,response_hours,resolve_hours,escalate_to) VALUES (?,?,?,?,?,?) ON CONFLICT (scope, priority) DO UPDATE SET response_hours = excluded.response_hours, resolve_hours = excluded.resolve_hours, escalate_to = excluded.escalate_to', [
         sid, scope, prio, resp, resolve, 'usr_maya',
       ]);
     }
@@ -199,7 +200,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['lb_quick', 'quick-win', '#22c55e', 'Under 4 hours'],
     ];
     for (const [lid, name, color, desc] of labels) {
-      db.run('INSERT OR REPLACE INTO labels (id,name,color,description) VALUES (?,?,?,?)', [lid, name, color, desc]);
+      await db.run('INSERT INTO labels (id,name,color,description) VALUES (?,?,?,?) ON CONFLICT (name) DO UPDATE SET color = excluded.color, description = excluded.description', [lid, name, color, desc]);
     }
 
     /* --------------------------------------------------------------- deals -- */
@@ -219,7 +220,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
     ];
     for (const [did, cid, title, value, stage, owner, prob, started, next] of deals) {
       const status = stage === 'st_closed' ? 'lost' : stage === 'st_expansion' ? 'won' : 'open';
-      db.run(
+      await db.run(
         `INSERT INTO deals (id,client_id,title,value_cents,currency,status,stage_id,owner_id,probability,started_at,next_step,lost_at,lost_reason)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [did, cid, title, value, 'INR', status, stage, owner, prob, started, next,
@@ -252,8 +253,8 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
     };
     const runPhases = ['ph_discovery', 'ph_architecture', 'ph_design', 'ph_build', 'ph_qa'];
     for (const [did, runs] of Object.entries(phaseRunPlan)) {
-      runs.forEach((r, i) => {
-        db.run(
+      for (const [i, r] of runs.entries()) {
+        await db.run(
           `INSERT INTO deal_phase_runs (id,deal_id,phase_id,status,position,started_at,due_at,completed_at,approved_by,turnover_notes)
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
           [id('dpr'), did, runPhases[i], r.status, i,
@@ -263,7 +264,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
             r.status === 'done' ? 'usr_maya' : null,
             r.status === 'done' ? 'Turnover gate green; artefact linked on Excaliboard.' : ''],
         );
-      });
+      }
     }
 
     /* ------------------------------------------------------------ projects -- */
@@ -276,7 +277,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['pr_tide', 'TIDE', 'Atlas Field Ops (Offline)', 'cl_atlas', 'dl_tide', 'usr_tara', 'active', 'on_track', 22, 3900000, 300, 'Offline-first field operations app with sync conflict resolution.', 'https://github.com/atlas/field-ops'],
     ];
     for (const [pid, key, name, cid, did, owner, status, health, started, budget, hours, desc, repo] of projects) {
-      db.run(
+      await db.run(
         `INSERT INTO projects (id,key,name,client_id,deal_id,owner_id,status,health,started_at,target_end_at,budget_cents,hours_budget,description,repo_url)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [pid, key, name, cid, did, owner, status, health, daysAgo(started), daysAhead(Math.max(10, 120 - started)), budget, hours, desc, repo],
@@ -293,8 +294,8 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       pr_tide: [['ph_discovery', 'done', 100, 21, 16], ['ph_architecture', 'done', 100, 16, 9], ['ph_design', 'active', 58, 8, -6], ['ph_build', 'locked', 0, 0, -24]],
     };
     for (const [pid, rows] of Object.entries(projectPhasePlan)) {
-      rows.forEach(([phid, status, progress, ago, dueOffset], i) => {
-        db.run(
+      for (const [i, [phid, status, progress, ago, dueOffset]] of rows.entries()) {
+        await db.run(
           `INSERT INTO project_phases (id,project_id,phase_id,status,position,progress,started_at,due_at,completed_at,turnover_passed,signoff_by)
            VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
           [id('pph'), pid, phid, status, i, progress,
@@ -304,7 +305,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
             status === 'done' ? 1 : 0,
             status === 'done' ? 'usr_maya' : null],
         );
-      });
+      }
     }
 
     /* --------------------------------------------------------------- boards -- */
@@ -321,21 +322,21 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
     for (const pid of Object.keys(projectPhasePlan)) {
       const bid = `bd_${pid.replace('pr_', '')}`;
       boardFor[pid] = bid;
-      db.run('INSERT INTO boards (id,project_id,name,description,kind) VALUES (?,?,?,?,?)', [
+      await db.run('INSERT INTO boards (id,project_id,name,description,kind) VALUES (?,?,?,?,?)', [
         bid, pid, 'Delivery', 'Sprint board with turnover gates per column.', 'delivery',
       ]);
       for (const [key, name, pos, wip, isDone, color] of columnDefs) {
-        db.run('INSERT INTO columns (id,board_id,key,name,position,wip_limit,is_done,color) VALUES (?,?,?,?,?,?,?,?)', [
+        await db.run('INSERT INTO columns (id,board_id,key,name,position,wip_limit,is_done,color) VALUES (?,?,?,?,?,?,?,?)', [
           `${bid}_${key}`, bid, key, name, pos, wip, isDone, color,
         ]);
       }
     }
     // Org-wide triage board.
-    db.run('INSERT INTO boards (id,project_id,name,description,kind) VALUES (?,?,?,?,?)', [
+    await db.run('INSERT INTO boards (id,project_id,name,description,kind) VALUES (?,?,?,?,?)', [
       'bd_triage', null, 'Triage', 'Cross-project intake: bugs, client asks, incidents.', 'triage',
     ]);
     for (const [key, name, pos, wip, isDone, color] of columnDefs) {
-      db.run('INSERT INTO columns (id,board_id,key,name,position,wip_limit,is_done,color) VALUES (?,?,?,?,?,?,?,?)', [
+      await db.run('INSERT INTO columns (id,board_id,key,name,position,wip_limit,is_done,color) VALUES (?,?,?,?,?,?,?,?)', [
         `bd_triage_${key}`, 'bd_triage', key, name, pos, wip, isDone, color,
       ]);
     }
@@ -445,13 +446,13 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
     const taskIds: string[] = [];
     // project_phase rows are the FK target; map (project, phase key) -> row id.
     const phaseRowFor = new Map<string, string>();
-    for (const row of db.all<{ id: string; project_id: string; phase_id: string }>(
+    for (const row of await db.all<{ id: string; project_id: string; phase_id: string }>(
       'SELECT id, project_id, phase_id FROM project_phases',
     )) {
       phaseRowFor.set(`${row.project_id}:${row.phase_id}`, row.id);
     }
 
-    taskSeeds.forEach((t, index) => {
+    for (const [index, t] of taskSeeds.entries()) {
       const pk = projectKey[t.project];
       counters[pk] = (counters[pk] ?? 0) + 1;
       const key = `${pk}-${100 + counters[pk]}`;
@@ -471,7 +472,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       const startedAt = ['in_progress', 'review', 'blocked', 'done'].includes(t.status) ? daysAgo(Math.floor(rnd() * 8) + 1) : null;
       const completedAt = t.status === 'done' ? daysAgo(Math.floor(rnd() * 6)) : null;
 
-      db.run(
+      await db.run(
         `INSERT INTO tasks (id,key,project_id,board_id,column_id,project_phase_id,title,description,type,priority,status,
           assignee_id,reporter_id,story_points,estimate_hours,logged_hours,position,due_at,sla_hours,sla_due_at,sla_breached,
           started_at,completed_at,blocked_reason,turnover_criteria,turnover_state,turnover_approved_by,turnover_approved_at,
@@ -487,16 +488,16 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
 
       for (const lb of t.labels) {
         const labelId = labels.find((l) => l[0] === lb)?.[0];
-        if (labelId) db.run('INSERT OR IGNORE INTO task_labels (task_id,label_id) VALUES (?,?)', [tid, labelId]);
+        if (labelId) await db.run('INSERT OR IGNORE INTO task_labels (task_id,label_id) VALUES (?,?)', [tid, labelId]);
       }
-      db.run('INSERT OR IGNORE INTO task_watchers (task_id,user_id) VALUES (?,?)', [tid, 'usr_maya']);
+      await db.run('INSERT OR IGNORE INTO task_watchers (task_id,user_id) VALUES (?,?)', [tid, 'usr_maya']);
       if (t.status !== 'backlog') {
-        db.run('INSERT INTO task_checklist (id,task_id,label,done,position) VALUES (?,?,?,?,?)', [id('chk'), tid, 'Acceptance criteria confirmed with the client', 1, 1]);
-        db.run('INSERT INTO task_checklist (id,task_id,label,done,position) VALUES (?,?,?,?,?)', [id('chk'), tid, 'Implementation merged behind a flag', t.status === 'done' ? 1 : 0, 2]);
-        db.run('INSERT INTO task_checklist (id,task_id,label,done,position) VALUES (?,?,?,?,?)', [id('chk'), tid, 'Turnover evidence attached', t.turnover === 'passed' ? 1 : 0, 3]);
+        await db.run('INSERT INTO task_checklist (id,task_id,label,done,position) VALUES (?,?,?,?,?)', [id('chk'), tid, 'Acceptance criteria confirmed with the client', 1, 1]);
+        await db.run('INSERT INTO task_checklist (id,task_id,label,done,position) VALUES (?,?,?,?,?)', [id('chk'), tid, 'Implementation merged behind a flag', t.status === 'done' ? 1 : 0, 2]);
+        await db.run('INSERT INTO task_checklist (id,task_id,label,done,position) VALUES (?,?,?,?,?)', [id('chk'), tid, 'Turnover evidence attached', t.turnover === 'passed' ? 1 : 0, 3]);
       }
       if (index % 4 === 0) {
-        db.run('INSERT INTO task_comments (id,task_id,author_id,body,created_at) VALUES (?,?,?,?,?)', [
+        await db.run('INSERT INTO task_comments (id,task_id,author_id,body,created_at) VALUES (?,?,?,?,?)', [
           id('cmt'), tid, pick(['usr_maya', 'usr_arjun', 'usr_sofia', 'usr_tara']),
           pick([
             'Pulled the latest client feedback into the AC — added the empty-state requirement.',
@@ -511,30 +512,30 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       const taskGates = gates.filter((g) => g[3] === 'task');
       for (const [gid, , gname] of taskGates) {
         const state = t.turnover === 'passed' ? 'pass' : t.turnover === 'failed' && gname.includes('Test') ? 'fail' : pick(['pending', 'pending', 'pass', 'pass', 'pass']);
-        db.run(
+        await db.run(
           'INSERT INTO turnover_checks (id,gate_id,task_id,status,evidence,checked_by,checked_at) VALUES (?,?,?,?,?,?,?)',
           [id('tchk'), gid, tid, state,
             state === 'pass' ? 'Evidence attached to the task thread.' : state === 'fail' ? 'Coverage on the error branch is 41% — needs another pass.' : '',
             state === 'pass' ? 'usr_maya' : null, state === 'pass' ? daysAgo(1) : null],
         );
       }
-    });
+    }
 
     // Dependencies — a believable chain.
     const depPairs: Array<any[]> = [[0, 2], [1, 0], [4, 0], [8, 9], [9, 10], [13, 8], [15, 16], [21, 22], [26, 27]];
     for (const [a, b] of depPairs) {
       if (taskIds[a] && taskIds[b] && taskIds[a] !== taskIds[b]) {
-        db.run('INSERT OR IGNORE INTO task_dependencies (task_id,depends_on_id,kind) VALUES (?,?,?)', [taskIds[a], taskIds[b], 'blocks']);
+        await db.run('INSERT OR IGNORE INTO task_dependencies (task_id,depends_on_id,kind) VALUES (?,?,?)', [taskIds[a], taskIds[b], 'blocks']);
       }
     }
 
     // Phase-level turnover checks for active project phases.
     const phaseGates = gates.filter((g) => g[3] === 'phase');
-    const activePhases = db.all<{ id: string }>("SELECT id FROM project_phases WHERE status IN ('active','blocked','done')");
+    const activePhases = await db.all<{ id: string }>("SELECT id FROM project_phases WHERE status IN ('active','blocked','done')");
     for (const ph of activePhases) {
       for (const [gid] of phaseGates) {
         const st = pick(['pending', 'pending', 'pass', 'pass']);
-        db.run('INSERT INTO turnover_checks (id,gate_id,project_phase_id,status,evidence,checked_by,checked_at) VALUES (?,?,?,?,?,?,?)', [
+        await db.run('INSERT INTO turnover_checks (id,gate_id,project_phase_id,status,evidence,checked_by,checked_at) VALUES (?,?,?,?,?,?,?)', [
           id('pchk'), gid, ph.id, st, st === 'pass' ? 'Linked on the project Excaliboard.' : '', st === 'pass' ? 'usr_maya' : null, st === 'pass' ? daysAgo(2) : null,
         ]);
       }
@@ -546,7 +547,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
         if (rnd() < 0.18) continue;
         const mins = pick([90, 120, 150, 180, 240, 300, 360]);
         const project = pick(projectIds);
-        db.run(
+        await db.run(
           'INSERT INTO time_entries (id,task_id,project_id,user_id,minutes,note,billable,approved,worked_on) VALUES (?,?,?,?,?,?,?,?,?)',
           [id('te'), null, project, uid, mins, pick(['Build + test', 'Pairing session', 'Client demo prep', 'Code review', 'Incident follow-up', 'Design crit']), 1, rnd() > 0.3 ? 1 : 0, daysAgo(d)],
         );
@@ -564,7 +565,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['pr_atlas', 'ph_discovery', 'Grid telemetry systems map', 'excalidraw', 'https://excalidraw.com/#json=atlas-grid-map', 'draft', null],
     ];
     for (const [pid, phid, title, type, url, status, ago] of handoffs) {
-      db.run(
+      await db.run(
         'INSERT INTO handoffs (id,project_id,project_phase_id,title,type,url,status,created_by,shared_at) VALUES (?,?,?,?,?,?,?,?,?)',
         [id('hnd'), pid, phaseRowFor.get(`${pid}:${phid}`) ?? null, title, type, url, status, 'usr_maya', ago ? daysAgo(ago) : null],
       );
@@ -579,11 +580,11 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['Phase due in 3 days → alert phase owner', 'phase.due_soon', 'notify.in_app', JSON.stringify({ days: 3 }), ''],
       ['Weekly capacity > 110% → block new assignment', 'capacity.overallocated', 'assign.block', JSON.stringify({ threshold: 110 }), ''],
     ];
-    rules.forEach(([name, trig, act, cfg], i) => {
-      db.run('INSERT INTO automation_rules (id,name,trigger_key,action_key,config_json,is_enabled,run_count,last_run_at) VALUES (?,?,?,?,?,?,?,?)', [
+    for (const [i, [name, trig, act, cfg]] of rules.entries()) {
+      await db.run('INSERT INTO automation_rules (id,name,trigger_key,action_key,config_json,is_enabled,run_count,last_run_at) VALUES (?,?,?,?,?,?,?,?)', [
         id('aut'), name, trig, act, cfg, i === 5 ? 0 : 1, Math.floor(rnd() * 40), daysAgo(1),
       ]);
-    });
+    }
 
     /* ------------------------------------------------------ notifications -- */
     const notifs: Array<any[]> = [
@@ -595,7 +596,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['usr_tara', 'deal', 'Atlas consultation booked', 'Tuesday 11:00 IST with Daniel Okoye. Pre-read attached.', 5],
     ];
     for (const [uid, kind, title, body, ago] of notifs) {
-      db.run('INSERT INTO notifications (id,user_id,kind,title,body,created_at) VALUES (?,?,?,?,?,?)', [
+      await db.run('INSERT INTO notifications (id,user_id,kind,title,body,created_at) VALUES (?,?,?,?,?,?)', [
         id('ntf'), uid, kind, title, body, ago === null ? isoNow() : daysAgo(ago),
       ]);
     }
@@ -605,7 +606,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       const weekStart = daysAhead(wk * 7 - 21);
       for (const [uid, cap] of [['usr_arjun', 34], ['usr_dev', 36], ['usr_nina', 36], ['usr_sofia', 32], ['usr_omar', 32], ['usr_tara', 30]] as const) {
         const planned = Math.round(cap * (0.6 + rnd() * 0.7));
-        db.run('INSERT INTO capacity_snapshots (id,user_id,week_start,capacity_hours,planned_hours,logged_hours) VALUES (?,?,?,?,?,?)', [
+        await db.run('INSERT INTO capacity_snapshots (id,user_id,week_start,capacity_hours,planned_hours,logged_hours) VALUES (?,?,?,?,?,?)', [
           id('cap'), uid, weekStart, cap, planned, Math.round(planned * (0.7 + rnd() * 0.3)),
         ]);
       }
@@ -628,9 +629,8 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['ck_triage', 'lead-triage', 'Lead triage of inbound', 'deal', 'inbound lead captured', 24, 12, 8, 'lead', 'Every inbound gets a qualified or declined answer inside one working day.', 'v1'],
     ];
     for (const [cid, key, name, scope, anchorEvent, target, warn, stretch, esc, note, ref] of clocks) {
-      db.run(
-        `INSERT OR REPLACE INTO sla_clocks (id,key,name,scope,anchor_event,target_hours,warn_hours,stretch_hours,enforceable,escalation,policy_note,board_ref)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      await db.run(
+        `INSERT INTO sla_clocks (id,key,name,scope,anchor_event,target_hours,warn_hours,stretch_hours,enforceable,escalation,policy_note,board_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (key) DO UPDATE SET name = excluded.name, target_hours = excluded.target_hours, warn_hours = excluded.warn_hours, stretch_hours = excluded.stretch_hours, policy_note = excluded.policy_note, board_ref = excluded.board_ref`,
         [cid, key, name, scope, anchorEvent, target, warn, stretch, 1, esc, note, ref],
       );
     }
@@ -644,7 +644,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['pa_kite', 'cl_kite', 'Kite Growth Console', 'kite', 'starter', 25, 40000, 6],
     ];
     for (const [pid, cid, name, slug, plan, devices, quota, seats] of partners) {
-      db.run(
+      await db.run(
         'INSERT INTO partners (id,client_id,name,slug,console_url,plan,device_limit,api_quota_month,seat_limit) VALUES (?,?,?,?,?,?,?,?,?)',
         [pid, cid, name, slug, `https://${slug}.relayoss.studio/console`, plan, devices, quota, seats],
       );
@@ -654,20 +654,20 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
         [`qa@${slug}.app`, 'QA Automation', 'service', 0, 1],
       ];
       for (const [email, dn, role, mfa, ago] of iamUsers) {
-        db.run(
+        await db.run(
           'INSERT INTO partner_iam_users (id,partner_id,email,display_name,role,mfa_enabled,last_active_at,status) VALUES (?,?,?,?,?,?,?,?)',
           [id('iam'), pid, email, dn, role, mfa, ago === null ? null : daysAgo(ago), mfa === 1 ? 'active' : 'invited'],
         );
       }
       for (let i = 0; i < Math.min(devices, 9); i++) {
-        db.run(
+        await db.run(
           'INSERT INTO device_licenses (id,partner_id,device_id,device_name,platform,status,assigned_to,activated_at) VALUES (?,?,?,?,?,?,?,?)',
           [id('dev'), pid, `DEV-${slug.slice(0, 3).toUpperCase()}-${1000 + i}`, pick(['Field Tablet A', 'Warehouse Scanner', 'Dispatch Console', 'Nurse Handheld', 'Driver Phone']) + ` ${i + 1}`,
             pick(['android', 'ios', 'android']), i > 7 ? 'revoked' : 'active', pick(['Field Team 1', 'Ops', 'Night Shift', '']), daysAgo(i * 3)],
         );
       }
       for (let d = 0; d < 30; d++) {
-        db.run(
+        await db.run(
           'INSERT INTO usage_metrics (id,partner_id,day,api_calls,active_users,storage_mb,uptime_pct) VALUES (?,?,?,?,?,?,?)',
           [id('usg'), pid, daysAgo(d), Math.round(quota / 30 * (0.4 + rnd() * 0.9)), Math.round(seats * (0.5 + rnd() * 0.8)),
             Math.round(200 + rnd() * 4000), Math.round((99.2 + rnd() * 0.79) * 100) / 100],
@@ -702,7 +702,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
         const [mod, cat] = pick(edgeModules);
         const [scenario, sev] = pick(edgeTemplates);
         const status = pick(['catalogued', 'catalogued', 'covered', 'covered', 'verified', 'verified', 'verified', 'deferred']);
-        db.run(
+        await db.run(
           'INSERT INTO edge_cases (id,project_id,module,code,scenario,category,severity,status,automated,verified_by,verified_at,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
           [id('edge'), pid, mod, `EC-${String(1000 + i)}`, scenario, cat, sev, status,
             status === 'verified' ? pick([0, 1, 1]) : 0,
@@ -724,7 +724,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
     ];
     for (const [pid, version, name, status, branch, demoIn, approvedIn, shipIn, shippedIn, rollback] of releases) {
       const rid = id('rel');
-      db.run(
+      await db.run(
         `INSERT INTO releases (id,project_id,version,name,status,demo_at,demo_approved_at,exec_summary_due_at,ship_planned_at,shipped_at,branch,deploy_target,rollback_plan,exec_summary_url,demo_feedback)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [rid, pid, version, name, status,
@@ -757,7 +757,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       const project = pick(['pr_northwind', 'pr_veer', 'pr_lumen', 'pr_tide', 'pr_sentinel']);
       const status = pick(['open', 'open', 'triaged', 'in_progress', 'fixed', 'verified', 'verified', 'wont_fix']);
       const submitted = daysAgo(Math.floor(rnd() * 9));
-      db.run(
+      await db.run(
         `INSERT INTO qa_reports (id,project_id,kind,severity,title,body,status,reproduction,evidence_url,reporter_id,assignee_id,due_at,submitted_at,resolved_at)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id('qa'), project, kind, sev, title,
@@ -787,7 +787,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       const started = new Date(Date.now() - startedAgoH * 3600_000);
       const due = new Date(started.getTime() + targetH * 3600_000);
       const warn = new Date(started.getTime() + targetH * 0.66 * 3600_000);
-      db.run(
+      await db.run(
         `INSERT INTO sla_timers (id,clock_key,entity_type,entity_id,label,started_at,due_at,warn_at,met_at,missed_at,outcome,exception_note,minutes_used)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id('tmr'), clockKey, etype, eid, label,
@@ -801,7 +801,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
     }
 
     /* ------------------------------------------------------- acceptance ---- */
-    const allTasks = db.all<{ id: string; status: string; assignee_id: string; turnover_state: string }>(
+    const allTasks = await db.all<{ id: string; status: string; assignee_id: string; turnover_state: string }>(
       'SELECT id,status,assignee_id,turnover_state FROM tasks',
     );
     for (const t of allTasks) {
@@ -816,7 +816,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
         ladder.push(['dev_complete', 'pending'], ['qa_approved', 'pending'], ['lead_approved', 'pending'], ['client_accepted', 'pending']);
       }
       for (const [step, state] of ladder) {
-        db.run(
+        await db.run(
           'INSERT INTO acceptance_records (id,task_id,step,state,actor_id,evidence,notes,decided_at) VALUES (?,?,?,?,?,?,?,?)',
           [id('acc'), t.id, step, state,
             state === 'passed' ? (step === 'qa_approved' ? 'usr_tara' : step === 'lead_approved' ? 'usr_maya' : t.assignee_id) : null,
@@ -826,7 +826,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
         );
       }
       const step = t.status === 'done' ? 'client_accepted' : t.status === 'review' ? 'lead_approved' : 'dev_complete';
-      db.run('UPDATE tasks SET acceptance_step = ? WHERE id = ?', [step, t.id]);
+      await db.run('UPDATE tasks SET acceptance_step = ? WHERE id = ?', [step, t.id]);
     }
 
     /* -------------------------------------------------------------- docs --- */
@@ -839,14 +839,14 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['pr_tide', 'Offline sync — field notes', 'note', 'draft', 'Field engineers keep the tablet in the truck overnight at 45°C; battery-first design required. Sync must survive 6 hours offline.', 0],
     ];
     for (const [pid, title, kind, status, body, visible] of docs) {
-      db.run('INSERT INTO docs (id,project_id,title,kind,body,status,author_id,client_visible,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      await db.run('INSERT INTO docs (id,project_id,title,kind,body,status,author_id,client_visible,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
         [id('doc'), pid, title, kind, body, status, pick(['usr_maya', 'usr_arjun', 'usr_tara']), visible, daysAgo(Math.floor(rnd() * 10))]);
     }
 
-    db.run('INSERT INTO saved_views (id,name,owner_id,surface,filters_json,is_shared) VALUES (?,?,?,?,?,1)', [
+    await db.run('INSERT INTO saved_views (id,name,owner_id,surface,filters_json,is_shared) VALUES (?,?,?,?,?,1)', [
       id('vw'), 'My urgent + client-visible', 'usr_maya', 'board', JSON.stringify({ assignee: 'me', priority: ['urgent', 'high'], label: 'lb_client' }),
     ]);
-    db.run('INSERT INTO saved_views (id,name,owner_id,surface,filters_json,is_shared) VALUES (?,?,?,?,?,1)', [
+    await db.run('INSERT INTO saved_views (id,name,owner_id,surface,filters_json,is_shared) VALUES (?,?,?,?,?,1)', [
       id('vw'), 'SLA at risk this week', 'usr_maya', 'board', JSON.stringify({ sla: 'at_risk' }),
     ]);
 
@@ -856,7 +856,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['notifications', 90, 'In-app notification retention'],
       ['time_entries', 2555, 'Billable time records'],
     ] as const) {
-      db.run('INSERT OR REPLACE INTO retention_policies (id,table_name,retain_days,description) VALUES (?,?,?,?)', [id('ret'), tbl, days, desc]);
+      await db.run('INSERT INTO retention_policies (id,table_name,retain_days,description) VALUES (?,?,?,?) ON CONFLICT (table_name) DO UPDATE SET retain_days = excluded.retain_days, description = excluded.description', [id('ret'), tbl, days, desc]);
     }
 
     /* --------------------------------------------------------- activity -- */
@@ -871,7 +871,7 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
       ['task', 'TIDE-102', 'usr_sofia', 'status_changed', 'moved to In Progress', 9],
     ];
     for (const [etype, eid, actor, verb, summary, ago] of acts) {
-      db.run('INSERT INTO activity (entity_type,entity_id,actor_id,verb,summary,created_at) VALUES (?,?,?,?,?,?)', [
+      await db.run('INSERT INTO activity (entity_type,entity_id,actor_id,verb,summary,created_at) VALUES (?,?,?,?,?,?)', [
         etype, eid, actor, verb, summary, daysAgo(ago),
       ]);
     }
@@ -879,3 +879,6 @@ export function seed(db: Db, log: (m: string) => void = console.log) {
     log('  ✓ seeded 8 people, 6 clients, 12 deals, 6 projects, ' + taskSeeds.length + ' tasks');
   });
 }
+
+
+

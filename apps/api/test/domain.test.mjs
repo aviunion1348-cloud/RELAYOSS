@@ -3,9 +3,10 @@
  * These exercise the pure engines and the server-side invariants that make
  * the turnover policy real (not decorative UI).
  */
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,22 +17,56 @@ const ROOT = path.resolve(here, '../../..');
 const { evaluateGates } = await import('../src/domain/turnover.ts');
 const { scoreRisk, slaState, wsptScore } = await import('../src/domain/risk.ts');
 const { plan, criticalPathSlack } = await import('../src/domain/planner.ts');
-const { Db } = await import('../src/db/index.ts');
+const { SqliteDb } = await import('../src/db/sqlite.ts');
+const { PostgresDb } = await import('../src/db/postgres.ts');
 const { migrate } = await import('../src/db/migrate.ts');
 const { createTask, updateTask, recordAcceptance, assertTurnoverComplete, taskDetail } = await import('../src/services/tasks.ts');
 const { startTimer, resolveTimer, sweepTimers, clockHealth } = await import('../src/services/clocks.ts');
 
 /* ------------------------------------------------------------- fixtures -- */
-function memoryDb() {
-  const db = new Db(':memory:');
-  migrate(db, { log: () => {} });
-  db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u1','a@x.io','Ada','admin','AD')");
-  db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u2','b@x.io','Grace','member','GR')");
-  db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c1','Acme','acme','AC')");
-  db.run("INSERT INTO projects (id,key,name,client_id) VALUES ('p1','ACM','Acme Project','c1')");
-  db.run("INSERT INTO boards (id,project_id,name) VALUES ('b1','p1','Delivery')");
+const PG_URL = process.env.TEST_DATABASE_URL ?? '';
+const openDbs = [];
+after(async () => { for (const d of openDbs) await d.close(); });
+
+/** Fresh, migrated, minimal-fixture database on whichever engine is configured. */
+async function memoryDb() {
+  let db;
+  if (PG_URL) {
+    db = new PostgresDb(PG_URL);
+    openDbs.push(db);
+    // Each test gets a clean slate; identifiers are stable so the suite is
+    // deterministic on both engines.
+    // Policy tables are seeded by migrations (0005) and are *governance*, not
+    // fixtures: truncating them would silently disable turnover enforcement and
+    // make every clock lookup return "unknown". They are preserved.
+    const KEEP = new Set([
+      'schema_migrations', 'turnover_gates', 'sla_clocks', 'sla_policies',
+      'retention_policies', 'phases', 'pipeline_stages',
+    ]);
+    const rows = await db.all("SELECT tablename AS n FROM pg_tables WHERE schemaname='public'");
+    const wipe = rows.map((r) => r.n).filter((n) => !KEEP.has(n));
+    if (wipe.length) {
+      await db.exec(`TRUNCATE ${wipe.map((n) => `"${n}"`).join(', ')} RESTART IDENTITY CASCADE`);
+    }
+  } else {
+    db = new SqliteDb(':memory:');
+    openDbs.push(db);
+  }
+  await migrate(db, { log: () => {} });
+  // Re-assert the governance baseline from the migration file itself. It is
+  // idempotent (ON CONFLICT DO NOTHING), so this is safe on a warm database and
+  // guarantees no test can run against a silently ungoverned schema.
+  if (db.dialect === 'postgres') {
+    const baseline = readFileSync(new URL('../../../db/migrations/pg/0005_baseline_policy.sql', import.meta.url), 'utf8');
+    await db.exec(baseline);
+  }
+  await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u1','a@x.io','Ada','admin','AD')");
+  await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u2','b@x.io','Grace','member','GR')");
+  await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c1','Acme','acme','AC')");
+  await db.run("INSERT INTO projects (id,key,name,client_id) VALUES ('p1','ACM','Acme Project','c1')");
+  await db.run("INSERT INTO boards (id,project_id,name) VALUES ('b1','p1','Delivery')");
   for (const [key, name] of [['backlog', 'Backlog'], ['todo', 'Ready'], ['in_progress', 'In Progress'], ['review', 'In Review'], ['blocked', 'Blocked'], ['done', 'Done']]) {
-    db.run('INSERT INTO columns (id,board_id,key,name,position,is_done) VALUES (?,?,?,?,?,?)', [`b1_${key}`, 'b1', key, name, 0, key === 'done' ? 1 : 0]);
+    await db.run('INSERT INTO columns (id,board_id,key,name,position,is_done) VALUES (?,?,?,?,?,?)', [`b1_${key}`, 'b1', key, name, 0, key === 'done' ? 1 : 0]);
   }
   return db;
 }
@@ -160,117 +195,120 @@ test('wspt: urgency over effort ranks a small urgent task first', () => {
 });
 
 /* --------------------------------------------- governance (integration) -- */
-test('governance: task creation instantiates every task gate as pending', () => {
-  const db = memoryDb();
-  const taskId = createTask(db, { title: 'Build the intake validator', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
-  const detail = taskDetail(db, taskId);
+test('governance: task creation instantiates every task gate as pending', async () => {
+  const db = await memoryDb();
+  const taskId = await createTask(db, { title: 'Build the intake validator', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  const detail = await taskDetail(db, taskId);
   assert.ok(detail.turnover.checks.length >= 5, `expected task gates, got ${detail.turnover.checks.length}`);
   assert.ok(detail.turnover.checks.every((c) => c.status === 'pending'));
   assert.equal(detail.turnover.ready, false);
 });
 
-test('governance: cannot ship with outstanding gates', () => {
-  const db = memoryDb();
-  const taskId = createTask(db, { title: 'Ship with no evidence', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
-  updateTask(db, taskId, { status: 'review' }, 'u2');
-  assert.throws(() => updateTask(db, taskId, { status: 'done' }, 'u1'), /Turnover gate blocked|Acceptance ladder incomplete/);
+test('governance: cannot ship with outstanding gates', async () => {
+  const db = await memoryDb();
+  const taskId = await createTask(db, { title: 'Ship with no evidence', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  await updateTask(db, taskId, { status: 'review' }, 'u2');
+  await assert.rejects(() => updateTask(db, taskId, { status: 'done' }, 'u1'), /Turnover gate blocked|Acceptance ladder incomplete/);
 });
 
-test('governance: a task with no gate policy fails closed', () => {
-  const db = memoryDb();
-  db.run("DELETE FROM turnover_gates WHERE scope = 'task'");
-  const taskId = createTask(db, { title: 'Uncertifiable work', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
-  const detail = taskDetail(db, taskId);
+test('governance: a task with no gate policy fails closed', async () => {
+  const db = await memoryDb();
+  await db.run("DELETE FROM turnover_gates WHERE scope = 'task'");
+  const taskId = await createTask(db, { title: 'Uncertifiable work', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  const detail = await taskDetail(db, taskId);
   assert.equal(detail.turnover.ready, false, 'absence of policy must never mean "approved"');
   assert.match(detail.turnover.blockers[0].name, /policy/i);
 });
 
-test('governance: passing a gate without evidence is rejected', () => {
-  const db = memoryDb();
-  const taskId = createTask(db, { title: 'Evidence required', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
-  const gate = db.get('SELECT id FROM turnover_gates WHERE scope = ? LIMIT 1', ['task']);
+test('governance: passing a gate without evidence is rejected', async () => {
+  const db = await memoryDb();
+  const taskId = await createTask(db, { title: 'Evidence required', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  const gate = await db.get('SELECT id FROM turnover_gates WHERE scope = ? LIMIT 1', ['task']);
   // Simulated route-level guard: service asserts pass requires evidence upstream,
   // so the invariant we can test here is that a pending gate keeps it blocked.
-  const detail = taskDetail(db, taskId);
+  const detail = await taskDetail(db, taskId);
   assert.equal(detail.turnover.ready, false);
   assert.ok(gate.id);
 });
 
-test('governance: full ladder + gates allows shipping, in order', () => {
-  const db = memoryDb();
-  const taskId = createTask(db, { title: 'Fully governed feature', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1', clientVisible: true }, 'u1');
+test('governance: full ladder + gates allows shipping, in order', async () => {
+  const db = await memoryDb();
+  const taskId = await createTask(db, { title: 'Fully governed feature', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1', clientVisible: true }, 'u1');
   // Fill every required gate with evidence.
-  for (const c of taskDetail(db, taskId).turnover.checks) {
-    db.run('UPDATE turnover_checks SET status = ?, evidence = ? WHERE task_id = ? AND gate_id = ?', ['pass', 'evidence bundle attached', taskId, c.gateId]);
+  for (const c of (await taskDetail(db, taskId)).turnover.checks) {
+    await db.run('UPDATE turnover_checks SET status = ?, evidence = ? WHERE task_id = ? AND gate_id = ?', ['pass', 'evidence bundle attached', taskId, c.gateId]);
   }
-  updateTask(db, taskId, { status: 'review' }, 'u2');
+  await updateTask(db, taskId, { status: 'review' }, 'u2');
 
   // Out of order: client acceptance before lead approval must fail.
-  assert.throws(() => recordAcceptance(db, taskId, 'client_accepted', 'passed', 'u1'), /before/);
+  await assert.rejects(() => recordAcceptance(db, taskId, 'client_accepted', 'passed', 'u1'), /before/);
 
-  recordAcceptance(db, taskId, 'qa_approved', 'passed', 'u2', 'QA report QA-101');
-  recordAcceptance(db, taskId, 'lead_approved', 'passed', 'u1', 'Signed off');
-  recordAcceptance(db, taskId, 'client_accepted', 'passed', 'u1', 'Client email 2026-11-04');
+  await recordAcceptance(db, taskId, 'qa_approved', 'passed', 'u2', 'QA report QA-101');
+  await recordAcceptance(db, taskId, 'lead_approved', 'passed', 'u1', 'Signed off');
+  await recordAcceptance(db, taskId, 'client_accepted', 'passed', 'u1', 'Client email 2026-11-04');
 
-  assert.doesNotThrow(() => assertTurnoverComplete(db, taskId, { client_visible: 1 }));
-  const shipped = updateTask(db, taskId, { status: 'done' }, 'u1');
+  await assert.doesNotReject(() => assertTurnoverComplete(db, taskId, { client_visible: 1 }));
+  const shipped = await updateTask(db, taskId, { status: 'done' }, 'u1');
   assert.equal(shipped.status, 'done');
-  const audit = db.get("SELECT COUNT(*) AS c FROM audit_log WHERE entity_id = ?", [taskId]);
+  const audit = await db.get("SELECT COUNT(*) AS c FROM audit_log WHERE entity_id = ?", [taskId]);
   assert.ok(audit.c >= 1, 'status changes are audited');
 });
 
-test('governance: blocked status demands a written reason', () => {
-  const db = memoryDb();
-  const taskId = createTask(db, { title: 'Blocked without reason', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
-  assert.throws(() => updateTask(db, taskId, { status: 'blocked', blockedReason: 'x' }, 'u1'), /reason/);
-  assert.doesNotThrow(() => updateTask(db, taskId, { status: 'blocked', blockedReason: 'Client egress not opened' }, 'u1'));
+test('governance: blocked status demands a written reason', async () => {
+  const db = await memoryDb();
+  const taskId = await createTask(db, { title: 'Blocked without reason', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' }, 'u1');
+  await assert.rejects(() => updateTask(db, taskId, { status: 'blocked', blockedReason: 'x' }, 'u1'), /reason/);
+  await assert.doesNotReject(() => updateTask(db, taskId, { status: 'blocked', blockedReason: 'Client egress not opened' }, 'u1'));
 });
 
 /* --------------------------------------------------------------- clocks -- */
-test('clocks: a met clock inside its target stays met', () => {
-  const db = memoryDb();
-  const timerId = startTimer(db, 'module-turnover', 'task', 't1', 'Module turnover: ACM-101');
-  const resolved = resolveTimer(db, timerId, 'met', 'Done in 6h');
+test('clocks: a met clock inside its target stays met', async () => {
+  const db = await memoryDb();
+  const timerId = await startTimer(db, 'module-turnover', 'task', 't1', 'Module turnover: ACM-101');
+  const resolved = await resolveTimer(db, timerId, 'met', 'Done in 6h');
   assert.equal(resolved.outcome, 'met');
 });
 
-test('clocks: resolving after the deadline records a miss, not a met', () => {
-  const db = memoryDb();
-  const timerId = startTimer(db, 'module-turnover', 'task', 't1', 'late');
-  // Backdate the start so the deadline has passed.
-  db.run("UPDATE sla_timers SET started_at = datetime('now','-3 day'), due_at = datetime('now','-2 day') WHERE id = ?", [timerId]);
-  const resolved = resolveTimer(db, timerId, 'met', 'reported late');
+test('clocks: resolving after the deadline records a miss, not a met', async () => {
+  const db = await memoryDb();
+  const timerId = await startTimer(db, 'module-turnover', 'task', 't1', 'late');
+  // Backdate the start so the deadline has passed (engine-neutral ISO strings —
+  // timestamps are UTC text on both engines by design).
+  const iso = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600_000).toISOString().slice(0, 19).replace('T', ' ');
+  await db.run('UPDATE sla_timers SET started_at = ?, due_at = ? WHERE id = ?', [iso(72), iso(48), timerId]);
+  const resolved = await resolveTimer(db, timerId, 'met', 'reported late');
   assert.equal(resolved.outcome, 'missed', 'you cannot retroactively meet a deadline');
 });
 
-test('clocks: sweep closes overdue timers and leaves the rest alone', () => {
-  const db = memoryDb();
-  const late = startTimer(db, 'qa-report', 'qa', 'q1', 'late report');
-  const fresh = startTimer(db, 'qa-report', 'qa', 'q2', 'fresh report');
-  db.run("UPDATE sla_timers SET due_at = datetime('now','-1 hour') WHERE id = ?", [late]);
-  const swept = sweepTimers(db);
+test('clocks: sweep closes overdue timers and leaves the rest alone', async () => {
+  const db = await memoryDb();
+  const late = await startTimer(db, 'qa-report', 'qa', 'q1', 'late report');
+  const fresh = await startTimer(db, 'qa-report', 'qa', 'q2', 'fresh report');
+  await db.run('UPDATE sla_timers SET due_at = ? WHERE id = ?', [new Date(Date.now() - 3600_000).toISOString().slice(0, 19).replace('T', ' '), late]);
+  const swept = await sweepTimers(db);
   assert.equal(swept, 1);
-  assert.equal(db.get('SELECT outcome FROM sla_timers WHERE id = ?', [late]).outcome, 'missed');
-  assert.equal(db.get('SELECT outcome FROM sla_timers WHERE id = ?', [fresh]).outcome, 'running');
-  const health = clockHealth(db);
+  assert.equal((await db.get('SELECT outcome FROM sla_timers WHERE id = ?', [late])).outcome, 'missed');
+  assert.equal((await db.get('SELECT outcome FROM sla_timers WHERE id = ?', [fresh])).outcome, 'running');
+  const health = await clockHealth(db);
   assert.equal(health[0].compliancePct, 0);
 });
 
 /* ------------------------------------------------------------- schema ---- */
-test('schema: migrations apply cleanly and are idempotent', () => {
-  const db = new Db(':memory:');
-  migrate(db, { log: () => {} });
-  const first = db.get('SELECT COUNT(*) AS c FROM schema_migrations').c;
-  migrate(db, { log: () => {} });
-  const second = db.get('SELECT COUNT(*) AS c FROM schema_migrations').c;
+test('schema: migrations apply cleanly and are idempotent', async () => {
+  const db = await memoryDb();
+  const first = (await db.get('SELECT COUNT(*) AS c FROM schema_migrations')).c;
+  await migrate(db, { log: () => {} });
+  const second = (await db.get('SELECT COUNT(*) AS c FROM schema_migrations')).c;
   assert.equal(first, second);
   assert.ok(first >= 4);
-  const fk = db.all("SELECT name FROM pragma_table_info('tasks')").map((r) => r.name);
+  const fk = db.dialect === 'postgres'
+    ? (await db.all("SELECT column_name AS name FROM information_schema.columns WHERE table_name = 'tasks'")).map((r) => r.name)
+    : (await db.all("SELECT name FROM pragma_table_info('tasks')")).map((r) => r.name); // sql-portable-ok: SQLite branch of a dialect check
   for (const col of ['turnover_state', 'acceptance_step', 'sla_due_at', 'position']) assert.ok(fk.includes(col));
 });
 
-test('schema: foreign keys are enforced (no orphan rows)', () => {
-  const db = memoryDb();
+test('schema: foreign keys are enforced (no orphan rows)', async () => {
+  const db = await memoryDb();
   // project_id omitted (nullable) → must still fail on the missing board/column FK.
-  assert.throws(() => db.run("INSERT INTO tasks (id,key,board_id,column_id,title) VALUES ('x','X-1','ghost-board','ghost-col','orphan')"), /FOREIGN KEY/);
+  await assert.rejects(() => db.run("INSERT INTO tasks (id,key,board_id,column_id,title) VALUES ('x','X-1','ghost-board','ghost-col','orphan')"), /FOREIGN KEY|foreign key|violates/);
 });

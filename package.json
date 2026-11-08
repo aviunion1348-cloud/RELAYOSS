@@ -19,12 +19,18 @@
     "db:reset": "node apps/api/dist/db/cli.js reset",
     "typecheck": "tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
     "test": "node --test apps/api/test/*.test.mjs",
-    "guard": "node scripts/guard-no-json-store.mjs",
+    "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/gen-pg-migrations.mjs --check",
     "build:api": "npm run build -w @relay/api",
-    "verify": "npm run guard && npm run typecheck && npm test && npm run build"
+    "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build",
+    "pg:start": "node scripts/pg-dev.mjs start",
+    "pg:stop": "node scripts/pg-dev.mjs stop",
+    "pg:migrate": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts migrate",
+    "pg:reset": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts reset",
+    "test:pg": "node scripts/test-pg.mjs"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "embedded-postgres": "^16.15.0-beta.19"
   },
   "engines": {
     "node": ">=22.5.0"

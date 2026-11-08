@@ -1,33 +1,54 @@
 /**
- * HTTP contract tests — real router, real error handler, in-memory database.
- * These pin the public API shape and the status codes clients depend on.
+ * HTTP contract tests — real router, real error handler, real database.
+ *
+ * Runs against SQLite by default (fast, zero-dependency) and against a live
+ * PostgreSQL 16 server when `TEST_DATABASE_URL` is set — the same assertions,
+ * the same application code, two engines:
+ *
+ *   npm test                  → SQLite
+ *   npm run test:pg           → PostgreSQL 16 (boots one if needed)
+ *
+ * This is what proves PostgreSQL parity: not a schema diff, but every route
+ * returning the same shape and the same governance decisions.
  */
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../src/app.ts';
-import { Db } from '../src/db/index.ts';
+import { SqliteDb } from '../src/db/sqlite.ts';
+import { PostgresDb } from '../src/db/postgres.ts';
 import { migrate } from '../src/db/migrate.ts';
 
-const db = new Db(':memory:');
-migrate(db, { log: () => {} });
-db.run("INSERT INTO users (id,email,full_name,role,initials,capacity_hours_week) VALUES ('u1','a@x.io','Ada Lovelace','admin','AL',32)");
-db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u2','b@x.io','Grace Hopper','member','GH')");
-db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c1','Acme','acme','AC')");
-db.run("INSERT INTO projects (id,key,name,client_id,status) VALUES ('p1','ACM','Acme Project','c1','active')");
-db.run("INSERT INTO boards (id,project_id,name) VALUES ('b1','p1','Delivery')");
+const pgUrl = process.env.TEST_DATABASE_URL ?? '';
+const db = pgUrl ? new PostgresDb(pgUrl) : new SqliteDb(':memory:');
+await migrate(db, { log: () => {} });
+// PostgreSQL runs keep their data between runs; start from a known-empty
+// fixture set while preserving migration-seeded governance policy.
+if (pgUrl) {
+  // Governance policy survives (it is migration-seeded); demo rows do not.
+  const KEEP = new Set(['schema_migrations', 'turnover_gates', 'sla_clocks', 'sla_policies', 'retention_policies']);
+  const tables = await db.all("SELECT tablename AS n FROM pg_tables WHERE schemaname='public'");
+  const wipe = tables.map((r) => r.n).filter((n) => !KEEP.has(n));
+  if (wipe.length) await db.exec(`TRUNCATE ${wipe.map((n) => `"${n}"`).join(', ')} RESTART IDENTITY CASCADE`);
+  await db.exec(await (await import('node:fs/promises')).readFile(new URL('../../../db/migrations/pg/0005_baseline_policy.sql', import.meta.url), 'utf8'));
+}
+await db.run("INSERT INTO users (id,email,full_name,role,initials,capacity_hours_week) VALUES ('u1','a@x.io','Ada Lovelace','admin','AL',32) ON CONFLICT DO NOTHING");
+await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u2','b@x.io','Grace Hopper','member','GH') ON CONFLICT DO NOTHING");
+await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c1','Acme','acme','AC') ON CONFLICT DO NOTHING");
+await db.run("INSERT INTO projects (id,key,name,client_id,status) VALUES ('p1','ACM','Acme Project','c1','active') ON CONFLICT DO NOTHING");
+await db.run("INSERT INTO boards (id,project_id,name) VALUES ('b1','p1','Delivery') ON CONFLICT DO NOTHING");
 for (const [key, name] of [['backlog', 'Backlog'], ['todo', 'Ready'], ['in_progress', 'In Progress'], ['review', 'In Review'], ['blocked', 'Blocked'], ['done', 'Done']]) {
-  db.run('INSERT INTO columns (id,board_id,key,name,position,is_done) VALUES (?,?,?,?,?,?)', [`b1_${key}`, 'b1', key, name, 0, key === 'done' ? 1 : 0]);
+  await db.run('INSERT INTO columns (id,board_id,key,name,position,is_done) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING', [`b1_${key}`, 'b1', key, name, 0, key === 'done' ? 1 : 0]);
 }
 // Slim demo content so every read endpoint returns something meaningful.
-db.run("INSERT INTO pipeline_stages (id,key,name,phase,position) VALUES ('s1','tech_consult','Technical Consultation','discovery',30)");
-db.run("INSERT INTO deals (id,client_id,title,value_cents,stage_id,owner_id,probability) VALUES ('d1','c1','Acme platform','5000000','s1','u1',60)");
-db.run("INSERT INTO partners (id,client_id,name,slug,plan) VALUES ('pa1','c1','Acme Console','acme','growth')");
-db.run("INSERT INTO releases (id,project_id,version,name,status) VALUES ('r1','p1','v1.0.0','Launch','in_qa')");
+await db.run("INSERT INTO pipeline_stages (id,key,name,phase,position) VALUES ('s1','tech_consult','Technical Consultation','discovery',30) ON CONFLICT (key) DO UPDATE SET name = excluded.name");
+await db.run("INSERT INTO deals (id,client_id,title,value_cents,stage_id,owner_id,probability) VALUES ('d1','c1','Acme platform','5000000','s1','u1',60) ON CONFLICT DO NOTHING");
+await db.run("INSERT INTO partners (id,client_id,name,slug,plan) VALUES ('pa1','c1','Acme Console','acme','growth') ON CONFLICT DO NOTHING");
+await db.run("INSERT INTO releases (id,project_id,version,name,status) VALUES ('r1','p1','v1.0.0','Launch','in_qa') ON CONFLICT DO NOTHING");
 
 const { app } = await buildApp({ db, serveStatic: false, logger: false });
 const hdr = { 'x-actor-id': 'u1', 'content-type': 'application/json' };
 
-after(async () => { await app.close(); });
+after(async () => { await app.close(); await db.close(); });
 
 const request = (method, url, payload) =>
   app.inject({ method, url, headers: hdr, payload: payload ? JSON.stringify(payload) : undefined });
@@ -38,7 +59,7 @@ test('GET /api/health reports a schema version and storage engine', async () => 
   const body = res.json();
   assert.equal(body.data.status, 'ok');
   assert.ok(body.data.schemaVersion >= 5);
-  assert.equal(body.data.storage, 'sqlite-wal');
+  assert.equal(body.data.storage, pgUrl ? 'postgres' : 'sqlite-wal');
 });
 
 test('GET /api/meta exposes the client contract the UI depends on', async () => {
@@ -155,7 +176,7 @@ test('GET /api/dashboard aggregates without N+1 meltdown', async () => {
   for (const key of ['kpis', 'byStatus', 'throughput', 'workload', 'projects', 'clocks', 'timers', 'pipelineByPhase']) {
     assert.ok(key in d, `dashboard.${key} missing`);
   }
-  assert.equal(d.throughput.length, 14);
+  assert.equal(d.throughput.length, 14, JSON.stringify({ throughput: d.throughput?.length, keys: Object.keys(d) }));
 });
 
 test('paid endpoints: pipeline, qa, releases, partners, docs all return arrays', async () => {

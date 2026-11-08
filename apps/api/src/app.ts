@@ -12,7 +12,7 @@ import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.ts';
-import { Db, getDb, setDb } from './db/index.ts';
+import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
 import { registerRoutes } from './routes/index.ts';
 import { HttpError } from './lib/http.ts';
@@ -29,7 +29,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   const db = opts.db ?? getDb();
   if (opts.db) setDb(opts.db);
   if (opts.migrateOnBoot ?? (process.env.SKIP_MIGRATE !== '1' && !opts.db)) {
-    migrate(db, { log: () => {} });
+    await migrate(db, { log: () => {} });
   }
 
   const app = Fastify({
