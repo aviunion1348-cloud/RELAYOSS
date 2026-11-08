@@ -24,8 +24,63 @@ data, assert their own identity, or approve their own work.
 
 ### Auth modes
 
-`AUTH_MODE=oidc` is the production mode. `AUTH_MODE=dev` exists for local work
-and for a demonstration container stack, and it is deliberately awkward:
+There are four values, and the resolution order matters:
+
+| `AUTH_MODE` | Meaning |
+| --- | --- |
+| `auto` (default) | `password` if a shared credential is provisioned, else `dev` |
+| `password` | The single shared login. The intended production mode. |
+| `oidc` | Verified bearer/session identity from an external IdP. Supported, never required. |
+| `dev` | Local demonstration identities. Refused in production. |
+
+`auto` is what lets one repository work unchanged on a laptop, on a deployment with
+one shared password, and behind an IdP. Two properties make it safe:
+
+* A **provisioned credential always beats `dev`.** If a shared credential exists,
+  the effective mode is `password` regardless of the default — so demo identities
+  can never remain reachable alongside a real password. This is the §9 "no alternate
+  bypass" requirement expressed as a resolution rule rather than a runtime check.
+* An **explicit `AUTH_MODE` always wins**, so an operator is never argued with.
+
+### The single shared login
+
+The requested access model is one username and one password, not a per-person
+identity. That is a real reduction in accountability, and it is implemented with the
+controls that actually bite for a shared secret.
+
+| Control | Implementation | Evidence |
+| --- | --- | --- |
+| Storage | **Argon2id**, `m=65536` KiB, `t=3`, `p=4` (OWASP baseline). Only the hash is stored, never the password | `auth/password.ts` → `hashPassword` |
+| Comparison | `argon2.verify`, which is constant-time and salt-aware. Never `===` | `auth/password.ts` → `verifyPassword` |
+| No username oracle | Unknown user, wrong password, disabled credential and inactive user all return the same 401 with the same body; a **dummy verification runs when the user does not exist** so absence is not faster | `password-login.test.mjs` → *failures are indistinguishable* |
+| Brute force | Two counters — per client address **and** per username — with exponential backoff to a 30-minute lockout. Login also draws on the stricter auth rate-limit budget | `lib/rate-limit.ts`, `routes/password-login.ts` |
+| Bypass | `/api/auth/dev-login` returns **403** the moment a credential is provisioned; `dev` mode cannot boot in production | `vercel.test.mjs` → *a provisioned credential selects password mode, not dev* |
+| No identity headers | `x-actor-id`, `x-user-id`, `x-authenticated-user`, `x-relay-user` establish nothing — all 401 | `password-login.test.mjs` |
+| Session fixation | A fresh session id is minted on login; the previous one is not reused | `auth/index.ts` → `createSession` |
+| Rotation | Re-provisioning bumps `credential_version`; sessions record the version they were minted with and are refused afterwards. No row enumeration needed | `password-login.test.mjs` → *rotating invalidates live sessions* |
+| CSRF | Cookie sessions require a signed CSRF token on every mutating request | `auth/index.ts` → `issueCsrf` / `verifyCsrf` |
+| Logout | Server-side revocation, then the cookie is cleared. Replay fails | `routes/auth.ts` |
+| No secret leakage | Neither the password nor the hash appears in any response, log line, or `auth_events` row. Asserted by scanning every response and every audit row | `password-login.test.mjs` |
+| Boot validation | A malformed `RELAY_ADMIN_PASSWORD_HASH` fails startup with an explanatory message, before any connection is opened | `vercel.test.mjs` → *a malformed hash is refused at boot* |
+
+**What a shared login cannot do**, stated so it is not mistaken for a solved problem:
+
+* No per-person attribution. The audit trail records the shared identity, so "who
+  approved this release" is answerable only to the level of "the shared account".
+* No account recovery. Losing the password is a database operation
+  (`db:pg:assign-login`), not a self-service flow.
+* No per-person revocation. Signing one person out means signing everybody out.
+* A single leaked password is total access. The mitigations above reduce the chance
+  of a leak being *usable* (cost, throttling, audit); they cannot reduce the blast
+  radius, because by design there is only one account.
+
+If those limits matter more than the convenience, `AUTH_MODE=oidc` is fully
+supported — the shared login is the requested baseline, not the ceiling.
+
+### Development identities
+
+`AUTH_MODE=dev` exists for local work and for a demonstration container stack, and
+it is deliberately awkward:
 
 * `NODE_ENV=production` + `AUTH_MODE=dev` → **boot fails** unless
   `ALLOW_DEV_AUTH_IN_PRODUCTION=1` is set to exactly `1`.

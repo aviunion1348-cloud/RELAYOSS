@@ -20,7 +20,7 @@ is not a verified workflow, and a UI screen is not a governance control.* Where
 only the backend exists, the row says so.
 
 **Evidence sources** — `T:domain` `T:auth` `T:http` `T:resilience` `T:shipgate`
-are `apps/api/test/*.test.mjs`; `S:migrate` is `npm run test:pg`;
+are `apps/api/test/*.test.mjs` (`T:password-login` and `T:vercel` included); `S:migrate` is `npm run test:pg`;
 `S:smoke` is `npm run smoke:web`; `S:backup` is `npm run backup:verify`.
 
 ---
@@ -124,7 +124,16 @@ are `apps/api/test/*.test.mjs`; `S:migrate` is `npm run test:pg`;
 | R63 | Cross-tenant leak prevention on every read path | Security | `auth/scope.ts` — one primitive (`resolveReadScope` + `*Where`) used by every read; `assertProjectInScope`/`assertClientInScope`/`assertTimerInScope` | — | — | T:search-scope, T:auth, T:comms-legal, T:lifecycle, T:edge | `T:search-scope` 20/20 dual-engine; four isolated suites assert 404-not-403; the edge registry executed 3,641 probes and found **two cross-tenant writes** that no read test would have caught | Verified | The two defects it found are fixed: lifecycle evidence had no tenancy check at all, and none of the five clock routes checked that the timer's entity was in the caller's scope (a paused clock is excluded from elapsed time, so that was a way to erase another tenant's breach). Both now share one assertion helper. Tenancy denial is 404 everywhere, identical to absence, so the API is not an enumeration oracle |
 | R64 | 13-screen UX regression | UX | `scripts/smoke-web.mjs`; `scripts/e2e-browser.mjs` (11 scenarios) | — | 14 routes | S:smoke, S:e2e | `S:smoke`: all 13 screens render with live API data, no crashes, no undefined access. **`S:e2e` ran in CI**: headless Chromium → real server → real migrated database, 11/11 scenarios passed (step `Browser end-to-end suite`, CI run 42474443034) | Verified | The server-render smoke proves component rendering and data flow; the browser suite proves the things SSR cannot: that `/api/` is genuinely reached from the browser origin, that all 12 primary screens render without an uncaught page error, that an unknown deep link degrades instead of crashing, that a cross-client deep link returns 404 to a client identity, that a validation failure surfaces a payload the UI can show, and that a duplicate submission does not create two records. It cannot run in the authoring sandbox — the Chromium CDN is blocked there, so locally it exits 3 (not run) — and it is a required CI step |
 
-## H. Documentation and evidence
+## H. Vercel delivery and the shared login
+
+| ID | Requirement | Module | Backend | Database | UI | Test | Evidence | Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| R69 | Single shared login: one username, one password, Argon2id, no bypass | Security | `POST /api/auth/login`, `GET /api/auth/session`, `apps/api/src/auth/password.ts`, `scripts/set-password.mjs`, `db/cli.ts assign-login` | `local_credentials` (migration 0014), `sessions.credential_version` | `/login` (username + password form) | T:password-login, T:vercel | `T:password-login` 20/20 both engines: correct credentials → 200 + `relay_session` + CSRF; wrong password, unknown username, inactive user and disabled credential → the same 401 with a body identical bar `requestId`; uppercase username refused (exact match); POST without CSRF → 403; logout → 200 then 401; rotation (`version+1`) invalidates live sessions; `x-actor-id`/`x-user-id`/`x-authenticated-user`/`x-relay-user` → 401; dev-login → 403 once provisioned; no password or hash in any response or `auth_events` row | Verified | Argon2id `m=65536,t=3,p=4`. Dual throttling (address **and** username) with exponential backoff, because a single shared username means one counter alone would let an attacker rotate one dimension. Boot refuses a malformed hash. The dictated password is 11 characters; the generator requires `--allow-short` and prints the reduced margin rather than refusing outright |
+| R70 | Every page and API authenticated; direct protected URLs denied without a session | Security | `auth/middleware.ts` (anonymous allowlist), SPA route guard in `apps/web/src/App.tsx` | `sessions` | all 14 routes | T:password-login, T:vercel, S:smoke | `T:vercel`: `/api/projects`, `/api/tasks`, `/api/dashboard`, `/api/clients`, `/api/partners` all 401 anonymously. `S:smoke`: with the shared login, all 13 screens render real API data (Board 70 492 B, QACentre 70 492 B, Releases 40 082 B, …) | Verified | The allowlist is small and explicit — health/live/ready/metrics, `/api/auth/{login,session,logout}` and the cron endpoint, which authenticates with its own bearer secret. Everything else requires an identity |
+| R71 | Vercel-ready backend: function entry, no `listen()`, no persistent-memory assumptions, bounded connections | Deployment | `apps/api/src/vercel.ts`, `api/index.js`, `vercel.json`, `db/index.ts` pool sizing, authenticated `GET /api/cron/sweep` | `DATABASE_URL` (PostgreSQL) | `apps/web/dist` static | T:vercel | `T:vercel` 15/15: constructing the app does **not** listen; the exported `api/index.js` handler answers a real HTTP request through `http.createServer` + `fetch`; anonymous reads 401; health endpoints reachable; unknown `/api` routes are JSON; pool is exactly 3 on Vercel, 10 elsewhere, 7 when overridden; cron refuses absent/wrong/truncated/basic-auth secrets; cron is idempotent; a session cookie cannot trigger cron; a provisioned credential selects `password` not `dev`; an explicit `AUTH_MODE` wins; a malformed hash fails boot. Additionally driven end-to-end against **PostgreSQL 16**: login 200, authed `/api/projects` 200, cron 200 | Verified | `app.ready()` is load-bearing — without it the first request dies inside Fastify's pre-parsing hook runner, which only surfaces when `listen()` is skipped. Cron **fails closed** (503) without `CRON_SECRET`. Deadline processing does not depend on the schedule: a throttled lazy sweep runs on real requests, because Vercel Hobby allows one cron run per day |
+| R72 | Complete deployment guide with discovered settings and exact post-import steps | Documentation | `docs/DEPLOYMENT.md` §1 | — | — | — | Framework preset, root, install/build/output commands, Node 22.x, every env var with its purpose, the four provisioning commands with expected output, rotation, failure-mode table, and a statement of what is unproven | Verified | Settings are restated from `vercel.json`, so the dashboard and the file agree. No `.vercel/project.json` is committed and no project id is invented — the requester imports the repo into their own account |
+
+## I. Documentation and evidence
 
 | ID | Requirement | Module | Backend | Database | UI | Test | Evidence | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -155,12 +164,12 @@ not evidence of anything.
 
 | Status | Count | IDs |
 | --- | --- | --- |
-| Verified | 57 | R1, R2, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27, R28, R29, R30, R31, R32, R35, R36, R37, R38, R39, R40, R45, R47, R48, R49, R50, R51, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68 |
+| Verified | 61 | R1, R2, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27, R28, R29, R30, R31, R32, R35, R36, R37, R38, R39, R40, R45, R47, R48, R49, R50, R51, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72 |
 | Partial | 10 | R3, R4, R5, R33, R34, R41, R42, R43, R44, R46 |
 | Incomplete | 1 | R6 |
 | Blocked | 0 | — |
 
-**68 requirements: 57 verified (84%), 10 partial, 1 incomplete, 0 blocked.**
+**72 requirements: 61 verified (85%), 10 partial, 1 incomplete, 0 blocked.**
 
 ### What moved, and what it cost
 
