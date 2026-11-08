@@ -38,11 +38,13 @@
     "backup:verify-all": "node --no-warnings scripts/backup-ops.mjs verify-all",
     "test:edge": "node --no-warnings scripts/edge-cases/run.ts",
     "pg:seed": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts seed",
-    "pg:status": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts status"
+    "pg:status": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts status",
+    "test:e2e": "node --no-warnings scripts/e2e-browser.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
-    "embedded-postgres": "^16.15.0-beta.19"
+    "embedded-postgres": "^16.15.0-beta.19",
+    "playwright": "^1.49.1"
   },
   "engines": {
     "node": ">=22.5.0"

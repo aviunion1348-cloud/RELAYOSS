@@ -82,6 +82,12 @@ jobs:
       - name: Server-render smoke test for every screen
         run: npm run smoke:web
 
+      - name: Install headless Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser end-to-end suite (real Chromium, real server, real database)
+        run: npm run test:e2e
+
       - name: Production build refuses demo auth without an explicit opt-in
         run: |
           npm run build -w @relay/api
