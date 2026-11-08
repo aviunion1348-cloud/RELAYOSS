@@ -108,6 +108,9 @@ try {
   console.log('\n• clock pause/resume + calibration suite on PostgreSQL 16');
   exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/clocks-pause.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
 
+  console.log('\n• OIDC authorization-code + PKCE flow on PostgreSQL 16');
+  exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/oidc-flow.test.mjs'], { SESSION_SECRET: 'pg-conformance-secret' });
+
   console.log('\n• HTTP contract suite on PostgreSQL 16');
   exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/http.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
 } catch (err) {

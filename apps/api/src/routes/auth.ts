@@ -9,9 +9,13 @@
  *   GET  /api/auth/sessions      active sessions for the current user
  *   POST /api/auth/sessions/:id/revoke
  *
- * Interactive authorization-code redirect flow is intentionally absent: it
- * requires a real IdP tenant (client id/secret). The verification boundary it
- * hands off to — JWKS + RS256/ES256 + iss/aud/exp — is implemented and tested.
+ *   GET  /api/auth/login         begin authorization-code + PKCE redirect
+ *   GET  /api/auth/callback      complete it: state, nonce, code, session
+ *
+ * The redirect flow needs a real IdP tenant to be exercised end to end; the
+ * test suite runs it against an in-process provider (see test/oidc-flow.test.mjs)
+ * so the flow itself is proven rather than assumed. Production still needs the
+ * operator's own client id and secret — see docs/DEPLOYMENT.md.
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -19,6 +23,19 @@ import { getDb } from '../db/index.ts';
 import { config } from '../config.ts';
 import { badRequest, forbidden, notFound, ok, unauthorized } from '../lib/http.ts';
 import { nowIso } from '../lib/ids.ts';
+import {
+  beginFlow,
+  pruneFlows,
+  sanitiseReturnTo,
+  consumeFlow,
+  exchangeCode,
+  assertNonce,
+  authorizeUrl,
+  failFlow,
+  audit as oidcAudit,
+  oidcConfigStatus,
+  FLOW_TTL_MS,
+} from '../auth/oidc.ts';
 import {
   JwksCache,
   SESSION_COOKIE,
@@ -138,6 +155,143 @@ export async function registerAuthRoutes(
       expiresAt: new Date(session.expiresAt).toISOString(),
       csrfToken: issueCsrf(session.id, config.sessionSecret),
     });
+  });
+
+  /* ------------------------------------------------- authorization code -- */
+  /**
+   * Begin the browser login. Nothing about the user is accepted from the
+   * request; the only inputs are where to come back to and where the provider
+   * should send the browser afterwards.
+   */
+  app.get('/api/auth/login', async (req, reply) => {
+    if (config.authMode !== 'oidc') throw forbidden('OIDC is not the configured auth mode');
+    const status = oidcConfigStatus();
+    if (!status.configured) {
+      throw badRequest(
+        `Single sign-on is not fully configured. Missing: ${status.missing.join(', ')}. ` +
+        'An administrator must set these before browser sign-in can work.',
+      );
+    }
+    const q = req.query as { returnTo?: string; redirectUri?: string };
+
+    // The redirect URI must match the one registered with the provider. It is
+    // never taken from the query string unless it matches the configured value,
+    // because that is how an open redirect becomes token theft.
+    const configuredRedirect = process.env.OIDC_REDIRECT_URI ?? '';
+    const redirectUri = q.redirectUri && q.redirectUri === configuredRedirect ? q.redirectUri : configuredRedirect;
+
+    await pruneFlows(db());
+    const flow = await beginFlow(db(), {
+      redirectUri,
+      returnTo: sanitiseReturnTo(q.returnTo),
+      ip: req.ip,
+      userAgent: String(req.headers['user-agent'] ?? ''),
+    });
+    const url = authorizeUrl({
+      issuer: config.oidcIssuer,
+      clientId: process.env.OIDC_CLIENT_ID ?? '',
+      redirectUri,
+      state: flow.state,
+      nonce: flow.nonce,
+      codeChallenge: flow.codeChallenge,
+    });
+    return ok({ authorizeUrl: url, state: flow.state, expiresInSec: Math.floor(FLOW_TTL_MS / 1000) });
+  });
+
+  /**
+   * Complete the login.
+   *
+   * Order matters: consume the one-time flow first (so a replay cannot proceed),
+   * then exchange the code, then verify the ID token, then bind the nonce, and
+   * only then create a session. Any failure leaves no session behind.
+   */
+  app.get('/api/auth/callback', async (req, reply) => {
+    if (config.authMode !== 'oidc') throw forbidden('OIDC is not the configured auth mode');
+    const q = req.query as { code?: string; state?: string; error?: string; error_description?: string };
+
+    if (q.error) {
+      if (q.state) await failFlow(db(), q.state, `provider: ${q.error}`, req.ip);
+      return reply.code(401).send({
+        error: {
+          code: 'unauthorized',
+          message: `Sign-in was cancelled or refused by the identity provider (${q.error_description ?? q.error}).`,
+        },
+      });
+    }
+    if (!q.code) throw badRequest('The identity provider returned no authorization code.');
+
+    let flow;
+    try {
+      flow = await consumeFlow(db(), String(q.state ?? ''), req.ip);
+    } catch (err) {
+      throw err;
+    }
+
+    try {
+      // 1. Exchange the code, with the PKCE verifier that never left the server.
+      const exchanged = await exchangeCode({
+        tokenEndpoint: process.env.OIDC_TOKEN_URL ?? `${config.oidcIssuer.replace(/\/$/, '')}/oauth2/token`,
+        code: q.code,
+        redirectUri: flow.redirect_uri,
+        clientId: process.env.OIDC_CLIENT_ID ?? '',
+        clientSecret: process.env.OIDC_CLIENT_SECRET,
+        codeVerifier: flow.code_verifier,
+      });
+
+      // 2. Verify the signature against the provider's JWKS, and iss/aud/exp.
+      const payload = await verifyJwt(exchanged.idToken, {
+        jwks,
+        issuer: config.oidcIssuer || undefined,
+        audience: config.oidcAudience || undefined,
+      });
+
+      // 3. Bind the token to *this* request.
+      assertNonce(payload as Record<string, unknown>, flow.nonce);
+
+      // 4. The identity must already be provisioned. Sign-in never creates a
+      //    user: an unknown subject is refused, not auto-provisioned.
+      const subject = await db().get<{ user_id: string }>(
+        'SELECT user_id FROM identity_subjects WHERE issuer = ? AND subject = ?',
+        [payload.iss ?? '', payload.sub ?? ''],
+      );
+      if (!subject) {
+        await failFlow(db(), flow.state, `unprovisioned subject ${String(payload.sub ?? '')}`, req.ip);
+        throw forbidden('This identity is not provisioned in Relay. Ask an administrator for access.');
+      }
+
+      // 5. A disabled account cannot sign in, even with a valid token.
+      const user = await db().get<{ id: string; is_active: number }>('SELECT id, is_active FROM users WHERE id = ?', [subject.user_id]);
+      if (!user || !Number(user.is_active)) {
+        await failFlow(db(), flow.state, 'account disabled', req.ip);
+        throw forbidden('This account is disabled.');
+      }
+
+      const session = await createSession(db(), {
+        userId: subject.user_id,
+        method: 'oidc',
+        ttlMs: SESSION_TTL_MS,
+        userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
+        ip: req.ip,
+      });
+      await db().run('UPDATE identity_subjects SET last_login_at = ?, claims_json = ? WHERE issuer = ? AND subject = ?', [
+        nowIso(), JSON.stringify(payload).slice(0, 4000), payload.iss ?? '', payload.sub ?? '',
+      ]);
+      await oidcAudit(db(), flow.state, 'callback_ok', String(payload.sub ?? ''), '', req.ip);
+      await db().run('INSERT INTO auth_events (user_id, session_id, kind, ip, user_agent) VALUES (?,?,?,?,?)', [
+        subject.user_id, session.id, 'login_oidc', req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300),
+      ]);
+
+      reply.header('set-cookie', sessionCookie(session.id, SESSION_TTL_MS / 1000, secureCookies()));
+      return ok({
+        expiresAt: new Date(session.expiresAt).toISOString(),
+        csrfToken: issueCsrf(session.id, config.sessionSecret),
+        returnTo: sanitiseReturnTo(flow.return_to),
+      });
+    } catch (err) {
+      // Every path out of here is a closed door: no session was created.
+      await failFlow(db(), flow.state, (err as Error).message, req.ip);
+      throw err;
+    }
   });
 
   /* ------------------------------------------------------------ session -- */
