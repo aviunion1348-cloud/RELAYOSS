@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+coverage/
+.smoke/
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.local
+.DS_Store
+*.log
+.vite/

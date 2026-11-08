@@ -1,0 +1,32 @@
+{
+  "name": "relay-oss",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Relay OSS \u2014 Delivery OS: internal agile delivery board for agency client pipelines",
+  "type": "module",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev -w @relay/api",
+    "dev:web": "npm run dev -w @relay/web",
+    "build": "npm run build -w @relay/api && npm run build -w @relay/web",
+    "start": "node apps/api/dist/index.js",
+    "db:migrate": "node apps/api/dist/db/cli.js migrate",
+    "db:seed": "node apps/api/dist/db/cli.js seed",
+    "db:reset": "node apps/api/dist/db/cli.js reset",
+    "typecheck": "tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
+    "test": "node --test apps/api/test/*.test.mjs",
+    "guard": "node scripts/guard-no-json-store.mjs",
+    "build:api": "npm run build -w @relay/api",
+    "verify": "npm run guard && npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

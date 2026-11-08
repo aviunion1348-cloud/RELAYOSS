@@ -1,0 +1,47 @@
+# ============================================================================
+# Local / staging stack. `docker compose up` gives you the whole product:
+# API + SPA on :4000, Postgres 16 for parity testing.
+# ============================================================================
+services:
+  app:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DB_PATH: /data/relay.sqlite
+      DEMO_USER_ID: usr_maya
+      LOG_LEVEL: info
+      CORS_ORIGIN: "*"
+    volumes:
+      - relay-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/api/health"]
+      interval: 30s
+      timeout: 4s
+      retries: 3
+
+  # Production-parity database. Point DATABASE_URL here when running the
+  # Postgres adapter (see db/postgres/README.md).
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: relay_local_only
+      POSTGRES_DB: relay
+    ports:
+      - "5432:5432"
+    volumes:
+      - relay-pg:/var/lib/postgresql/data
+      - ./db/postgres/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay -d relay"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  relay-data:
+  relay-pg:
