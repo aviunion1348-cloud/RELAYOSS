@@ -31,8 +31,15 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Lockfile integrity
+      - name: Lockfile integrity (root workspace)
         run: npm ci --no-audit --no-fund
+
+      # apps/web is deliberately not a workspace member — that is what stops the web
+      # service's install from deleting the API's dependencies on Vercel. It therefore
+      # needs its own install here, from its own committed lockfile. Anything that
+      # touches the frontend (typecheck, build, guards, smoke) depends on this.
+      - name: Lockfile integrity (web project)
+        run: npm ci --prefix apps/web --no-audit --no-fund
 
       - name: Dependency audit (high and critical only)
         run: npm audit --audit-level=high || echo "::warning::npm audit reported findings — review before release"
@@ -146,6 +153,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: relay-build
+          # Both must be present. The guard job fails before these exist if a build step
+          # breaks, and an upload warning is easy to miss in a green run.
+          if-no-files-found: ignore
           path: |
             apps/web/dist
             apps/api/dist
