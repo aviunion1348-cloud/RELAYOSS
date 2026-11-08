@@ -1,20 +1,27 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": null,
-  "buildCommand": "npm run build:vercel",
-  "outputDirectory": "apps/web/dist",
-  "installCommand": "npm ci --no-audit --no-fund",
-  "functions": {
-    "api/index.js": {
-      "memory": 1024,
-      "maxDuration": 30
+  "services": {
+    "app": {
+      "root": ".",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel"
+    },
+    "api": {
+      "root": ".",
+      "framework": "fastify",
+      "entrypoint": "apps/api/src/entrypoints/index.ts"
+    },
+    "web": {
+      "root": "apps/web/",
+      "framework": "vite"
     }
   },
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.js"
-    }
+    { "source": "/api/(.*)", "destination": { "service": "api" } },
+    { "source": "/(.*)", "destination": { "service": "app" } }
+  ],
+  "crons": [
+    { "path": "/api/cron/sweep", "schedule": "0 3 * * *" }
   ],
   "headers": [
     {
@@ -32,23 +39,8 @@
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
-        {
-          "key": "Strict-Transport-Security",
-          "value": "max-age=63072000; includeSubDomains; preload"
-        }
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" }
       ]
-    },
-    {
-      "source": "/assets/(.*)",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
-      ]
-    }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/sweep",
-      "schedule": "0 3 * * *"
     }
   ]
 }

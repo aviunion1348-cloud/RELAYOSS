@@ -8,7 +8,7 @@
  *
  * Why the delegation is dynamic:
  *
- *   `apps/api/dist/vercel.js` does not exist until the build step has run. A static
+ *   `apps/api/dist/entrypoints/vercel.js` does not exist until the build step has run. A static
  *   top-level import would make the module fail to load during Vercel's own build
  *   inspection, before the build command has produced it. A dynamic import inside
  *   the handler defers resolution to first invocation, when the file is guaranteed
@@ -30,7 +30,7 @@ let modulePromise = null;
 
 export default async function handler(req, res) {
   if (!modulePromise) {
-    modulePromise = import('../apps/api/dist/vercel.js').catch((err) => {
+    modulePromise = import('../apps/api/dist/entrypoints/vercel.js').catch((err) => {
       modulePromise = null;
       throw err;
     });

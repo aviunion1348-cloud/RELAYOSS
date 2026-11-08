@@ -1,0 +1,81 @@
+# ============================================================================
+# Relay OSS — `app` service image (Vercel container runtime)
+#
+# This is not the production image. `Dockerfile` remains the long-lived
+# single-process deployment: API + SPA on one origin, a `setInterval` sweeper,
+# graceful SIGTERM shutdown. Keep it.
+#
+# Vercel's container runtime does not give a long-lived process either. A
+# container service is a request/response surface like any other function: it is
+# started per invocation context, must not assume an interval survives, and is
+# reached behind Vercel's router. So this image deliberately diverges in exactly
+# four places, and nowhere else:
+#
+#   1. It builds ONLY the web bundle. `apps/api/dist` is not compiled and not
+#      copied. docker-compose.yml calls this service `app` expecting API + SPA, but
+#      in the Vercel layout the API is its own service (`api`), so carrying a second
+#      copy of it here would be a second deployable that silently goes stale.
+#   2. It installs no `pg` and imports no database. `apt.txt` is empty of anything
+#      database-related because there is nothing to connect to from here.
+#   3. It runs a static server, not `dist/index.js`.
+#   4. No HEALTHCHECK for `/api/ready`. The API is a different service with a
+#      different lifecycle; a readiness probe here would have to make a network
+#      call across the deployment boundary, which is exactly what a binding is for
+#      and not something a Dockerfile healthcheck can do.
+#
+# What it deliberately keeps: the same guards, the same typecheck, the same Node
+# version. A container that builds on a codebase which fails its own architecture
+# rules is not a deployment, it is a bypass.
+# ============================================================================
+FROM node:22-alpine AS build
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+RUN npm ci --no-audit --no-fund
+
+COPY . .
+# Same guard chain as Dockerfile, minus the build of the API (which this image
+# does not ship) but *including* the typecheck, which covers both workspaces.
+RUN node scripts/guard-no-json-store.mjs \
+ && node scripts/guard-sql-portability.mjs \
+ && node scripts/guard-declared-deps.mjs \
+ && node scripts/gen-pg-migrations.mjs --check \
+ && node scripts/check-traceability.mjs \
+ && npm run typecheck \
+ && npm run build -w @relay/web
+
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=8080
+
+RUN apk add --no-cache tini curl && addgroup -S relay && adduser -S relay -G relay
+
+# No npm dependencies at all: the server uses only `node:http` and `node:fs`, so
+# there is no third-party code in the runtime image to audit or patch. A static
+# file server is small enough to own, and owning it means the traversal guard and
+# the asset-versus-document 404 rule are readable rather than inherited.
+
+COPY --from=build /app/apps/web/dist ./public
+
+# The static server is a checked-in file, not a heredoc, so the deployment guard can
+# read it and a linter can see it. It is also smoke-tested during the image build:
+# a container whose server crashes on the first request must not build successfully.
+COPY --chown=relay:relay deploy/web-server.mjs /app/server.mjs
+RUN node -e "import('/app/server.mjs').then(() => { console.log('✓ web server loads'); }).catch((e) => { console.error('✗ web server failed to load:', e.message); process.exit(1); })"
+
+USER relay
+EXPOSE 8080
+
+# Liveness only: this container has no dependencies, so there is no readiness gap.
+# The API's /api/ready is the deployment's readiness signal and lives in its own
+# service.
+HEALTHCHECK --interval=30s --timeout=4s --start-period=5s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "/app/server.mjs"]

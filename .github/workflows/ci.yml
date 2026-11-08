@@ -112,6 +112,17 @@ jobs:
             exit 0
           fi
           docker build -t relay-oss:ci .
+          # The `app` service image is a different image with a different job: it must
+          # run deploy/web-server.mjs and must not contain the API. Building it here
+          # is the only place a broken Dockerfile.vercel gets caught before a deploy.
+          docker build -t relay-web:ci -f Dockerfile.vercel .
+          # Prove the image has no API in it. If apps/api/dist ever leaks in, the
+          # deployment carries a second, stale copy of the backend.
+          if docker run --rm --entrypoint sh relay-web:ci -c 'test -d /app/apps/api/dist'; then
+            echo "::error title=Wrong image contents::Dockerfile.vercel contains apps/api/dist; the app service must serve the SPA only"
+            exit 1
+          fi
+          echo "✓ app image contains no API build output"
 
       - name: Docker fresh-start with PostgreSQL 16
         run: |

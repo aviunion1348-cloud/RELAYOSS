@@ -36,6 +36,17 @@ export interface BuildOptions {
   db?: Db;
   migrateOnBoot?: boolean;
   serveStatic?: boolean;
+  /**
+   * Directory the SPA was built into.
+   *
+   * Only relevant when the API serves the browser bundle itself, which is the
+   * container layout (`npm start`: one process, one origin, no CORS surface). In
+   * the multi-service deployment the web bundle is a separate artifact owned by the
+   * web service, so `serveStatic` is off and this path does not exist — see
+   * `entrypoints/vercel.ts`. Passing it in keeps the API's own filesystem free of
+   * assumptions about a build that lives in another service's output.
+   */
+  webDist?: string;
   logger?: boolean;
   /**
    * Inject a login throttle. Tests need this: several of them fail a login on
@@ -252,11 +263,27 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     });
   });
 
+  /*
+   * Resolved once, because two places depend on it and they must agree.
+   *
+   * `serveStatic: false` used to disable the static *plugin* and leave the not-found
+   * handler still reading `apps/web/dist/index.html` off the local disk — so the API
+   * service in a multi-service deployment answered `GET /` with an HTML document it
+   * had no business serving, while Vercel's rewrite had already assigned every
+   * non-`/api` path to the web service. A request reaching the API service for a
+   * browser route means the routing is wrong, and returning a 200 document hides it.
+   */
+  const serveStatic = opts.serveStatic ?? true;
   app.setNotFoundHandler((req, reply) => {
     if (req.url.startsWith('/api')) {
       return reply.code(404).send({ error: { code: 'not_found', message: `No route for ${req.method} ${req.url}` } });
     }
-    const indexFile = path.join(config.webDist, 'index.html');
+    if (!serveStatic) {
+      return reply
+        .code(404)
+        .send({ error: { code: 'not_found', message: `No route for ${req.method} ${req.url}` } });
+    }
+    const indexFile = path.join(opts.webDist ?? config.webDist, 'index.html');
     if (fs.existsSync(indexFile)) {
       return reply.type('text/html').send(fs.readFileSync(indexFile));
     }
@@ -349,8 +376,9 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   await app.register(registerPasswordLogin, { throttle: loginThrottle });
   await registerRoutes(app, { auth });
 
-  if ((opts.serveStatic ?? true) && fs.existsSync(config.webDist)) {
-    await app.register(fastifyStatic, { root: config.webDist, wildcard: false, cacheControl: true, maxAge: '1h' });
+  const webDist = opts.webDist ?? config.webDist;
+  if (serveStatic && fs.existsSync(webDist)) {
+    await app.register(fastifyStatic, { root: webDist, wildcard: false, cacheControl: true, maxAge: '1h' });
   }
 
   return { app, db };

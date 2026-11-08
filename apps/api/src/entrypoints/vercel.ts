@@ -12,6 +12,20 @@
  *   vercel.ts   builds the app once per instance and exports the request handler.
  *               No listen, no interval, no reliance on process memory surviving.
  *
+ * This file lives in `entrypoints/` rather than beside `index.ts`, and that is a
+ * deployment requirement rather than tidiness. Vercel's Fastify framework preset
+ * discovers its entrypoint from a fixed list of names in the service root — `src/
+ * index.{js,ts}`, `src/app.{js,ts}`, `src/server.{js,ts}`, or those three at the
+ * top level. It does not find `src/vercel.ts`. Without a file it recognises, Vercel
+ * infers the runtime from whatever it *can* see and can end up invoking
+ * `src/index.ts`, which is the long-lived entry: it calls `app.listen()` and boots
+ * a `setInterval` sweeper. A serverless invocation dies on the listen and the
+ * sweeper never fires, so the deployment would look healthy and process deadlines
+ * never.
+ *
+ * `entrypoints/index.ts` re-exports this handler under a name Vercel looks for, so
+ * the preset resolves to the serverless entry and never to the container one.
+ *
  * Two serverless-specific concerns are handled here rather than being left to
  * chance:
  *
@@ -29,9 +43,9 @@
  *     endpoint remains, for correctness on Pro and for backfill.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { buildApp } from './app.ts';
-import { sweepTimers } from './services/clocks.ts';
-import { getDb } from './db/index.ts';
+import { buildApp } from '../app.ts';
+import { sweepTimers } from '../services/clocks.ts';
+import { getDb } from '../db/index.ts';
 
 /** One app instance per function instance. Cold start pays for it once. */
 let ready: Promise<{ app: Awaited<ReturnType<typeof buildApp>>['app'] }> | null = null;
@@ -43,7 +57,20 @@ const SWEEP_THROTTLE_MS = Number(process.env.SWEEP_THROTTLE_MS ?? 60_000);
 async function getApp() {
   if (!ready) {
     ready = (async () => {
-      const { app } = await buildApp();
+      /**
+       * The API function serves exactly one thing: the API.
+       *
+       * In services mode the browser bundle is a separate service with its own
+       * build artifact and its own public domain — Vercel rewrites every non-`/api`
+       * path straight to it, so a static file can never reach this function. Leaving
+       * `serveStatic` on would make the function read `apps/web/dist` from its own
+       * bundle directory: absent, and if anything ever did land there it would
+       * duplicate the web service and let the two drift.
+       *
+       * `apps/api/src/index.ts` keeps serving static files, because the container
+       * layout is one process on one origin and `npm start` must still work.
+       */
+      const { app } = await buildApp({ serveStatic: false });
       /**
        * `ready()` is mandatory here, not an optimisation. Without it Fastify has
        * not finished installing its hook pipeline, and the first request fails
