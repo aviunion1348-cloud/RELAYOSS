@@ -40,17 +40,67 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (method !== 'GET' && method !== 'HEAD' && csrfToken) headers['x-csrf-token'] = csrfToken;
 
   const res = await fetch(BASE + path, { ...init, headers, credentials: 'same-origin' });
+
+  /**
+   * Parse defensively.
+   *
+   * A non-JSON body used to escape as a `SyntaxError` from `JSON.parse`, which
+   * reads as an application bug in the UI. It is not: a platform error page, a
+   * proxy timeout, or a 502 from an upstream that never reached this app all
+   * arrive as HTML. Reporting the status is honest; reporting "Unexpected token
+   * '<'" sends the reader hunting for a bug that does not exist.
+   */
   const text = await res.text();
-  const body = text ? JSON.parse(text) : null;
+  let body: any = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = null;
+    }
+  }
+
   if (!res.ok) {
-    const err = body?.error ?? { code: 'unknown', message: res.statusText };
+    const err = body?.error ?? {};
     if (res.status === 401 && !path.startsWith('/auth/')) {
       window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }
-    throw new ApiError(res.status, err.code, err.message, err.details);
+    throw new ApiError(
+      res.status,
+      err.code ?? 'unknown',
+      // A misconfigured deployment reports `summary` rather than `message`.
+      err.message ?? err.summary ?? (body === null && res.status >= 500
+        ? `The API returned ${res.status} with a non-JSON response.`
+        : res.statusText || `Request failed with ${res.status}`),
+      err,
+    );
   }
   return (body?.data ?? body) as T;
 }
+
+/** The detail a deployment sends when it cannot serve requests. */
+export interface MisconfiguredDetail {
+  code: 'misconfigured';
+  stage?: 'configuration' | 'database';
+  summary: string;
+  missing: string[];
+  invalid: Array<{ name: string; problem: string }>;
+  remedy: string[];
+}
+
+/**
+ * True when the API answered that it is not provisioned.
+ *
+ * Checked by shape as well as by code: the frontend and the API are separate
+ * services with independent build artifacts, so a frontend built from a newer
+ * commit can face an older API that has no `misconfigured` code yet.
+ */
+export function isMisconfigured(err: unknown): err is ApiError & { details: MisconfiguredDetail } {
+  if (!(err instanceof ApiError)) return false;
+  const details = err.details as Partial<MisconfiguredDetail> | undefined;
+  return err.status === 503 && Boolean(details) && Array.isArray((details as MisconfiguredDetail).remedy);
+}
+
 
 export interface SessionUser {
   id: string;
@@ -102,8 +152,16 @@ export const auth = {
       setCsrfToken(null);
     }
   },
+  /**
+   * The demo identities offered by the local sign-in screen.
+   *
+   * Not `/users`: that is the authenticated staff directory and requires a
+   * session, which a visitor on the sign-in screen does not have — so calling it
+   * here made the picker fail 100% of the time with a 401 that read as "the API
+   * is not running". `/auth/dev-users` is the anonymous, minimal counterpart.
+   */
   async users(): Promise<Array<{ id: string; name: string; role: string; title: string; initials: string; color: string }>> {
-    const users = await request<Array<Record<string, any>>>('/users');
+    const users = await request<Array<Record<string, any>>>('/auth/dev-users');
     return users.map((u) => ({ id: u.id, name: u.name ?? u.fullName, role: u.role, title: u.title, initials: u.initials, color: u.color }));
   },
 };

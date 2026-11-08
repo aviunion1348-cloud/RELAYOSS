@@ -422,3 +422,178 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
     await entry.getApp().then(({ app: inner }) => inner.close()).catch(() => {});
   }
 });
+
+/**
+ * A deployment whose environment was never provisioned must say so.
+ *
+ * This is the failure that reached production and could not be diagnosed from the
+ * browser. The API was reachable and healthy, but `buildApp` refused to start
+ * because `SESSION_SECRET` was unset, and the resulting 500 withheld its message
+ * (correctly — production never returns internal detail). The client could only
+ * conclude "the API is not reachable", which was false and sent the reader after
+ * the wrong problem.
+ *
+ * The assertions are deliberately about *actionability*, not about wording: the
+ * response must name the missing variable and must not leak a value.
+ */
+test('vercel: an unprovisioned instance reports what is missing instead of an opaque 500', async () => {
+  const saved = { ...process.env };
+  delete process.env.SESSION_SECRET;
+  delete process.env.DATABASE_URL;
+  process.env.NODE_ENV = 'production';
+
+  const entry = await import('../src/entrypoints/vercel.ts');
+  entry.resetBootState();
+
+  const responses = [];
+  const call = async (url) => {
+    const headers = {};
+    const chunks = [];
+    const res = {
+      statusCode: 200,
+      setHeader: (k, v) => { headers[k.toLowerCase()] = v; },
+      end: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
+      write: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
+    };
+    await entry.default({ method: 'GET', url, headers: { host: 'relay.example' } }, res);
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    responses.push({ url, status: res.statusCode, headers, body });
+    return body;
+  };
+
+  try {
+    const me = await call('/api/auth/me');
+    assert.equal(responses[0].status, 503, 'an instance that cannot boot is unavailable, not OK');
+
+    assert.equal(me.error.code, 'misconfigured', 'the failure must be identifiable by code');
+    assert.equal(me.error.stage, 'configuration', 'a refused boot is a configuration failure');
+    assert.ok(
+      me.error.missing.includes('SESSION_SECRET'),
+      `the response must name the missing variable, got ${JSON.stringify(me.error.missing)}`,
+    );
+    assert.ok(
+      me.error.missing.includes('DATABASE_URL'),
+      'a deployment with no database is equally unusable and must say so',
+    );
+    assert.ok(
+      Array.isArray(me.error.remedy) && me.error.remedy.length > 0,
+      'a report that names no remedy leaves the operator where they started',
+    );
+    assert.match(me.error.summary, /SESSION_SECRET is required/, 'the boot check\'s own explanation must survive');
+
+    // No value may be echoed. The endpoint is unauthenticated.
+    const serialised = JSON.stringify(me);
+    for (const name of ['SESSION_SECRET', 'DATABASE_URL']) {
+      const value = process.env[name];
+      if (value) assert.ok(!serialised.includes(value), `${name}'s value leaked into the report`);
+    }
+    assert.ok(!/\$argon2id\$/.test(serialised), 'no hash may appear in a public report');
+
+    assert.equal(
+      responses[0].headers['cache-control'],
+      'no-store, max-age=0',
+      'a provisioning failure must never be cached — the deployment would look broken after it is fixed',
+    );
+
+    // Every route, not just the failed one: the whole instance is down.
+    await call('/api/live');
+    assert.equal(responses[1].status, 503, 'a liveness probe must not claim success on an instance that cannot serve');
+  } finally {
+    process.env = saved;
+    entry.resetBootState();
+  }
+});
+
+test('vercel: a misconfigured instance recovers once the environment is provisioned', async () => {
+  const saved = { ...process.env };
+  delete process.env.SESSION_SECRET;
+  process.env.NODE_ENV = 'production';
+
+  const entry = await import('../src/entrypoints/vercel.ts');
+  entry.resetBootState();
+
+  const call = async () => {
+    const chunks = [];
+    const res = {
+      statusCode: 200,
+      setHeader: () => {},
+      end: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
+      write: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
+    };
+    await entry.default({ method: 'GET', url: '/api/auth/me', headers: { host: 'relay.example' } }, res);
+    const text = Buffer.concat(chunks).toString();
+    return { status: res.statusCode, body: text ? JSON.parse(text) : null };
+  };
+
+  try {
+    const before = await call();
+    assert.equal(before.status, 503, 'the instance must start out unavailable');
+
+    // Provisioning the variable is exactly what an operator does. The next boot
+    // must pick it up — a recorded failure that outlives its cause is a worse bug
+    // than the original 500, because the instance never recovers and reports a
+    // stale reason while doing it.
+    process.env.SESSION_SECRET = 'a'.repeat(48);
+    // No database is reachable here, so the second boot still fails — but for a
+    // *different* reason. That difference is what proves the failure was re-derived
+    // rather than replayed from the cached first attempt.
+    entry.resetBootState();
+    const after = await call();
+    assert.equal(after.status, 503, 'a boot with no database still cannot serve');
+    assert.ok(
+      !JSON.stringify(after.body).includes('SESSION_SECRET'),
+      'the SESSION_SECRET complaint must disappear once it is set — a stale reason is misleading',
+    );
+  } finally {
+    process.env = saved;
+    entry.resetBootState();
+  }
+});
+
+/**
+ * When the visible error blames something else, explain the chain.
+ *
+ * With no `DATABASE_URL` the boot falls back to an empty local SQLite file, so no
+ * credential exists, so `AUTH_MODE=auto` resolves to `dev`, so the production
+ * guard refuses. The message therefore says "AUTH_MODE=dev is refused" while the
+ * one variable that fixes everything is `DATABASE_URL`. Reporting only the literal
+ * message invites the operator to go configure an identity provider they do not
+ * need.
+ */
+test('vercel: a missing database is named as the cause of the auth refusal it produces', async () => {
+  const saved = { ...process.env };
+  delete process.env.DATABASE_URL;
+  delete process.env.RELAY_ADMIN_PASSWORD_HASH;
+  process.env.SESSION_SECRET = 'a'.repeat(48);
+  process.env.NODE_ENV = 'production';
+
+  const entry = await import('../src/entrypoints/vercel.ts');
+  entry.resetBootState();
+
+  try {
+    const chunks = [];
+    const res = {
+      statusCode: 200,
+      setHeader: () => {},
+      end: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
+      write: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
+    };
+    await entry.default({ method: 'GET', url: '/api/users', headers: { host: 'relay.example' } }, res);
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(body.error.missing, ['DATABASE_URL'], 'only DATABASE_URL is actually absent here');
+    assert.ok(
+      body.error.remedy.some((step) => /DATABASE_URL is unset.*AUTH_MODE=auto resolves to/i.test(step)),
+      'the report must connect the missing database to the auth refusal it causes',
+    );
+    assert.match(
+      body.error.remedy[0],
+      /DATABASE_URL/,
+      'the causal explanation must come first — it is the variable to fix',
+    );
+  } finally {
+    process.env = saved;
+    entry.resetBootState();
+  }
+});

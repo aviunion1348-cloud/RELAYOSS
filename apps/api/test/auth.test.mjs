@@ -417,3 +417,56 @@ test('security: operational endpoints are anonymous but expose no user data', as
   // Everything else stays private.
   assert.equal((await req('GET', '/api/dashboard')).statusCode, 401);
 });
+
+/**
+ * The sign-in picker must be loadable without a session.
+ *
+ * Regression test for a bug that made the development sign-in screen unusable in
+ * *every* environment, including the deployment that reported it: the screen called
+ * `GET /api/users` — the authenticated staff directory — to build its picker, and a
+ * visitor on the sign-in screen has no session by definition. The list could never
+ * load, and the resulting 401 was rendered as "is the API running on :4000?", which
+ * hid a deterministic 100% failure behind a connectivity question.
+ */
+test('auth: the identity picker is anonymous and minimal', async () => {
+  const res = await app.inject({ method: 'GET', url: '/api/auth/dev-users' });
+  assert.equal(res.statusCode, 200, 'the picker must load without a session');
+
+  const users = JSON.parse(res.body).data;
+  assert.ok(users.length > 0, 'the seeded identities must be offered');
+
+  assert.deepEqual(
+    Object.keys(users[0]).sort(),
+    ['color', 'id', 'initials', 'name', 'role', 'title'],
+    'the picker payload must stay minimal — it is served to anonymous callers',
+  );
+  assert.ok(!('email' in users[0]), 'an anonymous picker must not expose email addresses');
+  assert.ok(!/Cents|capacityHours|@x\.io/.test(res.body), 'no rates, capacity or emails may be exposed');
+
+  // The authenticated directory stays closed to the same anonymous caller.
+  const dir = await app.inject({ method: 'GET', url: '/api/users' });
+  assert.equal(dir.statusCode, 401, 'the staff directory must remain session-gated');
+
+  // And the identities it returns are usable for the login it is a picker for.
+  const chosen = users[0].id;
+  const signedIn = await app.inject({
+    method: 'POST',
+    url: '/api/auth/dev-login',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ userId: chosen }),
+  });
+  assert.equal(signedIn.statusCode, 200, 'an identity from the picker must be signable-in');
+});
+
+test('auth: the identity picker is refused in production without the documented opt-in', async () => {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    const res = await app.inject({ method: 'GET', url: '/api/auth/dev-users' });
+    assert.equal(res.statusCode, 403, 'listing demo identities in production is a bypass');
+    assert.ok(!/Ada Admin|u_admin|@x\.io/.test(res.body), 'a refused response must not still contain the list');
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
+});

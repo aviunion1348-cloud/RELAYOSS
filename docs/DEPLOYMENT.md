@@ -439,6 +439,62 @@ mechanism. Deadline processing also runs inline on real requests, throttled by
   nothing twice, because the sweep only touches timers whose deadline has passed
   and whose outcome is still `running`.
 
+### 1.5.0 When the deployed sign-in screen says the API is unreachable
+
+The first thing a newly deployed instance shows is the sign-in screen, and it used
+to report every failure the same way — *"Could not load identities. Is the API
+running on :4000?"* — which is false on every deployed host and points at the
+wrong problem. It now distinguishes three cases, and the distinction is the
+diagnosis:
+
+| What the screen says | What it means | Where to look |
+| --- | --- | --- |
+| *"This deployment is not configured yet"* + a list of variable names | The API is **running and healthy**. It refused to boot because its environment is incomplete, and it has told you exactly what is missing | `error.missing` on any `/api` response, then §1.4 |
+| *"Could not reach the API"* | The request never completed. Routing or deployment, not configuration | The `/api` rewrite, and that both services appear in the build log |
+| *"The API rejected the request (status · code)"* | The API answered and refused. Read the status | The status itself; 401 at sign-in means no credential is provisioned |
+
+The middle row is the only one that is a connectivity question, which is why the
+other two no longer claim to be.
+
+**Read the JSON, not the screen.** Every `/api` route answers a provisioning
+failure identically, so `curl` is faster than the browser:
+
+```bash
+curl -s https://<deployment>/api/ready | jq .error
+```
+
+```json
+{
+  "code": "misconfigured",
+  "stage": "configuration",
+  "summary": "SESSION_SECRET is required (used to sign CSRF tokens and cookie sessions)",
+  "missing": ["SESSION_SECRET", "DATABASE_URL"],
+  "invalid": [],
+  "remedy": [
+    "Set SESSION_SECRET to 32+ random bytes: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
+    "Set DATABASE_URL to your provider's pooled PostgreSQL connection string (…)",
+    "Run the schema migration: DATABASE_URL=… npm run db:migrate:prod",
+    "Provision the shared login: npm run set-password, then npm run db:pg:assign-login",
+    "Redeploy and confirm GET /api/ready returns 200"
+  ]
+}
+```
+
+Three properties are deliberate and tested (`apps/api/test/vercel.test.mjs`):
+
+- **Names, never values.** This endpoint is unauthenticated. It says
+  `SESSION_SECRET` is missing; it never echoes a secret, a hash or a connection
+  string.
+- **503, not 500.** The instance genuinely is unavailable. `500` suggests a bug;
+  `503` says "not ready", which is what this is.
+- **Not cached.** `Cache-Control: no-store`. A cached failure would keep the
+  deployment looking broken after it was fixed.
+
+`stage` separates the two ways a boot fails: `configuration` (the guard refused
+before opening a connection) and `database` (the connection or migration failed
+after). They have entirely different fixes, and conflating them is how the
+original `500` wasted an afternoon.
+
 ### 1.5.1 Running this locally
 
 `vercel dev` starts both services and injects the routing table, which is the only
@@ -500,7 +556,10 @@ never failed is a guard you do not know works.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `deployment_misconfigured` from `/api` | `apps/api/dist/entrypoints/vercel.js` is absent because the api service's build did not compile the API | Check the `api` service build; redeploy |
+| `503` with `{"error":{"code":"misconfigured"}}` from every `/api/*` route | The function booted but refused to start: `SESSION_SECRET` or `DATABASE_URL` is unset, or `RELAY_ADMIN_PASSWORD_HASH` is malformed. **This is the intended response** and it names the missing variables in `error.missing` | Read `error.summary` and `error.missing`, then follow `error.remedy`. Complete §1.4, redeploy, confirm `/api/ready` returns 200. Nothing is wrong with the browser or the build |
+| Sign-in shows *"Could not reach the API"* rather than the variables above | The request never reached the function — the deployment has no `api` service, or the `/api` rewrite is missing | Check the rewrite order (§1.2) and that both services are detected in the build log |
+| The identity list never loads in development mode | Fixed: the screen called `GET /api/users`, the authenticated directory, which no anonymous visitor can read | `GET /api/auth/dev-users` is the anonymous, minimal counterpart. Update rather than special-casing the 401 |
+| `deployment_build_incomplete` from `/api` | `apps/api/dist/entrypoints/vercel.js` is absent because the api service's build did not compile the API | Check the `api` service build; redeploy |
 | `/` returns JSON `not_found` instead of a page | The catch-all rewrite is missing or points at `api`, so a browser route reached the API function | Confirm `/(.*) → web` is last in `rewrites` |
 | Every `/api/*` call returns HTML | The `/api` rewrite is missing, or the catch-all is listed before it | Order the rewrites specific-first; the guard checks this |
 | 500 with `Cannot read properties of undefined (reading 'length')` | `app.ready()` was skipped — a stale build | Rebuild; this is fixed in `apps/api/src/vercel.ts` |

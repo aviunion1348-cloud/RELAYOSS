@@ -70,6 +70,52 @@ export async function registerAuthRoutes(
   const jwks = new JwksCache(config.oidcJwksUri);
 
   /* ---------------------------------------------------------- dev login -- */
+
+  /**
+   * The demo identities a local sign-in screen can offer.
+   *
+   * This endpoint exists because its absence was a real bug: the sign-in screen
+   * called `GET /api/users` to build the picker, but that route requires a
+   * session — and a visitor on the sign-in screen has none by definition. The
+   * list could therefore never load, so the development sign-in was permanently
+   * broken, and the failure looked like a connectivity problem.
+   *
+   * It is anonymous, which is why the payload is deliberately minimal: an id, a
+   * display name, a role and a colour — exactly what the picker renders. No
+   * email, no rates, no capacity, no active flag. `dev-login` itself decides
+   * whether any of these can start a session; this route only lists them.
+   *
+   * Closed in three cases, all of which are the same condition the login enforces:
+   * not in `dev` mode, in production without the documented opt-in, or once a
+   * shared credential exists (in which case the screen should show a password
+   * form and no identities at all).
+   */
+  app.get('/api/auth/dev-users', async () => {
+    const demoAllowed = process.env.ALLOW_DEV_AUTH_IN_PRODUCTION === '1' && authMode() === 'dev';
+    if (config.env === 'production' && !demoAllowed) {
+      throw forbidden('Local development login is disabled in production');
+    }
+    if (authMode() !== 'dev') {
+      throw forbidden('Not available: this deployment does not use development identities');
+    }
+    if (await hasProvisionedCredential(db())) {
+      throw forbidden('This deployment uses the shared login.');
+    }
+    const rows = await db().all<Record<string, any>>(
+      'SELECT id,full_name,role,title,initials,avatar_color FROM users WHERE is_active = 1 ORDER BY full_name',
+    );
+    return ok(
+      rows.map((row) => ({
+        id: row.id,
+        name: row.full_name,
+        role: row.role,
+        title: row.title,
+        initials: row.initials,
+        color: row.avatar_color,
+      })),
+    );
+  });
+
   app.post('/api/auth/dev-login', async (req, reply) => {
     // Gate: refused in production unless the same explicit opt-in that lets the
     // boot guard run dev auth is set (a local demonstration stack). The two

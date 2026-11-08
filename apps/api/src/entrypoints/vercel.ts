@@ -46,9 +46,22 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { buildApp } from '../app.ts';
 import { sweepTimers } from '../services/clocks.ts';
 import { getDb } from '../db/index.ts';
+import {
+  bootFailure,
+  bootFailureBody,
+  recordBootFailure,
+  resetBootFailure,
+} from '../lib/misconfigured.ts';
 
-/** One app instance per function instance. Cold start pays for it once. */
-let ready: Promise<{ app: Awaited<ReturnType<typeof buildApp>>['app'] }> | null = null;
+/**
+ * One app instance per function instance. Cold start pays for it once.
+ *
+ * `app: null` is a first-class outcome, not an absent value: it means this
+ * instance tried to boot and could not, and `bootFailure()` holds the reason.
+ * Modelling it in the type keeps every caller honest about checking it.
+ */
+type Booted = { app: Awaited<ReturnType<typeof buildApp>>['app'] };
+let ready: Promise<Booted | { app: null }> | null = null;
 
 /** Timestamp of the last inline sweep, to keep it off the hot path. */
 let lastSweep = 0;
@@ -70,19 +83,83 @@ async function getApp() {
        * `apps/api/src/index.ts` keeps serving static files, because the container
        * layout is one process on one origin and `npm start` must still work.
        */
-      const { app } = await buildApp({ serveStatic: false });
-      /**
-       * `ready()` is mandatory here, not an optimisation. Without it Fastify has
-       * not finished installing its hook pipeline, and the first request fails
-       * inside the pre-parsing hook runner with a TypeError — a crash that only
-       * shows up in serverless, where `listen()` (which awaits ready internally)
-       * is never called.
-       */
-      await app.ready();
-      return { app };
+      try {
+        const { app } = await buildApp({ serveStatic: false });
+        /**
+         * `ready()` is mandatory here, not an optimisation. Without it Fastify has
+         * not finished installing its hook pipeline, and the first request fails
+         * inside the pre-parsing hook runner with a TypeError — a crash that only
+         * shows up in serverless, where `listen()` (which awaits ready internally)
+         * is never called.
+         */
+        await app.ready();
+        return { app };
+      } catch (err) {
+        /**
+         * Separate a provisioning mistake from a query failure.
+         *
+         * `buildApp` opens the connection and runs the boot migration before any
+         * route exists, so a failure here is already reduced to two causes: the
+         * configuration guard refused to start, or the database could not be
+         * reached. Recording which one lets `handler` answer with the actual
+         * problem instead of a generic 500 that says nothing.
+         *
+         * The rejection is deliberately *swallowed* rather than rethrown: `ready`
+         * stays resolved-empty so a warm instance does not repeat the boot attempt
+         * on every request. The recorded failure is what each request reports.
+         */
+        recordBootFailure(bootFailureStage(err), err);
+        // eslint-disable-next-line no-console
+        console.error(
+          JSON.stringify({
+            level: 50,
+            msg: 'API cannot boot — this instance is not serving requests. Reporting the reason on every response.',
+            stage: bootFailure()?.stage,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        return { app: null };
+      }
     })();
   }
   return ready;
+}
+
+/**
+ * Classify a boot error by the check that produced it.
+ *
+ * Both checks throw plain `Error`s with descriptive messages, so the message is
+ * the only discriminator available. The consequence of a wrong guess is cosmetic
+ * — the report carries the original message either way — so this stays a string
+ * match rather than a new error taxonomy threaded through the boot path.
+ */
+function bootFailureStage(err: unknown): 'configuration' | 'database' {
+  const message = err instanceof Error ? err.message : String(err);
+  return /is required|refused in production|is not a complete Argon2id hash|requires OIDC/.test(message)
+    ? 'configuration'
+    : 'database';
+}
+
+/** Answer with the recorded provisioning failure, in a shape an operator can act on. */
+function replyMisconfigured(res: ServerResponse): void {
+  const failure = bootFailure();
+  const body = failure
+    ? bootFailureBody(failure)
+    : {
+        code: 'misconfigured' as const,
+        summary: 'This instance failed to start and no reason was recorded.',
+        missing: [],
+        invalid: [],
+        remedy: [],
+      };
+  const payload = JSON.stringify({ error: body });
+  res.statusCode = 503;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.setHeader('cache-control', 'no-store, max-age=0');
+  // A provisioning problem is not a credential problem: never let a proxy or the
+  // browser cache this, or the deployment keeps looking broken after it is fixed.
+  res.setHeader('retry-after', '30');
+  res.end(payload);
 }
 
 /**
@@ -110,9 +187,40 @@ async function maybeSweep(): Promise<void> {
  */
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   const { app } = await getApp();
+
+  /**
+   * A failed boot is reported, not crashed.
+   *
+   * Before this, a missing `SESSION_SECRET` produced a 500 whose message is
+   * withheld in production, so the sign-in screen could only say "check the API".
+   * A 503 with the specific missing variable is both truthful — the service
+   * genuinely is unavailable — and the difference between a five-minute fix and
+   * an afternoon of guessing.
+   */
+  if (!app) {
+    replyMisconfigured(res);
+    return;
+  }
+
   await maybeSweep();
   app.server.emit('request', req, res);
 }
 
+/**
+ * Forget that this instance ever booted — success or failure.
+ *
+ * Resetting the recorded *reason* alone is not enough, and believing it was is a
+ * bug this function exists to prevent: `ready` caches `{ app: null }` on a failed
+ * boot, so clearing the reason while keeping the cached outcome leaves the
+ * instance permanently broken and reporting a stale cause. Both halves are
+ * cleared together, which is what a test (or a hot-reloading dev process) means by
+ * "start over".
+ */
+export function resetBootState(): void {
+  ready = null;
+  resetBootFailure();
+}
+
 /** Exported for tests and for the readiness probe. */
-export { getApp, maybeSweep };
+export { getApp, maybeSweep, resetBootFailure };
+

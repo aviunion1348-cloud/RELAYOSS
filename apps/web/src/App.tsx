@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useState, type ReactElement } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { auth, AUTH_EXPIRED_EVENT, type SessionInfo } from './lib/api';
+import { ApiError, auth, AUTH_EXPIRED_EVENT, type SessionInfo } from './lib/api';
 import { SignIn } from './pages/SignIn';
 import { Shell } from './components/Shell';
 import { Skeleton } from './components/ui';
@@ -62,9 +62,26 @@ function SessionGate({ children }: { children: (session: SessionInfo) => ReactEl
   }
 
   if (session.isError || expired) {
+    /**
+     * Pass the failure through.
+     *
+     * It used to be dropped on the floor (`info={null}`), which left the sign-in
+     * screen unable to distinguish "nobody is signed in" from "this deployment is
+     * broken" — and the screen then guessed, wrongly, that the API was not running.
+     * A session probe that failed for a reason other than 401 means the app itself
+     * cannot work, and that belongs on screen before a password is ever typed.
+     *
+     * A 401 is the normal, expected answer for an anonymous visitor, so it is not
+     * surfaced: `expired` already covers the transition, and the refetch path
+     * covers recovery.
+     */
+    const probeError = session.isError ? session.error : null;
+    const isAnonymous = probeError instanceof ApiError && probeError.status === 401;
+
     return (
       <SignIn
         info={null}
+        probeError={isAnonymous ? null : probeError}
         onSignedIn={() => {
           setExpired(false);
           void session.refetch();
