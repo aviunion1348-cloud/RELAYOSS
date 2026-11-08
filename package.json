@@ -19,9 +19,9 @@
     "db:reset": "node apps/api/dist/db/cli.js reset",
     "typecheck": "tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
     "test": "node --no-warnings --test apps/api/test/*.test.mjs",
-    "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/gen-pg-migrations.mjs --check",
+    "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/gen-pg-migrations.mjs --check && node scripts/check-traceability.mjs",
     "build:api": "npm run build -w @relay/api",
-    "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build && npm run smoke:web",
+    "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build && npm run smoke:web && npm run backup:verify",
     "pg:start": "node scripts/pg-dev.mjs start",
     "pg:stop": "node scripts/pg-dev.mjs stop",
     "pg:migrate": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts migrate",
@@ -30,7 +30,8 @@
     "backup": "node scripts/backup.mjs backup",
     "backup:verify": "node scripts/backup.mjs drill",
     "smoke:web": "node scripts/smoke-web.mjs",
-    "db:status": "node apps/api/src/db/cli.ts status"
+    "db:status": "node apps/api/src/db/cli.ts status",
+    "check:traceability": "node scripts/check-traceability.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

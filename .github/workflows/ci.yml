@@ -101,10 +101,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Traceability document must exist and every requirement must have a status
+      - name: Traceability audit
+        run: node scripts/check-traceability.mjs
+      - name: Required documentation set
         run: |
-          test -f docs/REQUIREMENT-TRACEABILITY.md || { echo "::error::docs/REQUIREMENT-TRACEABILITY.md missing"; exit 1; }
-          # Every row must declare one of the four permitted statuses.
-          missing=$(grep -E '^\| *R[0-9]+' docs/REQUIREMENT-TRACEABILITY.md | grep -vcE 'Verified|Incomplete|Blocked|N/A' || true)
-          echo "rows without a status: $missing"
-          test "$missing" -eq 0 || { echo "::error::traceability rows missing a status"; exit 1; }
+          for f in SECURITY DATABASE DEPLOYMENT BACKUP-RECOVERY RUNBOOK REQUIREMENT-TRACEABILITY; do
+            test -f "docs/$f.md" || { echo "::error::docs/$f.md missing"; exit 1; }
+          done
+      - name: No fabricated test or evidence markers
+        run: |
+          # A skipped/only/fixme test or a hard-coded "pass" is how a suite lies.
+          if grep -rnE "(describe|test|it)\.(skip|only)\(" apps/api/test apps/web/src --include=*.mjs --include=*.ts --include=*.tsx; then
+            echo "::error::skipped or exclusive tests are not allowed"; exit 1
+          fi
