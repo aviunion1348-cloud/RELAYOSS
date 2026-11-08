@@ -39,7 +39,11 @@ function secureCookies() {
   return config.env === 'production' || process.env.COOKIE_SECURE === '1';
 }
 
-export async function registerAuthRoutes(app: FastifyInstance) {
+export async function registerAuthRoutes(
+  app: FastifyInstance,
+  opts: { throttle?: import('../lib/rate-limit.ts').LoginThrottle } = {},
+) {
+  const throttle = opts.throttle;
   const jwks = new JwksCache(config.oidcJwksUri);
 
   /* ---------------------------------------------------------- dev login -- */
@@ -50,12 +54,26 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (!parsed.success) throw badRequest('Invalid payload', parsed.error.issues);
 
     const userId = parsed.data.userId ?? config.demoUserId;
+    // Brute-force protection is keyed by client address + claimed identity, so
+    // one attacker cannot lock a real user out from a different address.
+    const lockKey = `${req.ip}|${userId}`;
+    const locked = throttle?.check(lockKey);
+    if (locked?.locked) {
+      throw forbidden(`Too many failed attempts. Try again in ${locked.retryAfterSec}s.`);
+    }
     const user = await db().get<{ id: string; email: string; role: string; full_name: string; is_active: number }>(
       'SELECT id,email,role,full_name,is_active FROM users WHERE id = ?',
       [userId],
     );
-    if (!user) throw notFound('Unknown user');
-    if (!user.is_active) throw forbidden('Account is inactive');
+    if (!user || !user.is_active) {
+      throttle?.fail(lockKey);
+      await db().run('INSERT INTO auth_events (kind, ip, user_agent, detail) VALUES (?,?,?,?)', [
+        'login_failed', req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), userId,
+      ]);
+      // Same response for unknown and inactive accounts: no user enumeration.
+      throw unauthorized('Invalid credentials');
+    }
+    throttle?.succeed(lockKey);
 
     const session = await createSession(db(), {
       userId: user.id,

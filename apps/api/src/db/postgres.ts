@@ -26,6 +26,7 @@ export class PostgresDb implements Db {
   private pool: pg.Pool;
   private txClient: pg.PoolClient | null = null;
   private depth = 0;
+  private closed = false;
 
   constructor(connectionString: string, opts: { max?: number; connectionTimeoutMs?: number } = {}) {
     this.pool = new pg.Pool({
@@ -42,6 +43,7 @@ export class PostgresDb implements Db {
   }
 
   private async query<T = Row>(sql: string, params: SqlParams = []): Promise<pg.QueryResult<T>> {
+    this.assertOpen();
     const text = translate(sql, 'postgres');
     const values = Array.isArray(params) ? params : Object.values(params);
     // A Promise bound as a value is always a missing `await`. node-postgres
@@ -70,11 +72,13 @@ export class PostgresDb implements Db {
   }
 
   async exec(sql: string): Promise<void> {
+    this.assertOpen();
     const runner = this.txClient ?? this.pool;
     await runner.query(sql);
   }
 
   async tx<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertOpen();
     if (this.depth > 0) return fn();
     const client = await this.pool.connect();
     this.txClient = client;
@@ -104,6 +108,12 @@ export class PostgresDb implements Db {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     await this.pool.end();
+  }
+
+  /** A pool that has been ended must fail loudly, never silently return []. */
+  private assertOpen() {
+    if (this.closed) throw new Error('PostgresDb is closed — the connection pool has been released.');
   }
 }

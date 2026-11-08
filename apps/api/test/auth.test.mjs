@@ -21,6 +21,12 @@ import { migrate } from '../src/db/migrate.ts';
 import { verifyJwt, JwksCache, issueCsrf, verifyCsrf, createSession } from '../src/auth/index.ts';
 
 process.env.SESSION_SECRET ||= 'test-session-secret-do-not-use-in-production';
+// The suite deliberately bursts logins; raise the budget so behaviour tests are
+// not silently rate-limited. The limiter itself is exercised by rotating the
+// budget down in its own test below.
+process.env.RATE_LIMIT_AUTH ||= '1000';
+process.env.RATE_LIMIT_GLOBAL ||= '5000';
+process.env.RATE_LIMIT_WRITE ||= '5000';
 
 const pgUrl = process.env.TEST_DATABASE_URL ?? process.env.TEST_DATABASE_URL_ALT ?? '';
 const db = pgUrl ? new PostgresDb(pgUrl) : new SqliteDb(':memory:');
@@ -138,6 +144,41 @@ test('auth: /api/auth/me returns the verified identity and capability map', asyn
 });
 
 /* -------------------------------------------------------- session abuse -- */
+test('security: failed logins are throttled and do not reveal whether a user exists', async () => {
+  const unknown = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_does_not_exist' } });
+  assert.equal(unknown.statusCode, 401, 'unknown identity must not be distinguishable from an inactive one');
+  assert.equal(unknown.json().error.code, 'unauthorized');
+
+  // Repeated failures lock the (ip, identity) pair.
+  let locked = null;
+  for (let i = 0; i < 8; i++) {
+    const res = await req('POST', '/api/auth/dev-login', { payload: { userId: 'u_ghost' } });
+    if (res.statusCode === 403) {
+      locked = res;
+      break;
+    }
+  }
+  assert.ok(locked, 'brute force protection engages after repeated failures');
+  assert.match(locked.json().error.message, /Too many failed attempts/i);
+});
+
+test('security: the rate limiter enforces a budget and reports retry-after', async () => {
+  // Unit-level: deterministic, no dependence on the suite's own traffic.
+  const { RateLimiter } = await import('../src/lib/rate-limit.ts');
+  const limiter = new RateLimiter({ limit: 3, windowMs: 1000, scope: 'unit' });
+  const t0 = 1_000_000;
+  assert.equal(limiter.take('ip-1', t0).allowed, true);
+  assert.equal(limiter.take('ip-1', t0).allowed, true);
+  assert.equal(limiter.take('ip-1', t0).allowed, true);
+  const denied = limiter.take('ip-1', t0);
+  assert.equal(denied.allowed, false);
+  assert.ok(denied.retryAfterSec >= 1);
+  // A different client is unaffected.
+  assert.equal(limiter.take('ip-2', t0).allowed, true);
+  // The window rolls over.
+  assert.equal(limiter.take('ip-1', t0 + 1001).allowed, true);
+});
+
 test('auth: an unknown session cookie is rejected with 401', async () => {
   const res = await req('GET', '/api/auth/me', { cookie: 'relay_session=ses_forged_value' });
   assert.equal(res.statusCode, 401);

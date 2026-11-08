@@ -35,6 +35,16 @@ export const config = {
   oidcAudience: process.env.OIDC_AUDIENCE ?? '',
   oidcJwksUri: process.env.OIDC_JWKS_URI ?? '',
   sessionSecret: process.env.SESSION_SECRET ?? '',
+  /**
+   * Per-process request budgets (requests per minute, per client address).
+   * The auth budget is intentionally small: a human logs in a handful of times
+   * per minute at most. Tests raise it rather than skipping the limiter.
+   */
+  rateLimit: {
+    global: int('RATE_LIMIT_GLOBAL', 1200),
+    auth: int('RATE_LIMIT_AUTH', 30),
+    write: int('RATE_LIMIT_WRITE', 240),
+  },
   corsOrigin: (process.env.CORS_ORIGIN ?? '*').split(',').map((s) => s.trim()),
   /** Absolute path of the built SPA served by the API in production. */
   webDist: process.env.WEB_DIST ?? path.join(ROOT, 'apps', 'web', 'dist'),

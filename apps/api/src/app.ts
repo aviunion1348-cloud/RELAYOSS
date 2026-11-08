@@ -18,6 +18,8 @@ import { registerRoutes } from './routes/index.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { createAuth } from './auth/middleware.ts';
 import { assertAuthConfiguration } from './auth/index.ts';
+import { RateLimiter, LoginThrottle } from './lib/rate-limit.ts';
+import { tooMany } from './lib/http.ts';
 import { HttpError } from './lib/http.ts';
 
 export interface BuildOptions {
@@ -147,11 +149,41 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     return reply.code(404).send({ error: { code: 'not_found', message: 'Build the web app first (npm run build).' } });
   });
 
+  /**
+   * Rate limiting. Three budgets, because the abuse profiles differ:
+   *   global  — a runaway client or scraper
+   *   auth    — credential stuffing against login
+   *   write   — anything that creates/approves/ships
+   * Limits are per-process (documented in docs/SECURITY.md); a shared store is
+   * required for cluster-wide enforcement.
+   */
+  const globalLimiter = new RateLimiter({ limit: config.rateLimit.global, windowMs: 60_000, scope: 'global' });
+  const authLimiter = new RateLimiter({ limit: config.rateLimit.auth, windowMs: 60_000, scope: 'auth' });
+  const writeLimiter = new RateLimiter({ limit: config.rateLimit.write, windowMs: 60_000, scope: 'write' });
+  const loginThrottle = new LoginThrottle();
+
+  app.addHook('onRequest', async (req, reply) => {
+    const identityKey = (req.headers.cookie ? 'cookie' : req.ip) ?? 'anon';
+    const key = `${req.ip}|${identityKey}`;
+    const budget = req.url.startsWith('/api/auth/dev-login') || req.url.startsWith('/api/auth/oidc')
+      ? authLimiter
+      : req.method === 'GET' || req.method === 'HEAD'
+        ? globalLimiter
+        : writeLimiter;
+    const decision = budget.take(key);
+    reply.header('x-ratelimit-remaining', String(decision.remaining));
+    if (!decision.allowed) {
+      reply.header('retry-after', String(decision.retryAfterSec));
+      req.log.warn({ url: req.url, ip: req.ip }, 'rate_limited');
+      throw tooMany('Too many requests — slow down.', decision.retryAfterSec);
+    }
+  });
+
   // Authentication runs before any business route can observe a request.
   const auth = createAuth({ db });
   app.addHook('onRequest', auth.authenticate);
 
-  await app.register(registerAuthRoutes);
+  await app.register(registerAuthRoutes, { throttle: loginThrottle });
   await registerRoutes(app, { auth });
 
   if ((opts.serveStatic ?? true) && fs.existsSync(config.webDist)) {
