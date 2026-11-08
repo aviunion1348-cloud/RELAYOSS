@@ -19,7 +19,9 @@ COPY . .
 # architecture rules.
 RUN node scripts/guard-no-json-store.mjs \
  && node scripts/guard-sql-portability.mjs \
+ && node scripts/guard-declared-deps.mjs \
  && node scripts/gen-pg-migrations.mjs --check \
+ && node scripts/check-traceability.mjs \
  && npm run typecheck \
  && npm run build
 
@@ -37,6 +39,10 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+# The PostgreSQL driver must exist in a production-only install. It once did not:
+# `pg` resolved only through a dev tool, so the image built and then crashed on
+# boot. Fail the build instead of the deployment.
+RUN node -e "import('pg').then(() => console.log('✓ pg present')).catch(() => { console.error('✗ pg missing from the production install'); process.exit(1); })" 
 
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/web/dist apps/web/dist
