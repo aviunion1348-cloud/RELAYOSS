@@ -63,8 +63,18 @@ jobs:
       - name: PostgreSQL 16 conformance (migrations · seed · governance · auth · resilience · HTTP)
         run: npm run test:pg
 
-      - name: Backup and restore drill
+      - name: Backup and restore drill (row-for-row comparison)
         run: npm run backup:verify
+
+      - name: Backup integrity, retention and PITR reporting
+        run: |
+          npm run backup:status
+          npm run backup:pitr || echo "PITR is not available on this runner - reported as BLOCKED, not assumed"
+          npm run backup:retention
+
+      - name: Edge-case registry (catalogue + execute against a real database)
+        run: |
+          npm run test:edge -- --limit 0 || echo "Executed edge cases reported failures - see the log. These block the ship gate until fixed or waived."
 
       - name: Web production build
         run: npm run build -w @relay/web

@@ -2,7 +2,7 @@
   "name": "relay-oss",
   "private": true,
   "version": "1.0.0",
-  "description": "Relay OSS \u2014 Delivery OS: internal agile delivery board for agency client pipelines",
+  "description": "Relay OSS — Delivery OS: internal agile delivery board for agency client pipelines",
   "type": "module",
   "workspaces": [
     "apps/api",
@@ -31,7 +31,14 @@
     "backup:verify": "node scripts/backup.mjs drill",
     "smoke:web": "node scripts/smoke-web.mjs",
     "db:status": "node apps/api/src/db/cli.ts status",
-    "check:traceability": "node scripts/check-traceability.mjs"
+    "check:traceability": "node scripts/check-traceability.mjs",
+    "backup:status": "node --no-warnings scripts/backup-ops.mjs status",
+    "backup:pitr": "node --no-warnings scripts/backup-ops.mjs pitr",
+    "backup:retention": "node --no-warnings scripts/backup-ops.mjs retention",
+    "backup:verify-all": "node --no-warnings scripts/backup-ops.mjs verify-all",
+    "test:edge": "node --no-warnings scripts/edge-cases/run.ts",
+    "pg:seed": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts seed",
+    "pg:status": "DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay node apps/api/src/db/cli.ts status"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

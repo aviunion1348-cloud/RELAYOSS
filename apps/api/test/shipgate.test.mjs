@@ -30,6 +30,8 @@ await resetPostgres(db);
 /* --------------------------------------------------------------- fixtures -- */
 await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_lead','lead@x.io','Lee Lead','lead','LL')");
 await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_member','mem@x.io','Mia Member','member','MM')");
+// An admin is needed to exercise an authorised waiver.
+await db.run("INSERT INTO users (id,email,full_name,role,initials) VALUES ('u_admin','admin@x.io','Ada Admin','admin','AA')");
 await db.run("INSERT INTO clients (id,name,slug,initials) VALUES ('c1','Shipco','shipco','SC')");
 await db.run("INSERT INTO projects (id,key,name,client_id,status,edge_case_target) VALUES ('p1','SHP','Ship Project','c1','active',10)");
 await db.run("INSERT INTO project_members (project_id,user_id,access) VALUES ('p1','u_lead','admin')");
@@ -131,8 +133,10 @@ test('ship gate: an unrelated ticket does not count as edge-case coverage', asyn
   // 10 edge cases, but only 4 verified — coverage alone must not pass.
   for (let i = 0; i < 10; i += 1) {
     await db.run(
-      "INSERT INTO edge_cases (id,project_id,module,code,scenario,status) VALUES (?,?,?,?,?,?)",
-      [`ec${i}`, 'p1', 'checkout', `EC-${i}`, `scenario ${i}`, i < 4 ? 'verified' : 'catalogued'],
+      // The gate reads `execution`: four were genuinely run and passed, six were
+      // catalogued but never executed — which is not evidence of anything.
+      "INSERT INTO edge_cases (id,project_id,module,code,scenario,status,execution) VALUES (?,?,?,?,?,?,?)",
+      [`ec${i}`, 'p1', 'checkout', `EC-${i}`, `scenario ${i}`, 'covered', i < 4 ? 'passed' : 'not_executed'],
     );
   }
   const gate = await evaluateShipGate(db, 'r1');
@@ -167,7 +171,7 @@ test('ship gate: a turnover gate passed without evidence still blocks', async ()
 test('ship gate: a member cannot ship even when every requirement is met', async () => {
   // Bring the fixture to a genuinely green gate — including the 90%
   // verification threshold, which the previous test deliberately left short.
-  await db.run("UPDATE edge_cases SET status = 'verified' WHERE project_id = 'p1'");
+  await db.run("UPDATE edge_cases SET execution = 'passed', status = 'verified' WHERE project_id = 'p1'");
   await db.run("UPDATE releases SET demo_approved_at = ? WHERE id = 'r1'", [new Date().toISOString()]);
   const gate = await evaluateShipGate(db, 'r1');
   assert.equal(gate.shippable, true, 'fixture should now be shippable: ' + gate.blockedReason);
@@ -329,4 +333,47 @@ test('clocks: all ten board policies exist and are reachable in the dashboard', 
   assert.equal(health.statusCode, 200);
   const keys = new Set(health.json().data.clocks.map((c) => c.key));
   for (const p of policies) assert.ok(keys.has(p.key), `${p.key} missing from the SLA dashboard`);
+});
+
+test('ship gate: one unresolved edge-case failure blocks the release outright', async () => {
+  // Everything else is green; a single executed-and-failed case must still block.
+  // A pass rate cannot average away a known defect.
+  await db.run("UPDATE edge_cases SET execution = 'passed', status = 'verified' WHERE project_id = 'p1'");
+  await db.run("UPDATE edge_cases SET execution = 'failed' WHERE code = 'EC-7'");
+  const blocked = await evaluateShipGate(db, 'r1');
+  const check = blocked.checks.find((c) => c.key === 'edge_cases_no_failures');
+  assert.ok(check, 'the gate must include an explicit no-failures check');
+  assert.equal(check.passed, false, 'an unresolved failure blocks');
+  assert.equal(blocked.shippable, false, 'the release must not be shippable');
+  assert.match(blocked.blockedReason ?? '', /failed/i);
+
+  // A written waiver from an authorised user resolves it, and is itself recorded.
+  await db.run(
+    "UPDATE edge_cases SET execution = 'waived', waiver_reason = 'Known cosmetic defect, tracked as RLY-999, accepted for this release.', waived_by = 'u_admin' WHERE code = 'EC-7'",
+  );
+  const waived = await evaluateShipGate(db, 'r1');
+  assert.equal(waived.checks.find((c) => c.key === 'edge_cases_no_failures').passed, true, 'a written waiver from an admin resolves it');
+
+  // A waiver without a reason or author is not a resolution: the case leaves the
+  // failing set, but it also stops counting as resolved, so the 90% threshold
+  // must fail while the no-failures check still passes.
+  await db.run("UPDATE edge_cases SET waiver_reason = '', waived_by = NULL WHERE code = 'EC-7'");
+  const bare = await evaluateShipGate(db, 'r1');
+  assert.equal(bare.checks.find((c) => c.key === 'edge_cases_no_failures').passed, true, 'it is not failing any more');
+  // The waiver must not add to the resolved count: 9 genuinely passed, and the
+  // tenth contributes nothing because it carries neither reason nor author.
+  assert.equal(bare.checks.find((c) => c.key === 'edge_cases_verified').actual, 9, 'nine passed; the bare waiver adds nothing');
+  assert.ok(
+    !/1 waived/.test(bare.checks.find((c) => c.key === 'edge_cases_verified').detail),
+    'the detail must not claim the bare waiver resolved anything',
+  );
+});
+
+test('ship gate: catalogued but never executed is not verification', async () => {
+  await db.run("UPDATE edge_cases SET execution = 'not_executed', status = 'verified' WHERE project_id = 'p1'");
+  const gate = await evaluateShipGate(db, 'r1');
+  const check = gate.checks.find((c) => c.key === 'edge_cases_verified');
+  assert.equal(check.passed, false, 'a row marked verified in the catalogue but never run must not count');
+  assert.equal(check.actual, 0);
+  await db.run("UPDATE edge_cases SET execution = 'passed' WHERE project_id = 'p1'");
 });

@@ -108,3 +108,118 @@ The drill is deliberately strict:
 | B5 | Restore into a managed PostgreSQL (RDS/Cloud SQL) untested | Provider-specific extensions/roles may differ |
 
 B1 and B3 are the two that must be closed before any real client data is stored.
+
+---
+
+## 8. Operations: scheduling, retention, integrity, PITR
+
+`scripts/backup-ops.mjs` is the operational wrapper. It answers four questions
+that the drill alone cannot.
+
+### 8.1 What is actually possible here
+
+```bash
+npm run backup:status      # engine, whether a local backup is possible, what is missing
+npm run backup:pitr        # point-in-time recovery readiness, with the exact requirements
+npm run backup:retention   # apply the tiered retention policy
+npm run backup:verify-all  # re-verify the checksum of every archive on disk
+```
+
+Nothing in that output is assumed. `backup:status` reports `localBackupPossible`
+as a function of the binaries it actually found; `backup:pitr` reports one of
+`AVAILABLE`, `BLOCKED` or `NOT_APPLICABLE` and, when blocked, names the exact
+server setting required.
+
+### 8.2 Point-in-time recovery: the honest position
+
+PITR needs continuous archiving on the **server**: `archive_mode=on` (or an
+`archive_library`), `wal_level=replica` or better, retained WAL segments, and a
+`pg_basebackup` base. The embedded PostgreSQL used for local testing has none of
+these, and a managed provider only has them if the operator enabled them.
+
+Verified state in this environment:
+
+```
+$ npm run backup:pitr
+{
+  "available": false,
+  "verdict": "BLOCKED",
+  "reason": "Continuous archiving is not configured on this server, so recovery can only
+             restore the most recent logical backup. A point in time between backups cannot
+             be recovered.",
+  "requirements": [
+    "archive_mode=on (or archive_library set) on the PostgreSQL server",
+    "wal_level=replica or logical (currently unknown)",
+    "psql client to verify server settings"
+  ]
+}
+```
+
+On SQLite the answer is `NOT_APPLICABLE`: there is no WAL archive to replay, so
+the recovery point objective is the most recent verified backup.
+
+**Consequence for RPO.** Without PITR the RPO equals the backup interval. With
+daily backups that is up to 24 hours of loss; with the hourly schedule below it is
+up to one hour. This is stated rather than implied, because an RPO that is
+believed to be five minutes and is actually a day is worse than a known day.
+
+### 8.3 Retention
+
+Retention is tiered, not age-based. Deleting purely by age eventually removes
+every long-range restore point, leaving seven recent copies and nothing older.
+
+| Tier | Default | Env |
+| --- | --- | --- |
+| Always keep the newest N backups | 7 | `BACKUP_KEEP_DAILY` |
+| Newest of each of the last N weeks | 4 | `BACKUP_KEEP_WEEKLY` |
+| Newest of each of the last N months | 6 | `BACKUP_KEEP_MONTHLY` |
+| Hard ceiling on age | 200 days | `BACKUP_MAX_AGE_DAYS` |
+
+Verified: given 40 daily archives, retention keeps the newest 7 in full, plus the
+newest of each week and month beyond that, and removes the rest. The test asserts
+both halves — that long-range points survive and that noise is removed.
+
+### 8.4 Integrity: a manifest, not a timestamp
+
+A file that exists is not a backup. Every archive now carries a `.sha256`
+manifest recording the digest, byte size, creation time and engine. `verify-all`
+recomputes the digest and fails if it differs, so an archive altered — or
+truncated by a full disk — is detected rather than restored.
+
+Verified: flipping a single byte in an archive causes `verify-all` to report
+`checksum mismatch`; restoring the bytes restores the proof. An archive with no
+manifest is reported as *unprovable*, never as verified.
+
+### 8.5 Scheduling
+
+`.github/workflows/backup.yml` runs the full drill daily at 02:17 UTC against a
+fresh PostgreSQL 16: migrate, seed, PITR report, drill, integrity sweep over every
+archive, retention, then uploads the archives and manifests as an artifact with a
+14-day retention.
+
+It has no production credentials and no network path to a production database —
+by design. It proves the machinery, not the production backup.
+
+**Production scheduling is an operator responsibility** and requires, at minimum:
+
+- a scheduler (cron, systemd timer, Kubernetes CronJob, or the provider's own)
+  invoking `node scripts/backup.mjs backup` on the production connection string;
+- offsite replication: an archive on the same volume as the database is not a
+  backup (an operator copies to object storage with its own retention);
+- an alert on a failed run — `backup:run` exits non-zero, so any scheduler that
+  surfaces exit codes will escalate it;
+- a quarterly restore rehearsal against a scratch instance, recording the
+  elapsed time and comparing row counts, which is exactly what `drill` prints.
+
+### 8.6 Verified results in this environment
+
+| Engine | Command | Result |
+| --- | --- | --- |
+| SQLite | `backup.mjs drill` | 76 tables and 68 rows identical, integrity ok, 25 ms |
+| PostgreSQL 16 | `backup.mjs drill` | 76 tables identical, restore 1,473–1,559 ms |
+| PostgreSQL 16 | `backup-ops.mjs verify-all` | 1 archive, 1 checked, 0 failed |
+| both | `backup-ops.mjs pitr` | SQLite `NOT_APPLICABLE`, PostgreSQL `BLOCKED` — never `AVAILABLE` without server configuration |
+
+The row-for-row comparison replaced a table-count comparison during this work:
+counting tables passes on an archive of empty tables, which is not evidence that
+anything was restored.

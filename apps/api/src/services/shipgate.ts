@@ -53,13 +53,27 @@ export async function evaluateShipGate(db: Db, releaseId: string): Promise<ShipG
 
   /* ---------------------------------------------- 1+2 edge case coverage -- */
   const target = Number(project.edge_case_target ?? 3500);
-  const counts = await db.all<{ status: string; c: number }>(
-    'SELECT status, COUNT(*) AS c FROM edge_cases WHERE project_id = ? GROUP BY status',
+  // The gate reads *execution*, not catalogue status. A case that exists but was
+  // never run is not evidence, and an "executed" count that could be satisfied by
+  // writing rows would be worthless. Waived cases count as resolved only when a
+  // waiver reason and author are recorded.
+  const counts = await db.all<{ execution: string; c: number }>(
+    'SELECT execution, COUNT(*) AS c FROM edge_cases WHERE project_id = ? GROUP BY execution',
     [project.id],
   );
-  const byStatus = Object.fromEntries(counts.map((r) => [r.status, Number(r.c)]));
+  const byExecution = Object.fromEntries(counts.map((r) => [r.execution, Number(r.c)]));
   const catalogued = counts.reduce((sum, r) => sum + Number(r.c), 0);
-  const verified = Number(byStatus.verified ?? 0);
+  const passed = Number(byExecution.passed ?? 0);
+  const failed = Number(byExecution.failed ?? 0);
+  const waived = await db.get<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM edge_cases
+      WHERE project_id = ? AND execution = 'waived' AND waiver_reason <> '' AND waived_by IS NOT NULL`,
+    [project.id],
+  );
+  const waivedCount = Number(waived?.c ?? 0);
+  const verified = passed;
+  // An executed-and-passed case, or a properly waived one, resolves its slot.
+  const resolved = passed + waivedCount;
   const verifiedTarget = Math.floor(target * 0.9);
 
   checks.push({
@@ -73,10 +87,23 @@ export async function evaluateShipGate(db: Db, releaseId: string): Promise<ShipG
   checks.push({
     key: 'edge_cases_verified',
     label: 'Edge cases verified',
-    passed: verified >= verifiedTarget,
-    detail: `${verified} verified (need ${verifiedTarget}, 90% of target)`,
-    actual: verified,
+    // Qualified: a waiver only counts when it carries a reason and an author.
+    passed: resolved >= verifiedTarget,
+    detail: `${resolved} resolved by execution (${passed} passed + ${waivedCount} waived; need ${verifiedTarget}, 90% of target)`,
+    actual: resolved,
     required: verifiedTarget,
+  });
+  // A failed case blocks the gate outright. This is the fail-closed behaviour:
+  // an unresolved failure cannot be averaged away by a large passing majority.
+  checks.push({
+    key: 'edge_cases_no_failures',
+    label: 'No unresolved edge-case failures',
+    passed: failed === 0,
+    detail: failed === 0
+      ? 'every executed case passed or was waived with a reason'
+      : `${failed} executed case(s) failed — fix the defect or record a written waiver`,
+    actual: failed,
+    required: 0,
   });
 
   /* ------------------------------------------------------ 3 open defects -- */

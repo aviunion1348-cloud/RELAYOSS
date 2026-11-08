@@ -215,6 +215,34 @@ async function ensureDatabase() {
   console.log('  · provisioned for the drill');
 }
 
+/**
+ * Write a checksum manifest beside a verified archive.
+ *
+ * A drill that leaves an unprovable archive behind is half a drill: the next
+ * `verify-all` can only say "the file exists", not "the bytes are the bytes we
+ * proved". The manifest closes that gap.
+ */
+async function stampArchive(file) {
+  try {
+    const { createHash } = await import('node:crypto');
+    const bytes = fs.readFileSync(file);
+    fs.writeFileSync(
+      `${file}.sha256`,
+      JSON.stringify({
+        file: path.basename(file),
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        bytes: bytes.length,
+        verifiedAt: new Date().toISOString(),
+        engine: file.endsWith('.ndjson') ? 'postgres' : 'sqlite',
+        note: 'Written after a successful restore drill.',
+      }, null, 2),
+    );
+  } catch (err) {
+    // Never fail a drill because the manifest could not be written; say so loudly.
+    console.error(`  ! could not write a checksum manifest for ${file}: ${err.message}`);
+  }
+}
+
 async function drill() {
   const started = Date.now();
   await ensureDatabase();
@@ -224,19 +252,64 @@ async function drill() {
     const scratch = path.join(BACKUP_DIR, `restore-${stamp()}.sqlite`);
     fs.copyFileSync(file, scratch);
     const { DatabaseSync } = await import('node:sqlite');
-    const db = new DatabaseSync(scratch);
-    const integrity = Object.values(db.prepare('PRAGMA integrity_check').get() ?? {})[0];
-    const restoredTables = db.prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table'").get().c;
-    db.close();
 
-    const source = new DatabaseSync(DB_PATH);
-    const sourceTables = source.prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table'").get().c;
-    source.close();
-    fs.unlinkSync(scratch);
+    /**
+     * Comparing the number of tables is not evidence that a backup restores:
+     * every table can be present and empty. The drill compares the row count of
+     * every table, which is what "the data came back" actually means.
+     */
+    const countRows = (db) => {
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .all()
+        .map((t) => t.name);
+      const out = {};
+      for (const name of tables) {
+        // A malformed archive can contain a table whose rows will not read; that
+        // must surface as a mismatch, not an exception.
+        try {
+          out[name] = Number(db.prepare(`SELECT COUNT(*) AS c FROM "${name}"`).get().c);
+        } catch {
+          out[name] = -1;
+        }
+      }
+      return out;
+    };
 
+    const restored = new DatabaseSync(scratch);
+    const integrity = Object.values(restored.prepare('PRAGMA integrity_check').get() ?? {})[0];
+    const restoredCounts = countRows(restored);
+    restored.close();
+
+    let sourceCounts;
+    try {
+      const source = new DatabaseSync(DB_PATH);
+      sourceCounts = countRows(source);
+      source.close();
+    } catch (err) {
+      // An in-memory or absent source cannot be compared; say so and fail rather
+      // than reporting a green drill that compared nothing.
+      console.error(`✗ restore drill: the source database could not be read (${err.message})`);
+      fs.unlinkSync(scratch);
+      process.exit(1);
+    }
+
+    const mismatches = Object.keys(sourceCounts).filter((t) => sourceCounts[t] !== restoredCounts[t]);
+    const totalRows = Object.values(sourceCounts).reduce((a, b) => a + Math.max(0, b), 0);
     const elapsed = Date.now() - started;
-    console.log(`${integrity === 'ok' && restoredTables === sourceTables ? '✓' : '✗'} restore drill: ${restoredTables}/${sourceTables} tables, integrity ${integrity}, ${elapsed}ms`);
-    if (integrity !== 'ok' || restoredTables !== sourceTables) process.exit(1);
+    if (integrity !== 'ok' || mismatches.length) {
+      console.error(`✗ restore drill: ${mismatches.length} of ${Object.keys(sourceCounts).length} table(s) differ, integrity ${integrity}`);
+      for (const t of mismatches.slice(0, 10)) {
+        console.error(`  ${t}: source ${sourceCounts[t]} vs restored ${restoredCounts[t]}`);
+      }
+      fs.unlinkSync(scratch);
+      process.exit(1);
+    }
+    fs.unlinkSync(scratch);
+    console.log(
+      `✓ restore drill: ${Object.keys(sourceCounts).length} tables and ${totalRows} rows identical, integrity ${integrity}, ${elapsed}ms`,
+    );
+    await stampArchive(file);
     return;
   }
 
@@ -309,6 +382,7 @@ async function drill() {
     process.exit(1);
   }
   console.log(`✓ restore drill: ${Object.keys(sourceCounts).length} tables identical, restore ${restoreMs}ms, total ${elapsed}ms`);
+  await stampArchive(file);
 }
 
 switch (command) {
