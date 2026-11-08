@@ -172,7 +172,12 @@ async function main() {
        * resolves. This is the assertion the previous version of this suite could not
        * make, because `/` was a gate.
        */
-      const fresh = await browser.newContext({ storageState: undefined });
+      /*
+       * `baseURL` is required on every context, not just the default one: `goto('/')`
+       * with a relative path throws outright in a context that has none. `storageState:
+       * undefined` is what makes this cold — no cookies, no local storage.
+       */
+      const fresh = await browser.newContext({ baseURL: BASE, storageState: undefined });
       const coldPage = await fresh.newPage();
       const requested = [];
       coldPage.on('request', (r) => requested.push(r.url()));
@@ -195,8 +200,12 @@ async function main() {
       if (forbiddenAuth.length) throw new Error(`startup made an authentication request: ${forbiddenAuth[0]}`);
       if (!requested.some((u) => u.includes('/api/'))) throw new Error('the dashboard made no API request at all');
 
-      // It must be the real product, not a placeholder.
-      const expected = ['Dashboard', 'Projects', 'Clients'];
+      /*
+       * It must be the real product, not a placeholder. The words come from the
+       * sidebar's own labels — the home route is "Command Deck", not "Dashboard",
+       * which an earlier draft of this check got wrong.
+       */
+      const expected = ['Command Deck', 'Projects', 'Clients'];
       for (const word of expected) {
         if (!body.includes(word)) throw new Error(`the dashboard is missing its navigation ("${word}")`);
       }
@@ -205,7 +214,7 @@ async function main() {
     });
 
     await step('no cookie is set by any page load', async () => {
-      const fresh = await browser.newContext();
+      const fresh = await browser.newContext({ baseURL: BASE });
       const p2 = await fresh.newPage();
       await p2.goto('/', { waitUntil: 'networkidle' });
       const cookies = await fresh.cookies();
@@ -222,7 +231,9 @@ async function main() {
         const url = page.url();
         if (url.endsWith(stale)) throw new Error(`${stale} did not redirect (still at ${url})`);
         if (body.trim().length < 50) throw new Error(`${stale} rendered an empty page`);
-        if (!body.includes('Dashboard')) throw new Error(`${stale} did not land on the dashboard`);
+        // The home screen's nav label is "Command Deck"; its presence means the
+        // router fell through to the dashboard rather than rendering the stale path.
+        if (!body.includes('Command Deck')) throw new Error(`${stale} did not land on the dashboard`);
       }
     });
 
@@ -400,7 +411,7 @@ async function main() {
        * back to a sign-in screen.
        */
       const bad = [];
-      const fresh = await browser.newContext();
+      const fresh = await browser.newContext({ baseURL: BASE });
       const trackPage = await fresh.newPage();
       trackPage.on('response', (r) => {
         if (r.status() === 401 || r.status() === 403 || r.status() >= 500) {
