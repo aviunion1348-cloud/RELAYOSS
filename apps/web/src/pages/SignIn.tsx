@@ -160,9 +160,39 @@ export function SignIn({
               <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2.5">
                 <Icons.AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" />
                 <p className="text-[11.5px] leading-relaxed text-amber-200/90">
-                  <span className="font-medium">Local development authentication.</span> Sessions are real
-                  server-side sessions, but identity is chosen rather than proven. This mode is refused when
-                  <code className="mx-1 rounded bg-ink-800 px-1 py-0.5 text-[10.5px]">NODE_ENV=production</code>.
+                  <span className="font-medium">
+                    {info?.authMode === 'dev' ? 'Local development authentication.' : 'Sign-in mode not confirmed.'}
+                  </span>{' '}
+                  {/*
+                    Two different situations used to share one sentence, and it was wrong
+                    in the more common of the two.
+
+                    When `info` is present the server said `authMode: dev`, so the banner
+                    is a true description of what is in force. When `info` is null the
+                    server never answered — the probe failed — so the screen has no idea
+                    what mode is configured. Claiming "local development authentication"
+                    then was fiction: on the deployment that produced this screenshot the
+                    API had *refused* dev mode, which is a different fact entirely, and
+                    the banner sent the reader looking for an opt-in variable that was
+                    not the problem.
+
+                    Sessions are real server-side sessions in both cases, and identity
+                    really is chosen rather than proven — that part stays true because
+                    the picker can only exist in dev mode.
+                  */}
+                  {info?.authMode === 'dev' ? (
+                    <>
+                      Sessions are real server-side sessions, but identity is chosen rather than proven. This
+                      mode is refused when{' '}
+                      <code className="mx-1 rounded bg-ink-800 px-1 py-0.5 text-[10.5px]">NODE_ENV=production</code>.
+                    </>
+                  ) : (
+                    <>
+                      The API did not report its authentication mode, so this screen cannot promise which
+                      sign-in will work. If identities are listed below, development mode is active; if not,
+                      the deployment is refusing them and the message above says why.
+                    </>
+                  )}
                 </p>
               </div>
 

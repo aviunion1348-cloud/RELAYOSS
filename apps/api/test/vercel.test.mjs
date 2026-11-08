@@ -17,6 +17,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
 process.env.SESSION_SECRET ||= 'test-session-secret-do-not-use-in-production';
 process.env.RATE_LIMIT_AUTH ||= '1000';
@@ -592,6 +594,69 @@ test('vercel: a missing database is named as the cause of the auth refusal it pr
       /DATABASE_URL/,
       'the causal explanation must come first — it is the variable to fix',
     );
+  } finally {
+    process.env = saved;
+    entry.resetBootState();
+  }
+});
+
+/**
+ * No request may ever get a blank error.
+ *
+ * A production report showed `500` with a non-JSON body on every `/api` call. That
+ * signature is useless: a platform error page, a crashed function, an unhandled
+ * rejection and a proxy rejection all look identical, and the client cannot even
+ * tell whether the request reached the application.
+ *
+ * The handler therefore wraps the whole request path. This asserts the property
+ * rather than the mechanism — whatever goes wrong inside, the caller gets JSON that
+ * says where it went wrong.
+ */
+test('vercel: an in-process failure still answers with JSON, not a blank 500', async () => {
+  const saved = { ...process.env };
+  process.env.NODE_ENV = 'production';
+  process.env.SESSION_SECRET = 'a'.repeat(48);
+  // A bootable environment, so the failure below is unambiguously *in the request
+  // path* rather than a refusal to start. Without this the boot fails first and the
+  // test would silently assert the wrong thing.
+  process.env.ALLOW_DEV_AUTH_IN_PRODUCTION = '1';
+  process.env.DB_PATH = path.join(os.tmpdir(), `relay-handler-failure-${process.pid}.sqlite`);
+
+  const entry = await import('../src/entrypoints/vercel.ts');
+  entry.resetBootState();
+
+  try {
+    // A request object whose own `url` getter throws: the failure happens inside
+    // the handler, after the entry point has been reached, so it cannot be caught
+    // by anything upstream in the application.
+    const hostile = {
+      get url() { throw new TypeError('simulated defect reading the request'); },
+      method: 'GET',
+      headers: { host: 'relay.example' },
+    };
+
+    const headers = {};
+    const chunks = [];
+    const res = {
+      statusCode: 200,
+      headersSent: false,
+      writableEnded: false,
+      setHeader: (k, v) => { headers[k.toLowerCase()] = v; },
+      end: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
+      write: (c) => { if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))); },
+    };
+
+    await entry.default(hostile, res);
+
+    const body = Buffer.concat(chunks).toString();
+    assert.ok(body.length > 0, 'a failure must never answer with an empty body');
+    assert.match(String(headers['content-type']), /application\/json/i, 'the error must be JSON');
+
+    const parsed = JSON.parse(body);
+    assert.equal(parsed.error.code, 'handler_failed');
+    assert.equal(parsed.error.stage, 'request');
+    assert.match(parsed.error.detail, /simulated defect/, 'the cause must survive to the client');
+    assert.ok(Array.isArray(parsed.error.remedy) && parsed.error.remedy.length > 0);
   } finally {
     process.env = saved;
     entry.resetBootState();
