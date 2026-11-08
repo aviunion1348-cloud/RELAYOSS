@@ -72,9 +72,14 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
      *
      * Without a PostgreSQL instance the API falls back to SQLite, and on Vercel
      * that file starts empty on every cold start. An empty database is not merely
-     * sparse: there is no user to sign in as, so `AUTH_MODE=auto` finds no
-     * provisioned credential, resolves to `dev`, and a production deployment
-     * refuses to boot. The result was a sign-in screen that could never work.
+     * sparse: `users` is a foreign key target for every attribution column, so
+     * there is nobody to attribute a request to and every write would fail.
+     *
+     * The failure this replaced was worse and less obvious: the same empty database
+     * used to resolve no credential, fall back to `dev` mode, and be refused at boot
+     * in production — so the deployment answered nothing, and the frontend showed a
+     * sign-in screen that could never work. Seeding is what makes the no-database
+     * configuration genuinely usable rather than nominally supported.
      *
      * Seeding is gated three ways so it cannot touch real data:
      *
@@ -128,18 +133,6 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     bodyLimit: 2 * 1024 * 1024,
   });
 
-  /**
-   * Resolve the effective authentication mode before any route exists.
-   *
-   * `AUTH_MODE=auto` (the default) means: use the shared login if a credential has
-   * been provisioned, otherwise fall back to whatever the environment says. This
-   * is what makes the repository work unchanged in three settings — a developer
-   * laptop with demo identities, a deployment with one shared password, and a
-   * deployment behind an IdP — without anyone editing source.
-   *
-   * A provisioned credential wins over `dev` because leaving demo identities
-   * reachable on a deployment that has a real password would be a bypass.
-   */
   /*
    * No authentication mode is resolved, and nothing is provisioned.
    *
