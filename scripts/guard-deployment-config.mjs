@@ -245,6 +245,44 @@ for (const dir of scan) {
   walk(dir);
 }
 
+/* ------------------------------------------------------------------------
+ * The deployment guide must not drift from the code it describes.
+ *
+ * Both claims checked below were true when written and silently falsified later:
+ * the guide said "migrations applied: 14" after migration 0015 was added, and the
+ * node-version line is the kind of value that gets updated in package.json and
+ * forgotten in prose. A reader following Step 1 sees a count that does not match
+ * and reasonably concludes the migration failed. Neither number is a judgement
+ * call, so both can be derived rather than trusted.
+ * --------------------------------------------------------------------- */
+/*
+ * `exists()` joins ROOT onto its argument, so this must be a *relative* path.
+ * Passing the absolute one made `exists()` false, and the whole check was skipped
+ * without a word — a guard that fails open on its own path bug is worse than no
+ * guard, because the green tick is indistinguishable from a pass. Absence of the
+ * guide is therefore a failure, not a skip.
+ */
+const DEPLOY_DOC = 'docs/DEPLOYMENT.md';
+if (!exists(DEPLOY_DOC)) {
+  fail(`${DEPLOY_DOC} is missing — the deployment guide is a deliverable, not an optional extra`);
+} else {
+  const doc = fs.readFileSync(path.join(ROOT, DEPLOY_DOC), 'utf8');
+  const migrationCount = fs
+    .readdirSync(path.join(ROOT, 'db', 'migrations'))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f)).length;
+  const claimed = doc.match(/migrations applied: (\d+)/);
+  if (claimed && Number(claimed[1]) !== migrationCount) {
+    fail(
+      `docs/DEPLOYMENT.md claims "migrations applied: ${claimed[1]}" but db/migrations holds ${migrationCount} — ` +
+        'a reader following Step 1 would think the migration failed',
+    );
+  } else if (claimed) {
+    notes.push(`deployment guide migration count matches db/migrations (${migrationCount})`);
+  } else {
+    fail('docs/DEPLOYMENT.md no longer states the expected migration count — Step 1 needs a verifiable expectation');
+  }
+}
+
 // ------------------------------------------------------------------- report
 for (const n of notes) console.log(`· ${n}`);
 if (failures.length) {
