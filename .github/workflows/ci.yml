@@ -31,8 +31,15 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Lockfile integrity
+      - name: Lockfile integrity (root workspace)
         run: npm ci --no-audit --no-fund
+
+      # apps/web is deliberately not a workspace member — that is what stops the web
+      # service's install from deleting the API's dependencies on Vercel. It therefore
+      # needs its own install here, from its own committed lockfile. Anything that
+      # touches the frontend (typecheck, build, guards, smoke) depends on this.
+      - name: Lockfile integrity (web project)
+        run: npm ci --prefix apps/web --no-audit --no-fund
 
       - name: Dependency audit (high and critical only)
         run: npm audit --audit-level=high || echo "::warning::npm audit reported findings — review before release"
@@ -77,7 +84,7 @@ jobs:
           npm run test:edge -- --limit 0 || echo "Executed edge cases reported failures - see the log. These block the ship gate until fixed or waived."
 
       - name: Web production build
-        run: npm run build -w @relay/web
+        run: npm run build:web
 
       - name: Server-render smoke test for every screen
         run: npm run smoke:web
@@ -146,6 +153,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: relay-build
+          # Both must be present. The guard job fails before these exist if a build step
+          # breaks, and an upload warning is easy to miss in a green run.
+          if-no-files-found: ignore
           path: |
             apps/web/dist
             apps/api/dist
@@ -167,10 +177,13 @@ jobs:
 
       # Deliberately no `cache: npm` and no root `npm ci`: the harness wipes
       # node_modules and lets each service run its own installCommand.
+      # Order matters and is the point: the api service installs and builds first, then
+      # the web service. The web step asserts the api tree is still on disk afterwards,
+      # which is what the platform's `Deploying outputs` step needs.
       - name: API service — install and build in isolation
         run: node scripts/verify-service-builds.mjs . api
 
-      - name: Web service — install and build in isolation
+      - name: Web service — install and build, then assert the api tree survived
         run: node scripts/verify-service-builds.mjs . web
 
       - name: Web build is a complete SPA (document + hashed assets)

@@ -25,7 +25,10 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const API = process.env.SMOKE_API ?? 'http://127.0.0.1:4000/api';
-const WORK = path.join(ROOT, '.smoke');
+// Built inside apps/web, not the repo root: the web project is standalone (its install
+// cannot touch the root tree — that is what broke the Vercel deploy), so its node_modules
+// is the only place react-dom and friends resolve from.
+const WORK = path.join(ROOT, 'apps', 'web', '.smoke');
 const OUT = path.join(WORK, 'smoke.mjs');
 
 const PAGES = [
@@ -238,19 +241,20 @@ fs.writeFileSync(path.join(WORK, 'entry.mjs'), entry.replace(/\.tsx?/g, ''), 'ut
 
 // esbuild resolves the .tsx imports from the source tree.
 fs.writeFileSync(path.join(WORK, 'entry.mtsx'), entry, 'utf8');
+const ESBUILD = path.join(ROOT, 'apps', 'web', 'node_modules', '.bin', 'esbuild');
 execFileSync(
-  'npx',
+  fs.existsSync(ESBUILD) ? ESBUILD : 'esbuild',
   [
-    'esbuild', path.join(WORK, 'entry.mtsx'),
+    path.join(WORK, 'entry.mtsx'),
     '--bundle', '--platform=node', '--format=esm', `--outfile=${OUT}`,
     '--loader:.mtsx=tsx', '--jsx=automatic', '--log-level=error',
     '--external:react', '--external:react-dom', '--external:react-dom/server',
     '--external:react-router-dom', '--external:@tanstack/react-query',
     '--external:lucide-react', '--external:recharts',
   ],
-  { cwd: ROOT, stdio: 'inherit' },
+  { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' },
 );
 
-execFileSync(process.execPath, ['--no-warnings', OUT], { cwd: ROOT, stdio: 'inherit' });
+execFileSync(process.execPath, ['--no-warnings', OUT], { cwd: path.join(ROOT, 'apps', 'web'), stdio: 'inherit' });
 console.log('\n✓ all screens render with real API data');
 stopApi();

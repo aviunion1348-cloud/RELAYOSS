@@ -261,6 +261,48 @@ if (cfg) {
     }
 
     /*
+     * No shared npm workspace between the two services.
+     *
+     * This is the defect that produced
+     *   ENOENT: no such file or directory, lstat '/vercel/path0/node_modules/fastify/package.json'
+     * at `Deploying outputs`, after both builds had already succeeded.
+     *
+     * `npm ci` deletes `node_modules` at the project root *before* installing. For a
+     * workspace member, "project root" is the workspace root — so when the web service
+     * ran its install from `apps/web`, npm walked up and replaced the repo-root
+     * `node_modules`, deleting `fastify` out from under the API function that had just
+     * been compiled against it. Narrowing the command does not help: any `npm ci` from a
+     * workspace member wipes the shared tree (verified with --workspace too).
+     *
+     * So `apps/web` must not be a workspace member and must not sit inside one for npm's
+     * purposes: it needs its own lockfile and no `workspaces` key in its manifest.
+     */
+    {
+      const rootPkg = JSON.parse(read('package.json'));
+      const members = (rootPkg.workspaces ?? []).map((w) => String(w).replace(/\/+$/, ''));
+      if (members.some((w) => /^apps\/web$|^apps\/web\//.test(w))) {
+        fail(
+          'apps/web is an npm workspace member. Its install then resolves the workspace root ' +
+            'and deletes the root node_modules, which removes the API dependencies the api ' +
+            'service just built against (ENOENT fastify/package.json at Deploying outputs)',
+        );
+      }
+      const webPkg = JSON.parse(read('apps/web/package.json'));
+      if (webPkg.workspaces) {
+        fail('apps/web/package.json declares "workspaces"; the web service must install as a standalone project');
+      }
+      if (!exists('apps/web/package-lock.json')) {
+        fail(
+          'apps/web has no package-lock.json. Without its own lockfile npm resolves the repo-root ' +
+            'lockfile, treats the directory as part of the workspace, and wipes the shared tree',
+        );
+      }
+      if (String(services.web?.root ?? '').replace(/\/+$/, '') !== 'apps/web') {
+        fail(`the web service root is "${services.web?.root}", expected apps/web`);
+      }
+    }
+
+    /*
      * The .npmrc fallback.
      *
      * The service installCommands are the primary fix, but the failing deployment ran
