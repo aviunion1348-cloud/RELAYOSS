@@ -357,3 +357,29 @@ test('lifecycle: evidence is appended, never overwritten, and needs a label', as
   const rows = await db.all("SELECT label FROM lifecycle_evidence WHERE client_id='c1' AND stage_key='development' ORDER BY created_at");
   assert.equal(rows.length, 2, 'evidence must accumulate, not replace');
 });
+
+/* ==================================================== owner authority ==== */
+
+test('lifecycle: a stage owned by admin cannot be decided by a lead or member', async () => {
+  // `owner_role` was seeded and displayed but never enforced, so the only
+  // authority check on a transition was the approver, and only for `approved`.
+  // `release_ship` is owned and approved by admin — a different admin-owned stage
+  // from the rejection test above, which leaves `commercial_agreement` closed.
+  // Reaching `awaiting_approval` through the API requires every earlier stage to
+  // be settled, which is a test of the prerequisite chain rather than of owner
+  // authority; the state is staged directly so the authority rule is what fails.
+  await db.run(
+    "UPDATE lifecycle_instances SET state = 'awaiting_approval' WHERE client_id = 'c1' AND stage_key = 'release_ship'",
+  );
+
+  for (const [who, session] of [['lead', lead], ['member', member]]) {
+    const decided = await post(session, '/api/clients/c1/lifecycle/release_ship/transitions', {
+      to: 'rejected', reason: 'Not my call to make.',
+    });
+    assert.equal(decided.statusCode, 403, `a ${who} decided an admin-owned stage: ${decided.body}`);
+  }
+  const byAdmin = await post(admin, '/api/clients/c1/lifecycle/release_ship/transitions', {
+    to: 'rejected', reason: 'Ship gate failed: two release blockers still open.',
+  });
+  assert.equal(byAdmin.statusCode, 200, byAdmin.body);
+});

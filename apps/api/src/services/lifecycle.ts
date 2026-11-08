@@ -219,6 +219,56 @@ export async function transition(db: Db, input: TransitionInput): Promise<Transi
         throw forbidden(`"${stage.name}" requires a lead approver.`);
       }
     }
+    /*
+     * The owner gate.
+     *
+     * `owner_role` was stored, seeded and displayed but never enforced: only the
+     * *approver* was checked, and only for `approved`. So a plain member could
+     * drive any stage that had a lead approver to `done` or `awaiting_approval`
+     * without ever being the stage owner — the approval step downstream still
+     * held, but the "who may move this" rule the matrix describes did not exist
+     * server-side. §4 asks for every transition to be enforced, not just the
+     * gate at the end of it.
+     *
+     * Admins are exempt because they are the authority of last resort and the
+     * ledger records who acted; clients are exempt here because the route already
+     * restricts them to recording an approval, which is checked above.
+     */
+    /*
+     * The owner gate.
+     *
+     * `owner_role` was seeded, stored, returned by the catalogue endpoint and
+     * rendered in the UI, but nothing enforced it: only the *approver* was
+     * checked, and only when the target state was `approved`. A plain member
+     * could therefore drive any stage that merely had a lead approver all the way
+     * to `done` — the gate at the end of the stage still held, but the "who moves
+     * this" rule the matrix advertises did not exist on the server. §4 asks for
+     * every transition to be enforced, not only the last one.
+     *
+     * The ladder is admin ⊇ lead ⊇ member, so supervision works and escalation
+     * does not: a lead may move a member-owned stage, a member may not move a
+     * lead- or admin-owned one. A client identity never reaches here — the route
+     * has already reduced it to recording an approval decision.
+     */
+    const OWNER_RANK: Record<string, number> = { member: 1, lead: 2, admin: 3 };
+    const actorRank = OWNER_RANK[input.actorRole] ?? 0;
+    const ownerRank = OWNER_RANK[stage.owner_role] ?? 0;
+    /*
+     * Scoped to *decisions*, deliberately.
+     *
+     * Preparation of a stage is not settlement of it: a lead assembles the
+     * commercial pack and submits it for approval, and an admin decides. That
+     * separation is the point of the approver column, and blocking preparation
+     * would have made the flow unusable rather than safer. `rejected` is a
+     * decision, so the owner — not merely anyone senior enough to load the
+     * stage — must be the one to refuse it.
+     */
+    const isDecision = input.to === 'approved' || input.to === 'rejected';
+    if (isDecision && input.actorRole !== 'client' && actorRank < ownerRank) {
+      throw forbidden(
+        `"${stage.name}" is owned by the ${stage.owner_role}; a ${input.actorRole} cannot decide it.`,
+      );
+    }
     if (input.to === 'skipped') {
       if (!['admin', 'lead'].includes(input.actorRole)) throw forbidden('Only an admin or lead can skip a lifecycle stage.');
       if (!input.reason?.trim()) throw badRequest('Skipping a stage requires a written reason.');
