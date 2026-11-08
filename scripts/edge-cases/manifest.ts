@@ -307,7 +307,18 @@ export interface Fixtures {
  * 403; everything else they can see is 200, and every write is a capability
  * denial rather than a tenancy one.
  */
-const ADMIN_ONLY = ['/api/audit', '/api/users', '/api/metrics'];
+/*
+ * Surfaces a plain member must be refused.
+ *
+ * `/api/users` was in this list and should not have been: the user directory is
+ * legitimately readable by every authenticated identity — assignee pickers, avatars
+ * and workload all need it — and the sensitive part of it is the money fields, which
+ * are withheld per role inside the handler (see `directoryUser` in routes/index.ts).
+ * Keeping the route here would have asserted a 403 that the product deliberately does
+ * not return, and the "failure" would have hidden a real question: is the directory
+ * over-exposed? It was, for rates; the directory itself is not.
+ */
+const ADMIN_ONLY = ['/api/audit', '/api/metrics'];
 const expectedMemberStatus = (route: { method: Probe['method']; path: string }) => {
   const adminOnly = ADMIN_ONLY.some((p) => route.path.startsWith(p));
   if (route.method === 'GET') return adminOnly ? 403 : 200;

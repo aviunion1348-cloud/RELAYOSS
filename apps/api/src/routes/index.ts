@@ -212,8 +212,34 @@ export async function registerRoutes(
   });
 
   /* -------------------------------------------------------------- meta --- */
-  app.get('/api/meta', async () => {
-    const users = (await db().all('SELECT * FROM users WHERE is_active = 1 ORDER BY full_name')).map(mapUser);
+  /**
+   * Money fields are not directory data.
+   *
+   * `GET /api/users` and `/api/meta` both returned the full `mapUser` shape to every
+   * authenticated identity — including `costRateCents` and `billRateCents`, which are
+   * internal staff economics. A client-portal user could read the margin on their own
+   * project by fetching the directory. The directory itself is legitimately shared
+   * (assignee pickers, avatars, workload); the rates are not.
+   *
+   * Rather than hide the field per role in each call site — which is how one of the
+   * two routes ends up forgetting — the shape is chosen once by `directoryUser`, and
+   * both routes go through it. Rates are returned only to an admin or a lead, matching
+   * the capability that already governs the workload and cost surfaces.
+   */
+  const directoryUser = (row: Record<string, any>, identity: Identity) => {
+    const user = mapUser(row);
+    if (identity.role === 'admin' || identity.role === 'lead') return user;
+    const { costRateCents, billRateCents, ...rest } = user;
+    void costRateCents;
+    void billRateCents;
+    return rest;
+  };
+
+  app.get('/api/meta', async (req) => {
+    const viewer = await currentIdentity(req);
+    const users = (await db().all('SELECT * FROM users WHERE is_active = 1 ORDER BY full_name')).map(
+      (row) => directoryUser(row, viewer),
+    );
     const labels = await db().all('SELECT id,name,color,description FROM labels ORDER BY name');
     const clients = (await db().all('SELECT * FROM clients ORDER BY name')).map(mapClient);
     const projects = (await db().all<Record<string, any>>(
@@ -233,7 +259,7 @@ export async function registerRoutes(
       clients,
       projects,
       boards: boards.map((b) => ({ id: b.id, name: b.name, kind: b.kind, projectId: b.project_id, projectKey: b.project_key, projectName: b.project_name, color: b.client_color })),
-      currentUser: users.find((u) => u.id === config.demoUserId) ?? users[0],
+      currentUser: users.find((u) => u.id === viewer.userId) ?? users[0],
       priorities: ['urgent', 'high', 'medium', 'low'],
       types: ['feature', 'bug', 'research', 'design', 'ops', 'meeting', 'content'],
       acceptanceLadder: ACCEPTANCE_LADDER,
@@ -241,7 +267,15 @@ export async function registerRoutes(
     });
   });
 
-  app.get('/api/users', async () => ok((await db().all('SELECT * FROM users ORDER BY full_name')).map(mapUser)));
+  /**
+   * The user directory. Reachable by any authenticated identity because assignee
+   * pickers and avatars need it; money fields are withheld below admin/lead.
+   */
+  app.get('/api/users', async (req) => {
+    const viewer = await currentIdentity(req);
+    const rows = await db().all<Record<string, any>>('SELECT * FROM users ORDER BY full_name');
+    return ok(rows.map((row) => directoryUser(row, viewer)));
+  });
 
   /* -------------------------------------------------------------- tasks -- */
   app.get('/api/tasks', async (req) => {

@@ -402,3 +402,41 @@ test('idor: a QA report cannot be written by a foreign identity, and a bad statu
   });
   assert.equal(ok.statusCode, 200);
 });
+
+/* ============================ money fields are not directory data =========
+ *
+ * `GET /api/users` and `/api/meta` returned the full user shape — including
+ * `costRateCents` and `billRateCents` — to every authenticated identity. A
+ * client-portal user could read internal staff economics by fetching the directory.
+ * The directory itself is legitimately shared; the rates are not.
+ */
+test('exposure: staff rates are withheld from a client but kept for staff', async () => {
+  await db.run("UPDATE users SET cost_rate_cents = 4200, bill_rate_cents = 14500 WHERE id = 'u_admin'");
+
+  const asClient = await get(clientB, '/api/users');
+  assert.equal(asClient.status, 200, 'the directory stays reachable — assignee pickers need it');
+  for (const row of asClient.body.data) {
+    assert.equal(row.costRateCents, undefined, 'a client read an internal cost rate');
+    assert.equal(row.billRateCents, undefined, 'a client read an internal bill rate');
+  }
+  // The same must hold on /api/meta, which embeds the directory.
+  const meta = await get(clientB, '/api/meta');
+  for (const row of meta.body.data.users) {
+    assert.equal(row.costRateCents, undefined, '/api/meta leaked a cost rate to a client');
+    assert.equal(row.billRateCents, undefined, '/api/meta leaked a bill rate to a client');
+  }
+
+  // Staff still see them: withholding from everyone would break the workload screen.
+  const asLead = await get(lead, '/api/users');
+  const admin = asLead.body.data.find((u) => u.id === 'u_admin');
+  assert.equal(admin.costRateCents, 4200, 'a lead lost access to cost rates');
+  assert.equal(admin.billRateCents, 14500, 'a lead lost access to bill rates');
+
+  // And the fields are useful, not merely absent: a member must not see them.
+  const asMember = await get(member, '/api/users');
+  assert.equal(
+    asMember.body.data.find((u) => u.id === 'u_admin')?.costRateCents,
+    undefined,
+    'a plain member read a cost rate',
+  );
+});
