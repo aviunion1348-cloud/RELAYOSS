@@ -10,9 +10,15 @@
  * data. It is not a substitute for a browser; docs/REQUIREMENT-TRACEABILITY.md
  * records exactly what remains unproven because of it.
  *
- *   node scripts/smoke-web.mjs            (expects the API on :4000)
+ *   node scripts/smoke-web.mjs            # boots its own API if none is listening
+ *   SMOKE_API=http://host:port/api …      # or point at an existing instance
+ *
+ * Self-booting matters: CI has no server running, and a smoke test that
+ * silently depends on someone having started one is a smoke test that fails
+ * for the wrong reason (it did exactly that on the first CI run).
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,6 +104,93 @@ for (const [name, , route, endpoints] of pages) {
 process.exit(failed ? 1 : 0);
 `;
 
+
+/* --------------------------------------------------------- API lifecycle -- */
+const PORT = Number(new URL(API).port || 4000);
+const needsBoot = !process.env.SMOKE_API;
+
+function portOpen(port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port }, () => {
+      socket.end();
+      resolve(true);
+    });
+    socket.on('error', () => resolve(false));
+    socket.setTimeout(800, () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
+async function waitForApi(deadlineMs) {
+  const start = Date.now();
+  while (Date.now() - start < deadlineMs) {
+    if (await portOpen(PORT)) {
+      try {
+        const res = await fetch(`${API}/live`);
+        if (res.ok) return true;
+      } catch { /* not up yet */ }
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return false;
+}
+
+let api = null;
+if (await portOpen(PORT)) {
+  console.log(`· using the API already listening on :${PORT}`);
+} else if (needsBoot) {
+  // A clean checkout has no database: migrate + seed so every screen has real
+  // content to render, rather than a wall of empty states that would pass while
+  // proving nothing.
+  const dbFile = process.env.DB_PATH ?? path.join(ROOT, 'data', 'relay.sqlite');
+  if (!fs.existsSync(dbFile)) {
+    console.log('· no database — migrating and seeding for the smoke run');
+    execFileSync(process.execPath, ['--no-warnings', 'apps/api/src/db/cli.ts', 'migrate'], {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: { ...process.env, DB_PATH: dbFile },
+    });
+    execFileSync(process.execPath, ['--no-warnings', 'apps/api/src/db/cli.ts', 'seed'], {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: { ...process.env, DB_PATH: dbFile },
+    });
+  }
+  console.log(`· booting the API on :${PORT}`);
+  api = spawn(process.execPath, ['--no-warnings', 'apps/api/src/index.ts'], {
+    cwd: ROOT,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      HOST: '0.0.0.0',
+      DB_PATH: dbFile,
+      AUTH_MODE: 'dev',
+      SESSION_SECRET: process.env.SESSION_SECRET ?? 'smoke-run-secret-not-a-deployment',
+      SKIP_MIGRATE: '1',
+    },
+  });
+  if (!(await waitForApi(45_000))) {
+    api.kill('SIGTERM');
+    console.error(`✗ the API did not become ready on :${PORT}`);
+    process.exit(1);
+  }
+} else {
+  console.error(`✗ SMOKE_API is set but nothing is listening on :${PORT}`);
+  process.exit(1);
+}
+
+const stopApi = () => {
+  if (api && !api.killed) api.kill('SIGTERM');
+};
+process.on('exit', stopApi);
+process.on('SIGINT', () => {
+  stopApi();
+  process.exit(130);
+});
+
 fs.mkdirSync(WORK, { recursive: true });
 fs.writeFileSync(path.join(WORK, 'entry.mjs'), entry.replace(/\.tsx?/g, ''), 'utf8');
 
@@ -118,3 +211,4 @@ execFileSync(
 
 execFileSync(process.execPath, ['--no-warnings', OUT], { cwd: ROOT, stdio: 'inherit' });
 console.log('\n✓ all screens render with real API data');
+stopApi();
