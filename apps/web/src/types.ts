@@ -260,6 +260,27 @@ export interface Release {
   deployTarget: string;
   rollbackPlan: string;
   demoFeedback: string;
+  /** Server-computed ship gate. Present so the UI can never show a green
+   *  light the server would refuse. */
+  gate?: ShipGate;
+  acknowledgements?: Array<{ signal: string; state: string; source: string; receivedAt: string | null }>;
+}
+
+export interface ShipGateCheck {
+  key: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+  actual?: number;
+  required?: number;
+}
+
+export interface ShipGate {
+  releaseId: string;
+  shippable: boolean;
+  checks: ShipGateCheck[];
+  blockedReason: string;
+  evaluatedAt: string;
 }
 
 export interface ProjectDetail extends ProjectSummary {

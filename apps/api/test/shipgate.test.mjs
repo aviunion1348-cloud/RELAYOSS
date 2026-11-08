@@ -207,6 +207,21 @@ test('ship gate: with gate green and both acks received, the release ships', asy
   assert.equal(body.release.ship_approved_by, 'u_lead');
 });
 
+test('ship gate: a refused ship attempt is audited, not silently dropped', async () => {
+  await db.run("INSERT INTO releases (id,project_id,version,name,status) VALUES ('r4','p1','v2.0.0','Audited','in_qa')");
+  const res = await req('PATCH', '/api/releases/r4', lead, { status: 'shipped' });
+  assert.equal(res.statusCode, 400);
+  const rows = await db.all("SELECT action, after_json FROM audit_log WHERE entity_id = 'r4' AND action = 'release.ship_refused'");
+  assert.equal(rows.length, 1, 'the refusal must be recorded');
+  const recorded = JSON.parse(rows[0].after_json).blocked;
+  assert.ok(recorded.length > 0, 'the audit row must name what blocked it');
+  // The fixture is partly green by this point, so assert against the actual
+  // verdict rather than a hard-coded key.
+  const gate = await evaluateShipGate(db, 'r4');
+  const actual = gate.checks.filter((c) => !c.passed).map((c) => c.key).sort();
+  assert.deepEqual(recorded.map(([key]) => key).sort(), actual);
+});
+
 test('ship gate: the lifecycle does not move backwards', async () => {
   // Uses its own release so the assertion does not depend on a prior test
   // having reached `shipped`.

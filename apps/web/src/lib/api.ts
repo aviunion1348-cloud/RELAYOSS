@@ -1,7 +1,7 @@
 /** Typed API client. Single origin: the browser always calls /api on itself. */
 import type {
   AcceptanceStep, Activity, ClientSummary, DashboardData, Deal, Doc, Issue, Meta, PlanResult,
-  Partner, PipelineData, ProjectDetail, ProjectSummary, QAReport, Release, ClockHealth, LiveTimer, Task, TaskDetail, User,
+  Partner, PipelineData, ProjectDetail, ProjectSummary, QAReport, Release, ShipGate, ClockHealth, LiveTimer, Task, TaskDetail, User,
 } from '../types';
 
 const BASE = '/api';
@@ -157,6 +157,7 @@ export const api = {
   createQA: (payload: Record<string, unknown>) => request<{ id: string }>('/qa', { method: 'POST', body: JSON.stringify(payload) }),
   updateQA: (id: string, patch: Record<string, unknown>) => request(`/qa/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   releases: () => request<Release[]>('/releases'),
+  releaseGate: (id: string) => request<ShipGate>(`/releases/${id}/gate`),
   insights: () => request<{ insights: Issue[]; generatedAt: string }>('/insights'),
   activity: (limit = 30) => request<Activity[]>(`/activity?limit=${limit}`),
   notifications: () => request<Array<{ id: string; kind: string; title: string; body: string; readAt: string | null; createdAt: string }>>('/notifications'),

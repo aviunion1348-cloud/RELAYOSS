@@ -121,22 +121,29 @@ export async function evaluateShipGate(db: Db, releaseId: string): Promise<ShipG
   // A project-scope gate is outstanding when it has not been settled, or when it
   // was settled without the evidence that makes it meaningful. Waivers are
   // recorded with the waiving lead in `checked_by`, so they are attributable.
-  const projectChecks = await db.all<{ name: string; status: string; evidence: string; checked_by: string | null }>(
-    `SELECT g.name, c.status, c.evidence, c.checked_by
+  const projectChecks = await db.all<{ name: string; phase_name: string; status: string; evidence: string; checked_by: string | null }>(
+    `SELECT g.name, ph.name AS phase_name, c.status, c.evidence, c.checked_by
        FROM turnover_checks c
        JOIN turnover_gates g ON g.id = c.gate_id
        JOIN project_phases pp ON pp.id = c.project_phase_id
+       JOIN phases ph ON ph.id = pp.phase_id
       WHERE pp.project_id = ? AND g.scope != 'task' AND g.required = 1`,
     [project.id],
   );
   const outstanding = projectChecks.filter(
     (c) => !['pass', 'waived'].includes(c.status) || (c.status === 'pass' && !String(c.evidence ?? '').trim()),
   );
+  // A gate instantiated on several phases is still one requirement. Name it
+  // once, with the phase it belongs to, so the refusal reads as a list of
+  // outstanding obligations rather than a repeated wall of text.
+  const outstandingLabels = [...new Set(outstanding.map((g) => `${g.name} (${g.phase_name})`))];
   checks.push({
     key: 'project_turnover_gates',
     label: 'Required project turnover gates passed',
     passed: outstanding.length === 0,
-    detail: outstanding.length === 0 ? 'all required gates settled' : outstanding.map((g) => g.name).join(', '),
+    detail: outstanding.length === 0
+      ? `all ${projectChecks.length} required gate instances settled`
+      : `${outstandingLabels.join(', ')}`,
     actual: outstanding.length,
     required: 0,
   });
@@ -177,6 +184,13 @@ export async function evaluateShipGate(db: Db, releaseId: string): Promise<ShipG
 export async function markShipped(db: Db, releaseId: string, actorId: string | null): Promise<{ release: any; gate: ShipGateResult }> {
   const gate = await evaluateShipGate(db, releaseId);
   if (!gate.shippable) {
+    // A refused ship is a governed action that did not happen. Recording it
+    // means an auditor can see the attempt and the exact reason it was denied,
+    // not just the absence of a ship.
+    await db.run('INSERT INTO audit_log (actor_id,action,entity_type,entity_id,after_json) VALUES (?,?,?,?,?)', [
+      actorId, 'release.ship_refused', 'release', releaseId,
+      JSON.stringify({ blocked: gate.checks.filter((c) => !c.passed).map((c) => [c.key, c.detail]) }),
+    ]);
     throw badRequest(`Ship refused — outstanding requirements. ${gate.blockedReason}`);
   }
   const acks = await db.all<{ signal: string; state: string }>(
@@ -186,6 +200,9 @@ export async function markShipped(db: Db, releaseId: string, actorId: string | n
   const required = ['deployment_ack', 'post_ship_verification'];
   const missing = required.filter((sig) => !acks.some((a) => a.signal === sig && a.state === 'received'));
   if (missing.length) {
+    await db.run('INSERT INTO audit_log (actor_id,action,entity_type,entity_id,after_json) VALUES (?,?,?,?,?)', [
+      actorId, 'release.ship_refused', 'release', releaseId, JSON.stringify({ missingAcknowledgements: missing }),
+    ]);
     throw badRequest(`Ship refused — no ${missing.join(' and ')} recorded. A release is not shipped until the deployment is acknowledged.`);
   }
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');

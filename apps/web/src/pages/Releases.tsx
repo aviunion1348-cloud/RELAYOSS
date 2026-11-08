@@ -1,5 +1,6 @@
 /** Releases — demo → approval → ship, with the exec-summary clock enforced. */
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Icons } from '../components/icons';
 import { api } from '../lib/api';
 import { cls } from '../lib/cls';
@@ -8,6 +9,69 @@ import { PageHeader } from '../components/Shell';
 import { Badge, Card, Progress, SectionHeader, Skeleton } from '../components/ui';
 
 const FLOW = ['planning', 'in_qa', 'demo_ready', 'demo_done', 'approved', 'shipped'];
+
+/**
+ * Ship gate panel.
+ *
+ * The checks come from `GET /api/releases/:id/gate` — the same function that
+ * guards the ship transition. Nothing here is computed in the browser: if the
+ * server would refuse the ship, this panel shows why, and if it would allow it,
+ * this panel cannot invent a reason not to.
+ */
+function ShipGatePanel({ releaseId }: { releaseId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = useQuery({
+    queryKey: ['release-gate', releaseId],
+    queryFn: () => api.releaseGate(releaseId),
+    enabled: open,
+  });
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1 text-[10px] text-mist-300 transition hover:border-ink-500 hover:text-mist-100"
+      >
+        <Icons.ShieldCheck size={9} /> Check ship gate
+      </button>
+    );
+  }
+
+  if (isLoading || !data) {
+    return <div className="mt-2.5"><Skeleton className="h-16 w-full" /></div>;
+  }
+
+  const blocking = data.checks.filter((c) => !c.passed);
+  return (
+    <div className="mt-2.5 rounded-lg border border-ink-700 bg-ink-850/60 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-[10.5px] font-medium text-mist-200">
+          <Icons.ShieldCheck size={10} className={data.shippable ? 'text-mint-400' : 'text-amber-400'} />
+          {data.shippable ? 'All requirements met — this release may ship' : `${blocking.length} requirement${blocking.length === 1 ? '' : 's'} outstanding`}
+        </p>
+        <span className="text-[9px] uppercase tracking-wider text-mist-500">evaluated {dateTime(data.evaluatedAt)}</span>
+      </div>
+      <ul className="mt-1.5 space-y-1">
+        {data.checks.map((c) => (
+          <li key={c.key} className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+            <span className={cls('mt-0.5 grid size-3 shrink-0 place-items-center rounded-full', c.passed ? 'bg-mint-500/15 text-mint-400' : 'bg-amber-500/15 text-amber-400')}>
+              {c.passed ? <Icons.Check size={7} /> : <Icons.AlertTriangle size={7} />}
+            </span>
+            <span className="text-mist-400">
+              <span className="text-mist-200">{c.label}</span> — {c.detail}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {!data.shippable && (
+        <p className="mt-1.5 text-[9.5px] leading-relaxed text-mist-500">
+          Shipping is refused by the server until these are resolved. The refusal is recorded on the release.
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function Releases() {
   const { data, isLoading } = useQuery({ queryKey: ['releases'], queryFn: api.releases });
@@ -95,6 +159,7 @@ export default function Releases() {
                     <Icons.Undo2 size={9} className="mr-1 inline" />Rollback: {r.rollbackPlan}
                   </p>
                 )}
+                <ShipGatePanel releaseId={r.id} />
               </Card>
             );
           })}
@@ -137,15 +202,22 @@ export default function Releases() {
         </Card>
 
         <Card className="mt-3 p-4">
-          <SectionHeader title="Release gate" subtitle="Why the order above matters" />
+          <SectionHeader
+            title="Release gate"
+            subtitle="Evaluated server-side — this is the same check that refuses the ship transition"
+          />
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            {['QA verified', 'Demo approved in writing', 'Exec summary 48h before ship', 'Rollback plan rehearsed', 'Ship ≤ 5 days after approval'].map((s, i) => (
+            {['3,500 edge cases catalogued', '90% verified', 'No open P0/P1', 'Exec summary ≥ 48h ahead', 'Turnover gates with evidence', 'Demo or client acceptance'].map((s, i) => (
               <span key={s} className="flex items-center gap-1.5 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1 text-[10.5px] text-mist-300">
                 <span className="grid size-3.5 place-items-center rounded-full bg-iris-500/15 text-[8px] font-semibold text-iris-300">{i + 1}</span>
                 {s}
               </span>
             ))}
           </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-mist-500">
+            A release cannot be marked shipped while any check is outstanding, and it also needs a deployment acknowledgement and a
+            post-ship verification with a source. A pipeline exiting zero is not delivery.
+          </p>
         </Card>
       </div>
     </div>
