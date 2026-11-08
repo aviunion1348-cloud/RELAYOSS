@@ -216,6 +216,68 @@ if (cfg) {
     }
 
     /*
+     * Build and install commands, per service.
+     *
+     * This is the check that was missing when a production deploy failed with
+     * `vite: command not found` after installing 95 packages.
+     *
+     * Two independent mistakes produced it, and either alone is fatal:
+     *
+     *  1. Vercel installs with production-mode npm, which omits devDependencies.
+     *     `vite` and `typescript` are devDependencies — correctly, they are build
+     *     tools, not runtime code — so they are simply absent when the build runs.
+     *     Verified here: `npm ci --omit=dev` from apps/web adds 52 packages and
+     *     leaves no vite; `--include=dev` adds 134 and hoists it to the root bin.
+     *  2. The root `build` script builds *both* workspaces in sequence. Using it as
+     *     one service's build command compiles the other service too, and fails the
+     *     moment that sibling's own dependencies are absent.
+     *
+     * So each service declares its own install command (with dev dependencies) and
+     * its own single-workspace build command. The fix is configuration; moving Vite
+     * into dependencies would hide mistake 1 rather than correct it.
+     */
+    for (const [name, svc] of Object.entries(services)) {
+      if (!svc || svc.runtime === 'container') continue;
+
+      const install = String(svc.installCommand ?? '');
+      if (!install) {
+        fail(
+          `service "${name}" declares no installCommand. Vercel's default production install omits ` +
+            'devDependencies, so build tools such as vite and tsc are missing when the build runs',
+        );
+      } else if (!install.includes('--include=dev')) {
+        fail(
+          `service "${name}" installCommand ("${install}") does not include devDependencies; ` +
+            'add --include=dev or the build tools will be absent',
+        );
+      }
+
+      const build = String(svc.buildCommand ?? '');
+      if (!build) {
+        fail(`service "${name}" declares no buildCommand; the platform would run the wrong default`);
+      } else if (/\bgit\b/.test(build) || build.includes('--ignore-scripts')) {
+        fail(`service "${name}" buildCommand looks unrelated to building this workspace: "${build}"`);
+      }
+    }
+
+    // The API must build only the API, and the web service only the web.
+    if (api?.buildCommand && !String(api.buildCommand).includes('-w @relay/api')) {
+      fail(
+        `api buildCommand is "${api.buildCommand}"; it must build only @relay/api. The root ` +
+          '"npm run build" builds both workspaces sequentially and is not a valid service build command',
+      );
+    }
+    const webSvc = services.web;
+    if (webSvc?.buildCommand && /-w @relay\/api|\bbuild --workspaces\b/.test(String(webSvc.buildCommand))) {
+      fail(
+        `web buildCommand "${webSvc.buildCommand}" builds the API as well; each service builds independently`,
+      );
+    }
+    if (webSvc && String(webSvc.outputDirectory ?? '') !== 'dist') {
+      fail(`web outputDirectory is "${webSvc.outputDirectory ?? '(unset)'}" but the Vite build writes to dist`);
+    }
+
+    /*
      * No container service.
      *
      * The `app` service existed to serve the SPA from an image while the `web`
@@ -465,6 +527,73 @@ if (!exists(DEPLOY_DOC)) {
     notes.push(`deployment guide migration count matches db/migrations (${migrationCount})`);
   } else {
     fail('docs/DEPLOYMENT.md no longer states the expected migration count — Step 1 needs a verifiable expectation');
+  }
+}
+
+/**
+ * The install-script allowlist.
+ *
+ * npm 12 stopped running dependency lifecycle scripts by default; they run only when
+ * `package.json` approves them in `allowScripts`. Vercel's log flagged
+ * `argon2@0.41.1 (install: node-gyp-build)` as not approved, which is the one script
+ * this deployment genuinely needs.
+ *
+ * The failure mode this check exists for is a *silent* one: approval is pinned to an
+ * exact version, so bumping argon2 without updating the pin means the script stops
+ * running and the native binding arrives missing — at runtime, not at build time.
+ *
+ * The allowlist must stay narrow. Approving broadly to make a warning disappear is
+ * the blanket trust the mechanism exists to remove.
+ */
+{
+  const rootPkg = JSON.parse(read('package.json'));
+  const approved = rootPkg.allowScripts ?? {};
+  const names = Object.keys(approved);
+
+  if (!names.length) {
+    fail('package.json has no "allowScripts"; npm 12+ would skip every dependency install script');
+  }
+  for (const [name, ok] of Object.entries(approved)) {
+    if (ok !== true) continue; // explicit `false` is a deliberate denial, not a problem
+    if (!name.includes('@')) {
+      fail(
+        `allowScripts entry "${name}" is not version-pinned. A bare name approves every future ` +
+          'version without review — pin it as "<name>@<version>"',
+      );
+    }
+  }
+
+  /*
+   * argon2 must be approved at exactly the version that will be installed. Resolved
+   * from the lockfile rather than node_modules so the guard runs on a bare checkout
+   * (CI calls it before and after installing; a guard that needs an install to run
+   * is a guard that gets skipped).
+   */
+  const lock = JSON.parse(read('package-lock.json'));
+  const installed =
+    lock.packages?.['node_modules/argon2']?.version ??
+    lock.packages?.['apps/api/node_modules/argon2']?.version;
+  if (!installed) fail('package-lock.json does not contain argon2 — the lockfile is out of sync');
+  if (!approved[`argon2@${installed}`]) {
+    const pinned = names.filter((n) => n.startsWith('argon2@'));
+    fail(
+      `allowScripts does not approve argon2@${installed}` +
+        (pinned.length ? ` (it pins ${pinned.join(', ')})` : '') +
+        ' — the native binding would be skipped and password verification would fail at runtime',
+    );
+  } else {
+    notes.push(`argon2@${installed} install script approved (node-gyp-build; prebuilt, no compile)`);
+  }
+
+  // Build/bundler scripts are not needed: they ship working binaries, and nothing in
+  // this repo rebuilds them. Approving them would widen the allowlist for no reason.
+  for (const name of names) {
+    if (/^esbuild@|^@embedded-postgres\//.test(name) && approved[name] === true) {
+      fail(
+        `allowScripts approves "${name}", which this deployment does not need. ` +
+          'Keep the allowlist to the scripts the build actually requires',
+      );
+    }
   }
 }
 

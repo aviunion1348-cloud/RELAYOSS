@@ -5,11 +5,16 @@
       "root": ".",
       "framework": "fastify",
       "entrypoint": "apps/api/src/entrypoints/index.ts",
+      "installCommand": "npm ci --include=dev --no-audit --no-fund",
+      "buildCommand": "npm run build -w @relay/api",
       "devCommand": "npm run dev:api"
     },
     "web": {
       "root": "apps/web/",
       "framework": "vite",
+      "installCommand": "npm ci --include=dev --no-audit --no-fund",
+      "buildCommand": "npm run build",
+      "outputDirectory": "dist",
       "rewrites": [
         {
           "source": "/(.*)",
