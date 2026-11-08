@@ -31,9 +31,8 @@ Common causes, in the order they actually happen:
 
 | Symptom in the log | Cause | Fix |
 | --- | --- | --- |
-| `SESSION_SECRET is required` | missing env | set it; the process refuses to boot rather than run unsigned |
-| `AUTH_MODE=dev is refused in production` | wrong mode in a production build | set `AUTH_MODE=oidc` and the three OIDC vars — **do not** add the opt-in |
-| `AUTH_MODE=oidc requires OIDC_ISSUER…` | partial OIDC config | set all three |
+| `No users exist in the database, so requests cannot be attributed` | migrated but not seeded | `npm run db:seed`, or set `OPERATOR_USER_ID` to an existing user id |
+| `SQLite is unavailable in this runtime, and no DATABASE_URL is configured` | no database at all | set `DATABASE_URL`; the deployment has no other dependency |
 | `checksum mismatch` on a migration | an applied migration file was edited | restore the file; if it must change, add a new migration |
 | `EADDRINUSE` | stale process on 4000 | find and stop the old PID |
 
@@ -104,19 +103,19 @@ Never record `received` without a real source; the API refuses it. If the
 deployment failed, record `failed` with the error — a failure recorded honestly
 is worth more than silence.
 
-## 6. Authentication problems
+## 6. Access problems
+
+There is no authentication to troubleshoot — see `docs/AUTH-REMOVAL.md`. The
+questions that come up instead:
 
 | Symptom | Likely cause | Check |
 | --- | --- | --- |
-| everyone logged out at once | `SESSION_SECRET` changed (sessions are HMAC-signed) | deploy the old secret, or accept the logout |
-| `403 forbidden` on POST/PATCH only | missing CSRF token | the SPA sends `x-csrf-token`; a script must fetch it from `/api/auth/me` |
-| `401` immediately after login | cookie rejected — cross-site or `Secure` over http | check `CORS_ORIGIN`, TLS termination |
-| login works, data is empty | permission grant missing | `project_members` / `client_portal_users` |
-| `INSECURE AUTHENTICATION` at boot | `ALLOW_DEV_AUTH_IN_PRODUCTION=1` is set | remove it; configure OIDC |
-
-Revoke a compromised session: `POST /api/auth/sessions/:id/revoke`, or all of a
-user's sessions with `POST /api/auth/sessions/revoke-all`. Both are audited in
-`auth_events`.
+| the dashboard is reachable by anyone | by design | if that is wrong for this deployment, put it behind Vercel Deployment Protection or an SSO proxy; nothing in the app does this |
+| `401` from `/api/cron/sweep` | `CRON_SECRET` unset or not sent as `Authorization: Bearer …` | this is not user auth; it deliberately stays closed |
+| `503 misconfigured` naming `npm run db:seed` | the `users` table is empty, so no identity can be attributed | seed the database |
+| `403 forbidden` — should not happen | would mean a role check survived the removal | treat it as a bug: `grep -rn "forbidden(" apps/api/src` |
+| a stale `AUTH_MODE` or `SESSION_SECRET` in the environment | inert | harmless; delete when convenient so it does not imply a login |
+| `authMode` in `/api/health` is not `none` | a mode was reintroduced | it should read `none`; anything else is a regression |
 
 ## 7. Worker / sweeper
 

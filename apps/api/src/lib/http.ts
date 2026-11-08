@@ -23,6 +23,15 @@ export const tooMany = (m = 'Too many requests', retryAfterSec = 60) => {
   return err;
 };
 export const unavailable = (m = 'Service unavailable') => new HttpError(503, 'unavailable', m);
+/**
+ * A 503 that says *what* is misconfigured.
+ *
+ * `/api/ready` has always reported `{ stage, summary }` for a broken deployment;
+ * request handlers had no equivalent and could only return a bare message. This
+ * lets an identity failure name its cause and its remedy, instead of surfacing as
+ * "unauthorized" — which is what the blank dashboard used to hide behind.
+ */
+export const serviceUnavailable = (m: string, details?: unknown) => new HttpError(503, 'misconfigured', m, details);
 export const unprocessable = (m: string, d?: unknown) => new HttpError(422, 'unprocessable', m, d);
 
 export type Handler = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown> | unknown;

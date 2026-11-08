@@ -5,10 +5,9 @@
 #   docker compose up --build
 #   → http://localhost:4000            (health: /api/ready, metrics: /api/metrics)
 #
-# This stack runs with AUTH_MODE=dev because there is no identity provider in a
-# local environment; that is opt-in via ALLOW_DEV_AUTH_IN_PRODUCTION and is
-# announced loudly at boot. Set AUTH_MODE=oidc and the OIDC_* variables to run
-# the real authentication path.
+# There is no authentication. No sign-in, no session, no credential: the stack
+# opens on the dashboard. Put access control in front of it if it is exposed beyond
+# localhost — see docs/AUTH-REMOVAL.md.
 # ============================================================================
 services:
   app:
@@ -21,10 +20,7 @@ services:
       HOST: 0.0.0.0
       # PostgreSQL 16 is the production database, not an optional extra.
       DATABASE_URL: postgres://relay:relay_local_only@postgres:5432/relay
-      AUTH_MODE: dev
-      ALLOW_DEV_AUTH_IN_PRODUCTION: "1"
-      SESSION_SECRET: ${SESSION_SECRET:-local-compose-session-secret-change-me}
-      DEMO_USER_ID: usr_maya
+      OPERATOR_USER_ID: usr_maya
       LOG_LEVEL: info
       CORS_ORIGIN: http://localhost:4000
       SWEEP_INTERVAL_MS: "60000"
@@ -47,9 +43,6 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://relay:relay_local_only@postgres:5432/relay
-      AUTH_MODE: dev
-      ALLOW_DEV_AUTH_IN_PRODUCTION: "1"
-      SESSION_SECRET: ${SESSION_SECRET:-local-compose-session-secret-change-me}
       FORCE: "1"
     depends_on:
       app:

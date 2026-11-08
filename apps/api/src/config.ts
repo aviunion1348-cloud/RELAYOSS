@@ -58,28 +58,19 @@ const env = () => ({
       ? path.join(os.tmpdir(), 'relay.sqlite')
       : path.join(ROOT, 'data', 'relay.sqlite')),
   databaseUrl: process.env.DATABASE_URL ?? '',
-  /** Demo session identity — replace with SSO/OIDC in production. */
-  demoUserId: process.env.DEMO_USER_ID ?? 'usr_maya',
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Background clock sweeper cadence. */
   sweepIntervalMs: int('SWEEP_INTERVAL_MS', 60_000),
-  /**
-   * Authentication mode.
+  /*
+   * No authentication configuration.
    *
-   *   'password'  the single shared login (POST /api/auth/login). This is the
-   *               intended mode for a real deployment: the application owns the
-   *               credential, so neither an external IdP nor a demo identity is
-   *               required. Selected automatically when a shared credential has
-   *               been provisioned, unless AUTH_MODE names something else.
-   *   'oidc'      bearer/cookie sessions from an external identity provider.
-   *               Still fully supported, never required.
-   *   'dev'       local-only demonstration identities. Refused in production.
+   * `authMode`, `oidcIssuer`, `oidcAudience`, `oidcJwksUri` and `sessionSecret`
+   * were read here and are gone. Leaving them would be worse than unused: each
+   * one implies a setting that matters, and a reader — or a future change — would
+   * reasonably assume the deployment still had a mode to select.
    */
-  authMode: (process.env.AUTH_MODE ?? 'auto') as 'auto' | 'oidc' | 'password' | 'dev',
-  oidcIssuer: process.env.OIDC_ISSUER ?? '',
-  oidcAudience: process.env.OIDC_AUDIENCE ?? '',
-  oidcJwksUri: process.env.OIDC_JWKS_URI ?? '',
-  sessionSecret: process.env.SESSION_SECRET ?? '',
+  /** Which `users` row every request is attributed to. */
+  operatorUserId: process.env.OPERATOR_USER_ID ?? process.env.DEMO_USER_ID ?? 'usr_maya',
   /**
    * Per-process request budgets (requests per minute, per client address).
    * The auth budget is intentionally small: a human logs in a handful of times

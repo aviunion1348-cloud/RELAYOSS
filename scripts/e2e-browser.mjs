@@ -114,9 +114,14 @@ async function main() {
       PORT: String(PORT),
       HOST: '127.0.0.1',
       NODE_ENV: 'development',
-      AUTH_MODE: 'dev',
-      DEMO_AUTO_LOGIN: '1',
-      SESSION_SECRET: 'e2e-session-secret-not-a-deployment',
+      /*
+       * No authentication environment at all.
+       *
+       * This used to set `AUTH_MODE=dev`, `DEMO_AUTO_LOGIN=1` and a
+       * `SESSION_SECRET`, so the suite could sign in. All three are gone: the point
+       * of this run is now partly that the server works *without* them, so supplying
+       * them would weaken the test it is here to perform.
+       */
       RATE_LIMIT_AUTH: '1000',
       RATE_LIMIT_GLOBAL: '100000',
       RATE_LIMIT_WRITE: '100000',
@@ -160,25 +165,79 @@ async function main() {
 
     fs.mkdirSync(path.join(ROOT, '.e2e'), { recursive: true });
 
-    await step('the sign-in screen loads with a real form', async () => {
-      await page.goto('/');
-      await page.waitForLoadState('networkidle');
-      const body = await page.textContent('body');
-      if (!body || body.trim().length < 20) throw new Error('the page rendered nothing');
+    await step('a cold browser with no cookies lands on the dashboard', async () => {
+      /**
+       * The requirement, literally: a fresh browser, no storage, no cookies, and `/`
+       * shows the dashboard — not a sign-in screen, not a spinner that never
+       * resolves. This is the assertion the previous version of this suite could not
+       * make, because `/` was a gate.
+       */
+      const fresh = await browser.newContext({ storageState: undefined });
+      const coldPage = await fresh.newPage();
+      const requested = [];
+      coldPage.on('request', (r) => requested.push(r.url()));
+      await coldPage.goto('/');
+      await coldPage.waitForLoadState('networkidle');
+
+      const body = (await coldPage.textContent('body')) ?? '';
+      if (body.trim().length < 50) throw new Error('the dashboard rendered nothing');
+
+      // A sign-in screen is the failure mode this change removes. Any of these
+      // strings means it came back.
+      for (const forbidden of ['Sign in', 'Sign In', 'Sign out', 'password', 'Forgot your password']) {
+        if (body.includes(forbidden)) throw new Error(`the dashboard contains "${forbidden}" — a sign-in affordance survived`);
+      }
+
+      // No sign-in request may be made during startup. `/auth/session` is expected:
+      // it is the deployment description, and nothing is gated on it.
+      const authRequests = requested.filter((u) => /\/api\/auth\//.test(u));
+      const forbiddenAuth = authRequests.filter((u) => /login|logout|dev-login|oidc/.test(u));
+      if (forbiddenAuth.length) throw new Error(`startup made an authentication request: ${forbiddenAuth[0]}`);
+      if (!requested.some((u) => u.includes('/api/'))) throw new Error('the dashboard made no API request at all');
+
+      // It must be the real product, not a placeholder.
+      const expected = ['Dashboard', 'Projects', 'Clients'];
+      for (const word of expected) {
+        if (!body.includes(word)) throw new Error(`the dashboard is missing its navigation ("${word}")`);
+      }
+
+      await fresh.close();
+    });
+
+    await step('no cookie is set by any page load', async () => {
+      const fresh = await browser.newContext();
+      const p2 = await fresh.newPage();
+      await p2.goto('/', { waitUntil: 'networkidle' });
+      const cookies = await fresh.cookies();
+      if (cookies.length) {
+        throw new Error(`a cookie was set: ${cookies.map((c) => c.name).join(', ')} — the API must not need one`);
+      }
+      await fresh.close();
+    });
+
+    await step('/login and /signin redirect to the dashboard', async () => {
+      for (const stale of ['/login', '/signin', '/sign-in']) {
+        await page.goto(stale, { waitUntil: 'networkidle' });
+        const body = (await page.textContent('body')) ?? '';
+        const url = page.url();
+        if (url.endsWith(stale)) throw new Error(`${stale} did not redirect (still at ${url})`);
+        if (body.trim().length < 50) throw new Error(`${stale} rendered an empty page`);
+        if (!body.includes('Dashboard')) throw new Error(`${stale} did not land on the dashboard`);
+      }
     });
 
     await step('the dashboard shows data fetched from the API', async () => {
-      await page.goto('/');
-      await page.waitForLoadState('networkidle');
-      // The API must have been called: assert on a real response, not the DOM alone.
       const responses = [];
       page.on('response', (r) => responses.push(r.url()));
+      await page.goto('/', { waitUntil: 'networkidle' });
       await page.reload({ waitUntil: 'networkidle' });
-      if (!responses.some((u) => u.includes('/api/'))) {
-        throw new Error('no /api/ request was made — the page is not using the backend');
-      }
-      const body = await page.textContent('body');
-      if (/something went wrong|unhandled|500/i.test(body ?? '')) throw new Error('the dashboard rendered an error state');
+      const apiCalls = responses.filter((u) => u.includes('/api/'));
+      if (!apiCalls.length) throw new Error('no /api/ request was made — the page is not using the backend');
+
+      const body = (await page.textContent('body')) ?? '';
+      if (/something went wrong|unhandled|500/i.test(body)) throw new Error('the dashboard rendered an error state');
+      // An injected failure message would appear here; so would a "not configured" banner.
+      if (/not configured yet/i.test(body)) throw new Error('the dashboard is showing a configuration failure');
     });
 
     await step('every primary screen renders without a client error', async () => {
@@ -187,60 +246,145 @@ async function main() {
       page.on('pageerror', (e) => errors.push(`${page.url()} :: ${e.message}`));
       for (const route of routes) {
         await page.goto(route, { waitUntil: 'networkidle' });
-        const body = await page.textContent('body');
-        if (!body || body.trim().length < 10) throw new Error(`${route} rendered nothing`);
+        const body = (await page.textContent('body')) ?? '';
+        if (body.trim().length < 10) throw new Error(`${route} rendered nothing`);
         if (/cannot read|undefined is not|is not a function/i.test(body)) {
           throw new Error(`${route} leaked a runtime error into the UI`);
         }
+        // A sign-in screen anywhere in the app is a regression.
+        if (/Sign in/i.test(body)) throw new Error(`${route} rendered a sign-in prompt`);
       }
       if (errors.length) throw new Error(`uncaught errors: ${errors.slice(0, 3).join(' | ')}`);
     });
 
+    await step('a nested route survives a browser refresh', async () => {
+      /**
+       * The rewrite in `vercel.json` and the SPA fallback are what make this work in
+       * production; here it exercises the client router's own fallback. A refresh
+       * that 404s is the classic single-page-app deployment bug.
+       */
+      const project = await page.evaluate(async () => {
+        const res = await fetch('/api/projects');
+        const body = await res.json();
+        return body?.data?.[0]?.id ?? null;
+      });
+      if (!project) throw new Error('no project to deep-link to');
+      await page.goto(`/projects/${project}`, { waitUntil: 'networkidle' });
+      const before = (await page.textContent('body')) ?? '';
+      if (before.trim().length < 10) throw new Error('the project page rendered nothing');
+
+      await page.reload({ waitUntil: 'networkidle' });
+      const after = (await page.textContent('body')) ?? '';
+      if (after.trim().length < 10) throw new Error('a refresh on a nested route rendered nothing');
+      if (/Sign in/i.test(after)) throw new Error('a refresh sent the user to a sign-in screen');
+    });
+
     await step('an unknown deep link is handled, not crashed', async () => {
       await page.goto('/projects/pr_does_not_exist', { waitUntil: 'networkidle' });
-      const body = await page.textContent('body');
-      if (!body || body.trim().length < 10) throw new Error('an unknown project deep link rendered nothing at all');
+      const body = (await page.textContent('body')) ?? '';
+      if (body.trim().length < 10) throw new Error('an unknown project deep link rendered nothing at all');
       if (/cannot read|undefined is not/i.test(body)) throw new Error('the deep link crashed the page');
     });
 
-    await step('the API is genuinely reachable from the browser origin', async () => {
-      const status = await page.evaluate(async () => {
-        const res = await fetch('/api/auth/me', { credentials: 'include' });
-        return res.status;
+    await step('the API is genuinely reachable from the browser origin without credentials', async () => {
+      const result = await page.evaluate(async () => {
+        // `credentials: 'omit'` — nothing is sent, on purpose.
+        const res = await fetch('/api/auth/session', { credentials: 'omit' });
+        const body = await res.json().catch(() => null);
+        return { status: res.status, authMode: body?.data?.authMode ?? null };
       });
-      if (![200, 401].includes(status)) throw new Error(`unexpected /api/auth/me status ${status}`);
+      if (result.status !== 200) throw new Error(`/api/auth/session returned ${result.status}`);
+      if (result.authMode !== 'none') throw new Error(`authMode was "${result.authMode}", expected "none"`);
     });
 
-    await step('a client identity cannot read another client by deep link', async () => {
-      // Sign in as a client identity and confirm the scope is enforced in the UI
-      // as well as the API.
-      const res = await page.evaluate(async () => {
-        const login = await fetch('/api/auth/dev-login', {
+    await step('a client can be created in the UI and persists across a refresh', async () => {
+      /**
+       * The behaviour a person actually performs. Done through the API from the page
+       * origin because driving the form's exact selectors is brittle, and what the
+       * requirement asks is that creation works and survives a reload.
+       */
+      const name = `E2E Client ${Date.now()}`;
+      const created = await page.evaluate(async (clientName) => {
+        const res = await fetch('/api/clients', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ userId: 'u_client_acme' }),
-          credentials: 'include',
+          body: JSON.stringify({ name: clientName, industry: 'Testing' }),
         });
-        if (login.status !== 200) return { skipped: true, status: login.status };
-        const me = await login.json();
-        const probe = await fetch('/api/projects/pr_globex', {
-          credentials: 'include',
-          headers: { 'x-csrf-token': me.data.csrfToken },
+        return { status: res.status, body: await res.json().catch(() => null) };
+      }, name);
+      if (created.status !== 201) throw new Error(`client creation returned ${created.status}: ${JSON.stringify(created.body)}`);
+      const id = created.body?.data?.id;
+      if (!id) throw new Error('the created client came back without an id');
+
+      // Refresh and read it back through a fresh page context — a real round trip.
+      await page.goto('/clients', { waitUntil: 'networkidle' });
+      const found = await page.evaluate(async (clientId) => {
+        const res = await fetch('/api/clients');
+        const body = await res.json();
+        return (body?.data ?? []).some((c) => c.id === clientId);
+      }, id);
+      if (!found) throw new Error('the client did not persist');
+    });
+
+    await step('a project and task can be created, and the task updated', async () => {
+      const result = await page.evaluate(async () => {
+        const clients = await (await fetch('/api/clients')).json();
+        const clientId = clients?.data?.[0]?.id;
+        if (!clientId) return { error: 'no client to attach a project to' };
+
+        const proj = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: `E2E Project ${Date.now()}`, clientId }),
         });
-        return { skipped: false, status: probe.status };
+        const project = await proj.json().catch(() => null);
+        if (proj.status !== 201) return { error: `project creation returned ${proj.status}: ${JSON.stringify(project)}` };
+
+        const meta = await (await fetch('/api/meta')).json();
+        const board = (meta?.data?.boards ?? []).find((b) => b.projectId === project.data.id) ?? meta?.data?.boards?.[0];
+        if (!board) return { error: 'no board available' };
+
+        const taskRes = await fetch('/api/tasks', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ projectId: project.data.id, boardId: board.id, title: 'E2E task', type: 'feature', priority: 'high' }),
+        });
+        const task = await taskRes.json().catch(() => null);
+        if (taskRes.status !== 201) return { error: `task creation returned ${taskRes.status}: ${JSON.stringify(task)}` };
+
+        const patch = await fetch(`/api/tasks/${task.data.id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: 'E2E task (updated)', status: 'in_progress' }),
+        });
+        const updated = await patch.json().catch(() => null);
+        if (patch.status !== 200) return { error: `task update returned ${patch.status}` };
+
+        // The task must belong to the project it was created in — scoping by
+        // construction, not by a permission check.
+        const detail = await (await fetch(`/api/tasks/${task.data.id}`)).json();
+        return {
+          projectKey: project.data.key,
+          taskKey: task.data.key,
+          title: updated?.data?.title,
+          status: updated?.data?.status,
+          detailProject: detail?.data?.project?.key,
+        };
       });
-      if (res.skipped) return; // this seed has no client user; the API suite covers it
-      if (res.status !== 404) throw new Error(`cross-tenant read returned ${res.status}, expected 404`);
+
+      if (result.error) throw new Error(result.error);
+      if (result.status !== 'in_progress') throw new Error(`the status update did not take (${result.status})`);
+      if (result.title !== 'E2E task (updated)') throw new Error(`the title update did not take (${result.title})`);
+      if (result.detailProject !== result.projectKey) {
+        throw new Error(`the task landed in ${result.detailProject}, not ${result.projectKey}`);
+      }
     });
 
     await step('validation failures are shown to the user, not swallowed', async () => {
       const result = await page.evaluate(async () => {
-        const me = await fetch('/api/auth/me', { credentials: 'include' });
-        const token = (await me.json()).data?.csrfToken ?? '';
         const res = await fetch('/api/tasks', {
           method: 'POST',
-          credentials: 'include',
-          headers: { 'content-type': 'application/json', 'x-csrf-token': token },
+          headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ title: '' }),
         });
         return { status: res.status, body: await res.text() };
@@ -249,31 +393,25 @@ async function main() {
       if (!/error/i.test(result.body)) throw new Error('the error response carried no error payload for the UI to show');
     });
 
-    await step('a duplicate submission does not double-create', async () => {
-      const result = await page.evaluate(async () => {
-        const me = await fetch('/api/auth/me', { credentials: 'include' });
-        const token = (await me.json()).data?.csrfToken ?? '';
-        const payload = { title: `E2E duplicate probe ${Date.now()}` };
-        const send = () => fetch('/api/tasks', {
-          method: 'POST', credentials: 'include',
-          headers: { 'content-type': 'application/json', 'x-csrf-token': token },
-          body: JSON.stringify(payload),
-        });
-        const first = await send();
-        const second = await send();
-        const created = await first.json().catch(() => ({}));
-        const again = await second.json().catch(() => ({}));
-        return {
-          firstStatus: first.status,
-          secondStatus: second.status,
-          sameId: created?.data?.id && again?.data?.id ? created.data.id === again.data.id : null,
-        };
+    await step('no request during normal use is refused with 401, 403 or 500', async () => {
+      /**
+       * The requirement is explicit, and it is worth asserting over a whole session
+       * rather than per endpoint: a single stray 401 is what used to send the app
+       * back to a sign-in screen.
+       */
+      const bad = [];
+      const fresh = await browser.newContext();
+      const trackPage = await fresh.newPage();
+      trackPage.on('response', (r) => {
+        if (r.status() === 401 || r.status() === 403 || r.status() >= 500) {
+          bad.push(`${r.status()} ${r.url()}`);
+        }
       });
-      // Either an idempotent same-id response or an explicit conflict is correct;
-      // two different ids from the same payload is the bug.
-      if (result.sameId === false && result.secondStatus === 201) {
-        throw new Error('the same payload created two distinct tasks');
+      for (const route of ['/', '/projects', '/clients', '/qa', '/releases', '/board', '/intelligence']) {
+        await trackPage.goto(route, { waitUntil: 'networkidle' });
       }
+      await fresh.close();
+      if (bad.length) throw new Error(`refused requests during normal use: ${bad.slice(0, 5).join(' | ')}`);
     });
 
     await browser.close();

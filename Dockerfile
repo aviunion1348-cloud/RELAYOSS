@@ -57,8 +57,7 @@ COPY --from=build /app/apps/web/dist apps/web/dist
 # Migrations are read at boot (SQLite set + generated PostgreSQL set).
 COPY --from=build /app/db db
 
-ENV SKIP_MIGRATE=0 \
-    AUTH_MODE=oidc
+ENV SKIP_MIGRATE=0
 
 USER relay
 EXPOSE 4000

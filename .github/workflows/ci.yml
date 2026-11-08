@@ -15,8 +15,8 @@ permissions:
 env:
   # Never a real secret: CI runs the development auth mode explicitly, and the
   # boot guard refuses dev auth when NODE_ENV=production.
-  SESSION_SECRET: ci-session-secret-not-a-production-value
-  AUTH_MODE: dev
+  # No authentication variables. The suite asserts that the API works without
+  # them — supplying them would weaken that assertion.
 
 jobs:
   verify:
@@ -95,20 +95,37 @@ jobs:
       - name: Browser end-to-end suite (real Chromium, real server, real database)
         run: npm run test:e2e
 
-      - name: Production build refuses demo auth without an explicit opt-in
+      - name: Production build boots with no authentication environment at all
         run: |
+          # This step used to assert the opposite: that a production boot *refused*
+          # to start when AUTH_MODE=dev had no opt-in. That refusal, together with the
+          # missing-SESSION_SECRET one, is exactly what produced the blank dashboard
+          # in production -- an API that would not serve and could not say why.
+          #
+          # So the assertion is inverted. A production build given no authentication
+          # environment must boot, serve, and report that it authenticates nothing.
           npm run build -w @relay/api
-          set +e
-          NODE_ENV=production AUTH_MODE=dev SESSION_SECRET=ci-secret-not-a-deployment PORT=4310 \
-            node apps/api/dist/index.js > /tmp/refuse.log 2>&1
-          code=$?
-          set -e
-          if [ "$code" -eq 0 ]; then
-            echo "::error::the production build booted with AUTH_MODE=dev and no opt-in"; exit 1
-          fi
-          grep -q "AUTH_MODE=dev is refused in production" /tmp/refuse.log \
-            || { echo "::error::refused, but not for the documented reason"; cat /tmp/refuse.log; exit 1; }
-          echo "✓ production boot refused demo auth, as documented"
+          NODE_ENV=production PORT=4310 node apps/api/dist/index.js > /tmp/boot.log 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:4310/api/live > /tmp/live.json 2>/dev/null; then break; fi
+            sleep 0.5
+          done
+          grep -q '"live":true' /tmp/live.json \
+            || { echo "::error::the production build did not serve /api/live"; cat /tmp/boot.log; exit 1; }
+
+          curl -fsS http://127.0.0.1:4310/api/health > /tmp/health.json
+          grep -q '"authMode":"none"' /tmp/health.json \
+            || { echo "::error::authMode is not 'none' -- a gate was reintroduced"; cat /tmp/health.json; exit 1; }
+
+          # Retired login endpoints answer 410, never 200 and never 404.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H 'content-type: application/json' -d '{"username":"x","password":"y"}' \
+            http://127.0.0.1:4310/api/auth/login)
+          [ "$code" = "410" ] || { echo "::error::/api/auth/login answered $code, expected 410"; exit 1; }
+          echo "✓ production boot serves with no authentication environment"
 
       - name: Docker image builds
         run: |

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icons } from './icons';
-import { api, auth, type SessionInfo } from '../lib/api';
+import { api, type SessionInfo } from '../lib/api';
 import { cls } from '../lib/cls';
 import { clockLabel, inr, relTime } from '../lib/format';
 import { Avatar, Badge, Button, Dot, Kbd, Tooltip } from './ui';
@@ -280,19 +280,15 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
                   {session?.user.email ?? meta.currentUser.title}
                 </p>
               </div>
-              {session && (
-                <button
-                  type="button"
-                  title={`Sign out${session.method === 'dev' ? ' (development session)' : ''}`}
-                  onClick={async () => {
-                    await auth.logout();
-                    window.location.reload();
-                  }}
-                  className="shrink-0 rounded-md border border-ink-700 px-1.5 py-1 text-[10px] text-mist-500 transition-colors hover:border-ink-600 hover:text-mist-300"
-                >
-                  Exit
-                </button>
-              )}
+              {/*
+                No sign-out control.
+
+                There was one, and it called `auth.logout()` then reloaded. With no
+                session, "sign out" cannot mean anything: there is nothing to end,
+                and the reload would return to the same dashboard. A control that
+                does nothing is worse than an absent one — it implies a security
+                boundary that does not exist, and someone will trust it.
+              */}
               <Badge tone="iris" className="shrink-0">{session?.user.role ?? meta.currentUser.role}</Badge>
             </div>
           )}

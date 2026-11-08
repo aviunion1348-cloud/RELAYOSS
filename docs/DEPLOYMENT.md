@@ -67,11 +67,11 @@ and CI path — see §1.6.
 | `app.ready()` | Called once per instance, explicitly | Fastify installs its hook pipeline here. `listen()` does that for you; without `listen()` the first request crashes inside the hook runner. |
 | Background sweeper | Removed. Replaced by a lazy sweep on real requests + `/api/cron/sweep` | `setInterval` does not survive between invocations, and instances are concurrent — a timer would either never fire or double-fire. |
 | Routing | Two top-level rewrites to service *names*, specific before catch-all | Vercel routes to the first match and routing into a service is final — there is no fallback to another service. A catch-all listed first would swallow `/api` entirely. |
-| Service-to-service | **No bindings.** Nothing calls anything privately | The `api` service talks to PostgreSQL and to the identity provider (OIDC); the browser reaches it over the public `/api` rewrite. There is no third internal service to call, so a binding would inject an unused variable. |
+| Service-to-service | **No bindings.** Nothing calls anything privately | The `api` service talks to PostgreSQL; the browser reaches it over the public `/api` rewrite. There is no third internal service to call, so a binding would inject an unused variable. |
 | Database | `DATABASE_URL` (PostgreSQL, **pooled** endpoint) | SQLite cannot be written from parallel serverless instances. |
 | Connections | `DATABASE_POOL_MAX`, defaulting to 3 on Vercel | Each instance owns a pool. `pg`'s default of 10 × concurrent instances exhausts a managed database. |
 | Migrations | `npm run db:migrate:prod`, run by the operator | Migrating on every request is a race and a latency tax. One command, deliberately separate. |
-| Auth | `AUTH_MODE=password` with the shared credential | Needs no external IdP, and the demo identities are refused. |
+| Auth | **None.** The API authenticates nobody | This is a deliberate, single-tenant deployment: `/` opens the dashboard with no sign-in. Access control belongs to the hosting layer — see `docs/AUTH-REMOVAL.md`. |
 
 ### 1.2 The project settings
 
@@ -319,54 +319,57 @@ do not add `apps/web` back to `workspaces` — the guard fails if you do.
 ### 1.3 Environment variables
 
 Set these in **Project → Settings → Environment Variables** for *Production* (and
-*Preview* if you want preview deployments). Values are not included here;
-`RELAY_ADMIN_PASSWORD_HASH` is generated in step 1.4.
+*Preview* if you want preview deployments).
+
+**No variable is required to boot.** The deployment has no sign-in, so there is no
+session secret and no credential to provision. Missing `SESSION_SECRET` or
+`RELAY_ADMIN_PASSWORD_HASH` — which are now inert if present — cannot stop the API
+from starting.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | **yes** | PostgreSQL connection string. Use the provider's **pooled** endpoint (Neon `-pooler`, Supabase `:6543`, PgBouncer). Append `?sslmode=require` if the provider requires TLS. |
-| `SESSION_SECRET` | **yes** | Signs CSRF tokens and session cookies. 32+ random bytes, base64url. Rotating it invalidates every session. |
-| `RELAY_LOGIN_USERNAME` | **yes** | The shared username. Needed only by the provisioning command, not by the running app, but keep it so the value is documented. |
-| `RELAY_ADMIN_PASSWORD_HASH` | **yes** for provisioning | The Argon2id hash. Validated at boot: a malformed value fails startup with a clear message rather than a permanent 401. |
-| `AUTH_MODE` | recommended | `password`. Without it, `auto` resolves to `password` once a credential is provisioned — so this is belt and braces. |
-| `CRON_SECRET` | recommended | Authenticates `/api/cron/sweep`. Without it the endpoint returns 503 instead of running unauthenticated. |
+| `DATABASE_URL` | **strongly recommended** | PostgreSQL connection string. Use the provider's **pooled** endpoint (Neon `-pooler`, Supabase `:6543`, PgBouncer). Append `?sslmode=require` if the provider requires TLS. Without it the API runs on SQLite in the instance temp directory: functional, but **not durable** — see §1.3.1. |
+| `CRON_SECRET` | recommended | Authenticates `/api/cron/sweep`. Without it the endpoint returns 503 rather than running unauthenticated. This is not user authentication and is unaffected by the removal. |
+| `OPERATOR_USER_ID` | optional | Which `users` row every request is attributed to. Defaults to `usr_maya`; if that row is absent the API uses the first administrator, then any user at all. |
 | `DATABASE_POOL_MAX` | optional | Defaults to 3 on Vercel. Raise only if you are behind a connection pooler. |
 | `NODE_ENV` | set by Vercel | `production`. |
 | `CORS_ORIGIN` | optional | Only needed if the frontend is served from a different origin. Same-origin by default. |
+| `SESSION_SECRET`, `RELAY_ADMIN_PASSWORD_HASH`, `RELAY_LOGIN_USERNAME`, `AUTH_MODE`, `ALLOW_DEV_AUTH_IN_PRODUCTION` | **ignored** | Read by the removed authentication system. They are accepted and have no effect; leaving them set is harmless, and they should be deleted when convenient so they do not imply a login that does not exist. |
 
-**Never** put `RELAY_ADMIN_PASSWORD_HASH`, `SESSION_SECRET`, `CRON_SECRET` or
-`DATABASE_URL` in a `VITE_`-prefixed variable. Vite inlines `VITE_*` into the
-client bundle, which would publish the secret to every visitor. The frontend needs
-no secrets: it talks to `/api` on its own origin.
+**Never** put `CRON_SECRET` or `DATABASE_URL` in a `VITE_`-prefixed variable. Vite
+inlines `VITE_*` into the client bundle, which would publish the secret to every
+visitor. The frontend needs no secrets: it talks to `/api` on its own origin.
+
+> **Access control is now the hosting layer's job.** The API authenticates nobody,
+> so anyone who can reach the URL can read and write every record. If this
+> deployment is reachable from the internet, put it behind your organisation's
+> access control — Vercel deployment protection, an SSO proxy, or a private
+> network. See `docs/AUTH-REMOVAL.md` for the full list of what changed.
 
 ### 1.3.1 Running with no database at all (evaluation mode)
 
-You can deploy and sign in with **no PostgreSQL instance**. Set two variables and
-nothing else:
-
-| Variable | Value |
-| --- | --- |
-| `SESSION_SECRET` | 32+ random bytes |
-| `RELAY_ADMIN_PASSWORD_HASH` | from `npm run set-password` |
-
-Optionally `RELAY_LOGIN_USERNAME` (default `lear roadmap 289`) and
-`RELAY_LOGIN_USER_ID` (default `usr_owner`).
-
-On boot the API then: creates SQLite in the instance temp directory (the
+You can deploy with **no PostgreSQL instance and no environment variables at
+all**. On boot the API creates SQLite in the instance temp directory (the
 deployment bundle is read-only, so the source tree cannot be used), runs the
-migrations, seeds the demo studio because `users` is empty, and writes the
-credential from the two environment values before the auth mode is resolved — so
-`AUTH_MODE=auto` chooses `password` rather than `dev`, and the production refusal
-never fires.
+migrations, and seeds the demo studio because `users` is empty.
 
-Verified cold, with no `DATABASE_URL` and no `DB_PATH`:
+Verified cold, with no `DATABASE_URL`, no `DB_PATH` and no credential:
 
 ```
 GET /api/ready         200 {"ready":true,"engine":"sqlite"}
-POST /api/auth/login   200 admin session
-GET /api/projects      200 seeded projects
-GET /api/dashboard     200 {"openTasks":73,"inFlight":31,"blocked":8,...}
+GET /api/auth/session  200 {"authMode":"none","user":{"name":"Maya Iyer",...}}
+GET /api/projects      200 6 seeded projects
+GET /api/dashboard     200 {"kpis":{"openTasks":73,"inFlight":31,"blocked":8,...}}
+POST /api/clients      201 created, no credential sent
 ```
+
+**The cost, stated plainly:** SQLite in `/tmp` is per-instance. Every cold start
+begins with a fresh database, so anything a user creates is lost when the function
+recycles, and two concurrent instances do not see each other's writes. It is enough
+to evaluate the product; it is not enough to use it. Set `DATABASE_URL` for
+durable storage — that is the only difference between the two modes, and it is
+why the API reports `"engine":"sqlite"` on `/api/ready` and names the consequence
+on any boot failure.
 
 **What this mode is not.** SQLite lives in `/tmp`, which is per-instance and
 discarded. Specifically:
@@ -387,86 +390,44 @@ instance instead.
 `/api/health` always reports the engine (`sqlite` or `postgres`), so which mode a
 deployment is in is never a guess.
 
-### 1.4 Provision the database and the login — the exact steps
+### 1.4 Provision the database — the exact steps
 
-Run these **after** the first deployment, from a machine with the repository
-checked out and the same `DATABASE_URL` exported. They are not part of the build;
-each is a deliberate, one-off act.
-
-**Step 1 — create the schema.**
+There is no login to provision. The only setup step is the database, and skipping
+it is a supported (if non-durable) configuration.
 
 ```bash
-npm ci
+# 1. Migrate the schema. Idempotent, safe to re-run.
 DATABASE_URL='postgres://…' npm run db:migrate:prod
 # Expected: "✓ migrations applied: 15" (or "already at version 15" on a re-run)
+
+# 2. Seed the demo studio. Required only on a fresh database: the API attributes
+#    requests to a row in `users`, and cannot invent one.
+DATABASE_URL='postgres://…' npm run db:seed
+# Expected: a summary of the rows created.
+
+# 3. Confirm.
+curl -s https://<your-deployment>/api/ready   | jq
+curl -s https://<your-deployment>/api/projects | jq '.data | length'
 ```
 
-Migrations are forward-only and additive; running them twice is safe.
+`npm run db:seed` is the step that matters on a new database. Without a `users`
+row the API answers `503 misconfigured` and says exactly that — it will not refuse
+with a 401, because there is no authentication to fail:
 
-**Step 2 — generate the hash.** Nothing is written to disk.
-
-```bash
-RELAY_LOGIN_PASSWORD='your-chosen-password' node scripts/set-password.mjs --print-env
-
-# If the password is shorter than 12 characters the script refuses and generates
-# nothing:
-#   "Password is 11 characters; 12 is recommended for an internet-facing login."
-# That is a warning about margin, not a validation failure you should work around
-# silently. Re-run with --allow-short if you accept it; the script then prints the
-# mitigations that remain (Argon2id m=65536,t=3,p=4, login lockout, distributed
-# rate limiting) and still verifies the hash before printing it.
-# prints RELAY_LOGIN_USERNAME and RELAY_ADMIN_PASSWORD_HASH, then verifies the
-# hash by checking the password against it before printing.
+```json
+{
+  "error": {
+    "code": "misconfigured",
+    "stage": "identity",
+    "message": "No users exist in the database, so requests cannot be attributed. Run `npm run db:seed`, or set OPERATOR_USER_ID to an existing user id. (Looked for "usr_maya".)"
+  }
+}
 ```
 
-The script enforces 12+ characters. If you must use a shorter one it will refuse
-unless you add `--allow-short`, and it then prints a warning explaining the
-reduced margin and the mitigations that remain (Argon2id cost, dual throttling).
-It never writes a `.env` file — a secret in a checkout is a secret one `git add`
-away from being public.
-
-**Step 3 — write the credential, then confirm it.**
-
-```bash
-RELAY_LOGIN_USERNAME='your-shared-username' RELAY_ADMIN_PASSWORD_HASH='$argon2id$…' DATABASE_URL='postgres://…'   npm run db:pg:assign-login
-
-# Expected:
-#   ✓ created user usr_owner (admin)                     [first run only]
-#   ✓ provisioned credential for "<username>" → user usr_owner
-#   ✓ verified: username "<username>", version 1, enabled
-```
-
-The command reads the row back after writing and fails if it cannot. Add it to the
-Vercel environment variables as well, so the boot-time validation applies and a
-future rotation is a one-line change.
-
-**Step 4 — verify the deployment.**
-
-```bash
-curl -sS -o /dev/null -w '%{http_code}
-' https://<your-deployment>/api/live     # 200
-curl -sS -o /dev/null -w '%{http_code}
-' https://<your-deployment>/api/projects # 401
-curl -sS -o /dev/null -w '%{http_code}
-' https://<your-deployment>/api/ready    # 200
-```
-
-`401` on `/api/projects` is the correct answer and the one worth checking: it
-proves an unauthenticated visitor cannot read data. Then open the deployment root
-in a browser, sign in with the shared username and password, and confirm the
-dashboard renders. Reload a deep link such as `/projects/pr_northwind` — the SPA
-must restore the session and render, not redirect to `/login` or 404.
-
-**Step 5 — rotate the password (when needed).**
-
-```bash
-RELAY_LOGIN_PASSWORD='the-new-password' node scripts/set-password.mjs --print-env
-RELAY_LOGIN_USERNAME='…' RELAY_ADMIN_PASSWORD_HASH='…' DATABASE_URL='…' npm run db:pg:assign-login
-```
-
-Re-running `assign-login` bumps `version`, which invalidates every live session at
-its next request. You do not need to enumerate or delete session rows. Update the
-Vercel variable afterwards so future boots validate the current hash.
+> **The old `set-password` and `assign-login` scripts are obsolete.** They still
+> exist and still run, but nothing reads `local_credentials`, so the credential
+> they write has no effect on access. Do not treat running them as part of a
+> deployment.
 
 ### 1.5 Cron — and its honest limit
 
@@ -487,61 +448,30 @@ mechanism. Deadline processing also runs inline on real requests, throttled by
   nothing twice, because the sweep only touches timers whose deadline has passed
   and whose outcome is still `running`.
 
-### 1.5.0 When the deployed sign-in screen says the API is unreachable
+### 1.5.0 When the deployed dashboard says the API is unreachable
 
-The first thing a newly deployed instance shows is the sign-in screen, and it used
-to report every failure the same way — *"Could not load identities. Is the API
-running on :4000?"* — which is false on every deployed host and points at the
-wrong problem. It now distinguishes three cases, and the distinction is the
-diagnosis:
+There is no sign-in screen, so a failure now appears inside the dashboard as an
+inline message from `ApiFailure`. Three of them are distinguishable, and the
+distinction is the point — the original bug here reported "is the API running on
+:4000?" for a 503, which is false on every deployed host.
 
-| What the screen says | What it means | Where to look |
+| Message | Means | Fix |
 | --- | --- | --- |
-| *"This deployment is not configured yet"* + a list of variable names | The API is **running and healthy**. It refused to boot because its environment is incomplete, and it has told you exactly what is missing | `error.missing` on any `/api` response, then §1.4 |
-| *"Could not reach the API"* | The request never completed. Routing or deployment, not configuration | The `/api` rewrite, and that both services appear in the build log |
-| *"The API rejected the request (status · code)"* | The API answered and refused. Read the status | The status itself; 401 at sign-in means no credential is provisioned |
+| "This deployment is not configured yet." | The API is running and told you exactly what is wrong. | Read the variable names it lists. |
+| "Could not reach the API." | The request never completed: wrong host, a build without the service, a network fault. | Check the deployment and the routing config. |
+| A status and code, e.g. `429 rate_limited`. | The API answered and refused this particular request. | See the status. |
 
-The middle row is the only one that is a connectivity question, which is why the
-other two no longer claim to be.
-
-**Read the JSON, not the screen.** Every `/api` route answers a provisioning
-failure identically, so `curl` is faster than the browser:
+Check the deployment directly:
 
 ```bash
-curl -s https://<deployment>/api/ready | jq .error
+curl -s https://<your-deployment>/api/health | jq '.data | {status, storage, authMode}'
+curl -s https://<your-deployment>/api/ready  | jq
 ```
 
-```json
-{
-  "code": "misconfigured",
-  "stage": "configuration",
-  "summary": "SESSION_SECRET is required (used to sign CSRF tokens and cookie sessions)",
-  "missing": ["SESSION_SECRET", "DATABASE_URL"],
-  "invalid": [],
-  "remedy": [
-    "Set SESSION_SECRET to 32+ random bytes: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
-    "Set DATABASE_URL to your provider's pooled PostgreSQL connection string (…)",
-    "Run the schema migration: DATABASE_URL=… npm run db:migrate:prod",
-    "Provision the shared login: npm run set-password, then npm run db:pg:assign-login",
-    "Redeploy and confirm GET /api/ready returns 200"
-  ]
-}
-```
-
-Three properties are deliberate and tested (`apps/api/test/vercel.test.mjs`):
-
-- **Names, never values.** This endpoint is unauthenticated. It says
-  `SESSION_SECRET` is missing; it never echoes a secret, a hash or a connection
-  string.
-- **503, not 500.** The instance genuinely is unavailable. `500` suggests a bug;
-  `503` says "not ready", which is what this is.
-- **Not cached.** `Cache-Control: no-store`. A cached failure would keep the
-  deployment looking broken after it was fixed.
-
-`stage` separates the two ways a boot fails: `configuration` (the guard refused
-before opening a connection) and `database` (the connection or migration failed
-after). They have entirely different fixes, and conflating them is how the
-original `500` wasted an afternoon.
+`/api/ready` reports the storage engine. If it says `"engine":"sqlite"` on a
+production deployment, `DATABASE_URL` is not set and **data will not persist
+across cold starts** — that is the most common real problem, and it is not an
+authentication problem.
 
 ### 1.5.1 Running this locally
 
@@ -678,33 +608,31 @@ Required environment (see `.env.example`):
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `NODE_ENV` | yes | `production` |
-| `DATABASE_URL` | yes | `postgres://user:pass@host:5432/relay` |
-| `AUTH_MODE` | yes | `oidc` for a real deployment |
-| `SESSION_SECRET` | yes | ≥32 random bytes; boot fails without it |
-| `OIDC_ISSUER` / `OIDC_AUDIENCE` / `OIDC_JWKS_URI` | when `AUTH_MODE=oidc` | boot fails if incomplete |
+| `DATABASE_URL` | strongly recommended | `postgres://user:pass@host:5432/relay`. Without it the app runs on SQLite in `/tmp`, which works but does not persist. |
+| `CRON_SECRET` | recommended | Authenticates `/api/cron/sweep`; without it the endpoint returns 503 rather than running open. |
 | `CORS_ORIGIN` | recommended | comma-separated origins; `*` is a local default |
 | `PORT` / `HOST` | no | `4000` / `0.0.0.0` |
 | `SWEEP_INTERVAL_MS` | no | `60000` |
 | `SKIP_MIGRATE` | no | set to `1` only when a one-shot migrator ran first |
+| `OPERATOR_USER_ID` | no | which `users` row requests are attributed to; defaults to `usr_maya` |
+
+There is no authentication configuration. `AUTH_MODE`, `SESSION_SECRET`,
+`RELAY_ADMIN_PASSWORD_HASH` and the `OIDC_*` variables are **ignored** — they may
+still be present in an environment, and they change nothing.
 
 #### Verified boot behaviour
 
 | Scenario | Result |
 | --- | --- |
-| `NODE_ENV=production` + `AUTH_MODE=dev`, no opt-in | **refuses to boot** (`AUTH_MODE=dev is refused in production…`) |
-| `NODE_ENV=production` + `AUTH_MODE=oidc`, partial OIDC vars | **refuses to boot** (`requires OIDC_ISSUER, OIDC_AUDIENCE and OIDC_JWKS_URI`) |
-| `NODE_ENV=production` + `AUTH_MODE=dev` + `ALLOW_DEV_AUTH_IN_PRODUCTION=1` | boots, logs `INSECURE AUTHENTICATION…`, serves the demo stack |
-| No `SESSION_SECRET` | **refuses to boot** |
+| Any environment, including none at all | **boots and serves.** This is the property the previous release failed: a missing `SESSION_SECRET` refused boot, and every request got a non-JSON 500. |
+| `NODE_ENV=production` + a stale `AUTH_MODE=dev` | boots; the variable has no effect and no gate is re-armed |
+| `NODE_ENV=production` + a malformed password hash | boots; nothing reads the hash, so it cannot be a startup failure |
+| Empty database (migrated, not seeded) | `/api/ready` → 200; business reads → `503 misconfigured` naming `npm run db:seed` as the fix |
 
-With the escape hatch set and PostgreSQL attached: `/api/ready` →
-`{ready:true, engine:"postgres"}`, `/api/health` → `schemaVersion: 7`,
-`storage: "postgres"`; `POST /api/auth/dev-login` issued a real session;
-`GET /api/dashboard` returned live KPIs from PostgreSQL; an anonymous read
-returned `401`; a mutation without a CSRF token returned `403`.
-
-> The escape hatch exists so a reviewer can run the *production build* locally.
-> It is not a deployment mode. It announces itself at boot and is refused
-> unless the value is exactly `1`.
+With PostgreSQL attached: `/api/ready` → `{ready:true, engine:"postgres"}`,
+`/api/health` → `{status:"ok", storage:"postgres", authMode:"none"}`,
+`GET /api/projects` → 200 **with no cookie and no token**, and a mutation with no
+CSRF token succeeds — because there is neither a session nor a CSRF token.
 
 ### 2.3 Docker path — executed on CI
 

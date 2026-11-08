@@ -20,8 +20,8 @@ permissions:
   contents: read
 
 env:
-  SESSION_SECRET: ci-session-secret-not-a-production-value
-  AUTH_MODE: dev
+  # No authentication variables. The suite asserts that the API works without
+  # them — supplying them would weaken that assertion.
 
 jobs:
   drill:
