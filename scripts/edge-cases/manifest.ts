@@ -155,7 +155,7 @@ export const ROUTE_META: Record<string, Partial<RouteDef>> = {
   'GET /api/projects/:id': { needsId: 'project' },
   'PATCH /api/projects/:id/phases/:phaseRowId': { needsId: 'project', body: { status: 'active' } },
   'GET /api/tasks/:id': { needsId: 'task' },
-  'POST /api/tasks': { body: { title: 'Probe task' } },
+  'POST /api/tasks': { body: { title: 'Probe task', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' } },
   'PATCH /api/tasks/:id': { needsId: 'task', body: { title: 'Probe renamed' } },
   'DELETE /api/tasks/:id': { needsId: 'task' },
   'POST /api/tasks/:id/comments': { needsId: 'task', body: { body: 'probe' } },
@@ -219,7 +219,7 @@ export const ROUTE_SURFACE: RouteDef[] = [
   // --- tasks
   { method: 'GET', path: '/api/tasks' },
   { method: 'GET', path: '/api/tasks/:id', needsId: 'task' },
-  { method: 'POST', path: '/api/tasks', body: { title: 'Probe task' } },
+  { method: 'POST', path: '/api/tasks', body: { title: 'Probe task', boardId: 'b1', columnId: 'b1_todo', projectId: 'p1' } },
   { method: 'PATCH', path: '/api/tasks/:id', needsId: 'task', body: { title: 'Probe renamed' } },
   { method: 'DELETE', path: '/api/tasks/:id', needsId: 'task' },
   { method: 'POST', path: '/api/tasks/:id/comments', okStatus: 200, needsId: 'task', body: { body: 'probe' } },
