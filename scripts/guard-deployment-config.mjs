@@ -216,6 +216,118 @@ if (cfg) {
     }
 
     /*
+     * Build and install commands, per service.
+     *
+     * This is the check that was missing when a production deploy failed with
+     * `vite: command not found` after installing 95 packages.
+     *
+     * Two independent mistakes produced it, and either alone is fatal:
+     *
+     *  1. Vercel installs with production-mode npm, which omits devDependencies.
+     *     `vite` and `typescript` are devDependencies — correctly, they are build
+     *     tools, not runtime code — so they are simply absent when the build runs.
+     *     Verified here: `npm ci --omit=dev` from apps/web adds 52 packages and
+     *     leaves no vite; `--include=dev` adds 134 and hoists it to the root bin.
+     *  2. The root `build` script builds *both* workspaces in sequence. Using it as
+     *     one service's build command compiles the other service too, and fails the
+     *     moment that sibling's own dependencies are absent.
+     *
+     * So each service declares its own install command (with dev dependencies) and
+     * its own single-workspace build command. The fix is configuration; moving Vite
+     * into dependencies would hide mistake 1 rather than correct it.
+     */
+    for (const [name, svc] of Object.entries(services)) {
+      if (!svc || svc.runtime === 'container') continue;
+
+      const install = String(svc.installCommand ?? '');
+      if (!install) {
+        fail(
+          `service "${name}" declares no installCommand. Vercel's default production install omits ` +
+            'devDependencies, so build tools such as vite and tsc are missing when the build runs',
+        );
+      } else if (!install.includes('--include=dev')) {
+        fail(
+          `service "${name}" installCommand ("${install}") does not include devDependencies; ` +
+            'add --include=dev or the build tools will be absent',
+        );
+      }
+
+      const build = String(svc.buildCommand ?? '');
+      if (!build) {
+        fail(`service "${name}" declares no buildCommand; the platform would run the wrong default`);
+      } else if (/\bgit\b/.test(build) || build.includes('--ignore-scripts')) {
+        fail(`service "${name}" buildCommand looks unrelated to building this workspace: "${build}"`);
+      }
+    }
+
+    /*
+     * The .npmrc fallback.
+     *
+     * The service installCommands are the primary fix, but the failing deployment ran
+     * the *root* `npm run build` — not a service build — which means the install that
+     * starved the build did not come from a service installCommand. `include=dev` in
+     * .npmrc makes every install include the build toolchain regardless of which
+     * command or directory drives it, so a config path we have not anticipated cannot
+     * reintroduce `vite: command not found`.
+     */
+    if (!exists('.npmrc')) {
+      fail('.npmrc is missing; it carries `include=dev`, the fallback that keeps a plain production install from omitting the build toolchain');
+    } else {
+      const npmrc = read('.npmrc')
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('#'))
+        .join('\n');
+      if (!/^\s*include\s*=\s*dev\s*$/m.test(npmrc)) {
+        fail('.npmrc must set `include=dev`; without it a production install omits vite and tsc');
+      }
+      if (/^\s*ignore-scripts\s*=/m.test(npmrc)) {
+        fail(
+          '.npmrc sets `ignore-scripts`, which disables every dependency lifecycle script. ' +
+            'Approve the scripts that are needed via `allowScripts` in package.json instead',
+        );
+      }
+      if (/^\s*cache-dir\s*=/m.test(npmrc)) {
+        fail('.npmrc sets `cache-dir`, which npm no longer recognises; use `cache`');
+      }
+    }
+
+    // The API must build only the API, and the web service only the web.
+    if (api?.buildCommand && !String(api.buildCommand).includes('-w @relay/api')) {
+      fail(
+        `api buildCommand is "${api.buildCommand}"; it must build only @relay/api. The root ` +
+          '"npm run build" builds both workspaces sequentially and is not a valid service build command',
+      );
+    }
+    const webSvc = services.web;
+    if (webSvc?.buildCommand && /-w @relay\/api|\bbuild --workspaces\b/.test(String(webSvc.buildCommand))) {
+      fail(
+        `web buildCommand "${webSvc.buildCommand}" builds the API as well; each service builds independently`,
+      );
+    }
+    if (webSvc && String(webSvc.outputDirectory ?? '') !== 'dist') {
+      fail(`web outputDirectory is "${webSvc.outputDirectory ?? '(unset)'}" but the Vite build writes to dist`);
+    }
+
+    /*
+     * `services` vs `experimentalServices`.
+     *
+     * There are two related-but-distinct configuration models. `services` (the one used
+     * here) pairs with "build and runtime settings belong in the service" and public
+     * routing at the top level. `experimentalServices` is the earlier model, keyed by
+     * `entrypoint` + `routePrefix`.
+     *
+     * Vercel rejects declaring both, and a project still configured against the old model
+     * fails to build as services. Either way the symptom appears far from the cause, which
+     * is why this is asserted rather than remembered.
+     */
+    if (cfg.experimentalServices) {
+      fail(
+        'vercel.json declares "experimentalServices"; this project uses the current "services" ' +
+          'model, and the two cannot be declared together',
+      );
+    }
+
+    /*
      * No container service.
      *
      * The `app` service existed to serve the SPA from an image while the `web`
@@ -267,11 +379,34 @@ if (cfg) {
        * someone reloads a deep link rather than clicking through the app.
        */
       const webRewrites = Array.isArray(web.rewrites) ? web.rewrites : [];
-      const fallback = webRewrites.find((r) => String(r.source ?? '') === '/(.*)');
+      const fallback = webRewrites.find((r) => String(r.destination ?? '') === '/index.html');
       if (!fallback) {
-        fail('the web service has no "/(.*)" SPA fallback — a deep-link refresh would 404');
-      } else if (String(fallback.destination ?? '') !== '/index.html') {
-        fail(`the web service fallback targets "${fallback.destination}", not /index.html`);
+        fail('the web service has no fallback to /index.html — a deep-link refresh would 404');
+      } else if (String(fallback.source ?? '') === '/(.*)') {
+        /*
+         * The naive catch-all. It fixes deep links and quietly breaks assets.
+         *
+         * `/(.*)` also matches `/assets/index-abc123.js`, so a request for a missing or
+         * stale hashed asset is answered with the HTML document and status 200. The
+         * browser reports a MIME type error instead of a 404, and a stale reference
+         * renders a blank page rather than failing cleanly.
+         *
+         * The fallback therefore has to exclude anything that looks like a file. Verified
+         * against the real build: with `/(.*)` three missing-asset cases return the
+         * document; with the extension guard they 404 and deep links still resolve.
+         * `scripts/verify-web-routing.mjs` proves it against the built output, because
+         * `vercel dev` proxies the Vite dev server, which applies its own fallback first.
+         */
+        fail(
+          'the web fallback is "/(.*) → /index.html", which also swallows missing assets: ' +
+            'they would return the SPA document with status 200 instead of 404. Exclude ' +
+            'file-like paths, e.g. "/((?!assets/)[^.]*)"',
+        );
+      } else if (!/\[\^\.\]|\.\+|\{\d/.test(String(fallback.source ?? ''))) {
+        fail(
+          `the web fallback source "${fallback.source}" does not appear to exclude file-like ` +
+            'paths; missing assets would receive the SPA document instead of a 404',
+        );
       }
     }
 
@@ -382,7 +517,22 @@ if (cfg) {
 
   const engines = String(pkg.engines?.node ?? '');
   if (!engines) fail('package.json declares no engines.node, so Vercel cannot pin the runtime');
-  else note(`engines.node ${engines}`);
+  else if (!/<\d+|\s/.test(engines) || !/^[><=~^]*\s*\d+/.test(engines)) {
+    fail(`engines.node "${engines}" is not a usable range`);
+  } else if (!/\s<|\|\||\^22\.\d+\.\d+$/.test(engines)) {
+    /*
+     * An open-ended lower bound is not a pin. `>=22.5.0` is satisfied by every future
+     * major too, so when a new Node major ships Vercel upgrades the build image and the
+     * runtime changes without anyone deciding to. The deploy log warned about exactly
+     * this. A bounded range keeps the project on the line it was verified against.
+     */
+    fail(
+      `engines.node "${engines}" has no upper bound; Vercel will auto-upgrade to a future ` +
+        'major Node version. Pin the supported LTS line, e.g. ">=22.5.0 <23"',
+    );
+  } else {
+    note(`engines.node ${engines} (bounded to the Node 22 LTS line)`);
+  }
 }
 
 // --------------------------------------------------------- secrets and state
@@ -465,6 +615,98 @@ if (!exists(DEPLOY_DOC)) {
     notes.push(`deployment guide migration count matches db/migrations (${migrationCount})`);
   } else {
     fail('docs/DEPLOYMENT.md no longer states the expected migration count — Step 1 needs a verifiable expectation');
+  }
+}
+
+/**
+ * The install-script allowlist.
+ *
+ * npm 12 stopped running dependency lifecycle scripts by default; they run only when
+ * `package.json` approves them in `allowScripts`. Vercel's log flagged
+ * `argon2@0.41.1 (install: node-gyp-build)` as not approved, which is the one script
+ * this deployment genuinely needs.
+ *
+ * The failure mode this check exists for is a *silent* one: approval is pinned to an
+ * exact version, so bumping argon2 without updating the pin means the script stops
+ * running and the native binding arrives missing — at runtime, not at build time.
+ *
+ * The allowlist must stay narrow. Approving broadly to make a warning disappear is
+ * the blanket trust the mechanism exists to remove.
+ */
+{
+  const rootPkg = JSON.parse(read('package.json'));
+  const approved = rootPkg.allowScripts ?? {};
+  const names = Object.keys(approved);
+
+  if (!names.length) {
+    fail('package.json has no "allowScripts"; npm 12+ would skip every dependency install script');
+  }
+  for (const [name, ok] of Object.entries(approved)) {
+    if (ok !== true) continue; // explicit `false` is a deliberate denial, not a problem
+    if (!name.includes('@')) {
+      fail(
+        `allowScripts entry "${name}" is not version-pinned. A bare name approves every future ` +
+          'version without review — pin it as "<name>@<version>"',
+      );
+    }
+  }
+
+  /*
+   * argon2 must be approved at exactly the version that will be installed. Resolved
+   * from the lockfile rather than node_modules so the guard runs on a bare checkout
+   * (CI calls it before and after installing; a guard that needs an install to run
+   * is a guard that gets skipped).
+   */
+  const lock = JSON.parse(read('package-lock.json'));
+  const installed =
+    lock.packages?.['node_modules/argon2']?.version ??
+    lock.packages?.['apps/api/node_modules/argon2']?.version;
+  if (!installed) fail('package-lock.json does not contain argon2 — the lockfile is out of sync');
+  if (!approved[`argon2@${installed}`]) {
+    const pinned = names.filter((n) => n.startsWith('argon2@'));
+    fail(
+      `allowScripts does not approve argon2@${installed}` +
+        (pinned.length ? ` (it pins ${pinned.join(', ')})` : '') +
+        ' — the native binding would be skipped and password verification would fail at runtime',
+    );
+  } else {
+    notes.push(`argon2@${installed} install script approved (node-gyp-build; prebuilt, no compile)`);
+  }
+
+  // Build/bundler scripts are not needed: they ship working binaries, and nothing in
+  // this repo rebuilds them. Approving them would widen the allowlist for no reason.
+  for (const name of names) {
+    if (/^esbuild@|^@embedded-postgres\//.test(name) && approved[name] === true) {
+      fail(
+        `allowScripts approves "${name}", which this deployment does not need. ` +
+          'Keep the allowlist to the scripts the build actually requires',
+      );
+    }
+  }
+}
+
+/**
+ * The Services framework preset is a dashboard setting, so it cannot be asserted from
+ * here — but the *documentation* of it can be, and that is the deliverable the requester
+ * follows. A guide that stops saying "set the preset to Services" leaves the next person
+ * with a silent fallback and no stated cause.
+ */
+if (exists(DEPLOY_DOC)) {
+  const doc = read(DEPLOY_DOC);
+  const presetRow = /\|\s*\*\*Framework Preset\*\*\s*\|\s*\*\*`Services`\*\*/i.test(doc);
+  if (!presetRow) {
+    fail(
+      'docs/DEPLOYMENT.md no longer instructs the reader to set the Framework Preset to ' +
+        'Services — without that preset Vercel silently ignores the services block',
+    );
+  } else {
+    notes.push('deployment guide states the Services framework preset requirement');
+  }
+  if (/\|\s*Framework preset\s*\|\s*Leave to `vercel\.json`/i.test(doc)) {
+    fail(
+      'docs/DEPLOYMENT.md claims the framework preset can be left to vercel.json; it is a ' +
+        'project-level setting and Services mode is required',
+    );
   }
 }
 

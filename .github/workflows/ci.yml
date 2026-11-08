@@ -151,6 +151,42 @@ jobs:
             apps/api/dist
           retention-days: 7
 
+  service-builds:
+    # Reproduces what Vercel actually does: each service installed and built on its
+    # own, from a clean tree, with production NODE_ENV. The main `verify` job builds
+    # the workspaces from a root install, which is a different thing — it is exactly
+    # how a missing build tool reached production while CI stayed green.
+    name: Vercel service builds (independent, production install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Deliberately no `cache: npm` and no root `npm ci`: the harness wipes
+      # node_modules and lets each service run its own installCommand.
+      - name: API service — install and build in isolation
+        run: node scripts/verify-service-builds.mjs . api
+
+      - name: Web service — install and build in isolation
+        run: node scripts/verify-service-builds.mjs . web
+
+      - name: Web build is a complete SPA (document + hashed assets)
+        run: |
+          test -f apps/web/dist/index.html
+          test -d apps/web/dist/assets
+          grep -q '<div id="root">' apps/web/dist/index.html
+          echo "✓ SPA document and assets present"
+
+      # The rewrite table is applied to the real build here, because `vercel dev`
+      # cannot answer this: it proxies the Vite dev server, which serves index.html for
+      # every unmatched path itself. A naive /(.*) fallback would make a missing asset
+      # return the SPA document with status 200 instead of a 404.
+      - name: Built output routes correctly (deep links, asset 404s, /api not HTML)
+        run: npm run verify:routing
+
   audit-trail:
     name: Requirement traceability present
     runs-on: ubuntu-latest

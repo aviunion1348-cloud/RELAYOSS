@@ -8,6 +8,9 @@
     "apps/api",
     "apps/web"
   ],
+  "allowScripts": {
+    "argon2@0.41.1": true
+  },
   "scripts": {
     "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm run dev -w @relay/api",
@@ -44,6 +47,8 @@
     "db:pg:assign-login": "DATABASE_URL=\"${DATABASE_URL:-$(node scripts/pg-dev.mjs url 2>/dev/null)}\"; export DATABASE_URL; node apps/api/src/db/cli.ts assign-login",
     "set-password": "node scripts/set-password.mjs",
     "build:vercel": "npm run build -w @relay/api && npm run build -w @relay/web",
+    "build:service": "node scripts/verify-service-builds.mjs . api && node scripts/verify-service-builds.mjs . web",
+    "verify:routing": "node scripts/verify-web-routing.mjs",
     "db:migrate:prod": "node apps/api/dist/db/cli.js migrate"
   },
   "devDependencies": {
@@ -52,7 +57,7 @@
     "playwright": "^1.49.1"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.5.0 <23"
   },
   "dependencies": {
     "argon2": "^0.41.1"

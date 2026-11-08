@@ -31,9 +31,22 @@ Both services are public, and each one receives exactly the traffic it is built 
 * **`api`** is reachable only under `/api/*`. It has no rewrite of its own; the
   top-level `/api/(.*)` rule is the only way in.
 * **`web`** is the catch-all. Because routing into a service is final, the service
-  owns its own deep-link behaviour — `web` declares a service-level
-  `/(.*) → /index.html` fallback so that reloading `/projects/pr_northwind` returns
-  the document rather than a 404.
+  owns its own deep-link behaviour — `web` declares a service-level fallback so that
+  reloading `/projects/pr_northwind` returns the document rather than a 404.
+* **The fallback is not `/(.*)`.** That pattern also matches `/assets/index-abc123.js`,
+  so a missing or stale hashed asset would be answered with the HTML document and
+  status 200: the browser reports a MIME type error instead of a 404, and a stale
+  reference renders a blank page rather than failing cleanly. The fallback excludes
+  file-like paths:
+
+  ```json
+  { "source": "/((?!assets/)[^.]*)", "destination": "/index.html" }
+  ```
+
+  Deep links (`/projects/pr_northwind`) contain no dot and resolve to the document;
+  anything with an extension 404s. `npm run verify:routing` proves this against the
+  built output — `vercel dev` cannot, because it proxies the Vite dev server, which
+  serves `index.html` for every unmatched path itself.
 * Order matters. Vercel routes to the first match, so a catch-all listed first would
   swallow `/api` entirely. The guard asserts the order.
 
@@ -62,21 +75,52 @@ and CI path — see §1.6.
 
 ### 1.2 The project settings
 
-Import the GitHub repository into Vercel and use these values. Nothing in the
-source needs to change.
+Import the GitHub repository into Vercel and use these values.
+
+> **The Framework Preset must be set to `Services`. This is not optional and cannot be
+> committed.** Vercel only builds a `services` block when the *project* framework preset
+> is Services. If the preset is anything else, Vercel ignores the block **silently** and
+> falls back to ordinary single-app framework detection — which runs the root
+> `npm run build` and ignores every per-service `installCommand`.
+
+That fallback is exactly the failure this repository was reporting:
+
+```
+20:30:30.487 Running "npm run build"
+20:30:30.611 > relay-oss@1.0.0 build
+20:30:34.584 > @relay/web@1.0.0 build
+20:30:34.591 sh: line 1: vite: command not found
+```
+
+Three signals in that log identify it, and none of them is a repository defect:
+
+| Signal in the log | What it means |
+| --- | --- |
+| `Running "npm run build"` — the **root** script, once | Services mode runs each service's `buildCommand`. A single root build means the block was never read. |
+| `added 95 packages` | Vercel's production install excludes devDependencies. `vite` is a devDependency, so the frontend cannot build. Measured: a production root install adds 144 packages and leaves no `vite`. |
+| No `api [Fastify]` / `web [Vite]` lines | Services were never detected. `vercel dev -L` prints them immediately. |
+
+**The dashboard is the fix, and only the dashboard can apply it.**
 
 | Setting | Value |
 | --- | --- |
-| Framework preset | Leave to `vercel.json` — per service: **Fastify** (`api`), **Vite** (`web`) |
-| Root directory | Repository root — **leave blank** |
-| Build command, output directory, install command | **Per service in `vercel.json`** — these keys are *invalid* at the top level in services mode |
-| Node.js version | **22.x** (`engines.node` is `>=22`; verified on v22.22.3) |
-| Include files outside root | Not required |
+| **Framework Preset** | **`Services`** — required, see above |
+| Root Directory | Repository root — **leave blank** |
+| Build Command | **Leave empty.** A value here overrides the per-service `buildCommand`s even when the preset is Services |
+| Install Command | **Leave empty.** Same reason |
+| Output Directory | **Leave empty** — the `web` service declares `dist` itself |
+| Node.js Version | **22.x** (`engines.node` is `>=22.5.0 <23`; verified on v22.22.3) |
 
-The dashboard has no single build command or output directory to set in services
-mode; `vercel.json` owns them per service. If the dashboard offers a top-level
-build command, leave it empty — a value there is either ignored or rejected, and
-either way it is a confusing build failure rather than a config error.
+If an existing project was imported before the preset was switched, the framework
+preset and any Build/Install Command overrides must be corrected before redeploying.
+Clearing those two overrides matters as much as the preset: a stale
+`npm run build` in the dashboard is what produced the log above even though
+`vercel.json` had already been corrected.
+
+`vercel.json` cannot carry these values. `framework`, `buildCommand`,
+`installCommand` and `outputDirectory` are **invalid at the top level** whenever
+`services` is present, so writing them there to compensate would produce a
+configuration error instead of a fix.
 
 ### 1.2.1 Which service exists to do what
 
@@ -95,12 +139,137 @@ single-process deployment — API and SPA in one process on :4000, with a
 service, and nothing routes to it.
 
 **Workspace dependencies.** Each service builds from its own `root`, but the
-repository is an npm workspace. npm resolves `apps/web`'s dependencies by walking up
-to the repo-root `package-lock.json`, so `npm ci` run from `apps/web` installs the
-correct tree without any per-service `installCommand`. This was verified directly
-(`npm ci` from `apps/web` in a scratch directory with no local manifest: 134
-packages, resolved through the workspace root). No service needs an
-`installCommand`, and no duplicate container is needed to work around one.
+repository is an npm workspace. npm resolves `apps/web` by walking up to the
+repo-root `package-lock.json`, so `npm ci` run from `apps/web` installs the correct
+tree. Verified: with the root lockfile removed, `npm ci` from `apps/web` fails
+outright — so the resolution genuinely comes from the workspace root, and each
+service needs no lockfile of its own.
+
+### 1.2.2 Build and install commands — and the failure they fix
+
+A production deploy failed with:
+
+```
+npm run build
+> npm run build -w @relay/api && npm run build -w @relay/web
+Web build: FAIL
+sh: line 1: vite: command not found
+```
+
+Two independent mistakes, each fatal on its own:
+
+1. **Vercel installs with production-mode npm, which omits `devDependencies`.**
+   `vite` and `typescript` are devDependencies — correctly, they are build tools, not
+   runtime code — so they were simply absent when the build ran. Measured: `npm ci`
+   from `apps/web` adds **52** packages and leaves no `vite`; `npm ci --include=dev`
+   adds **134** and hoists `vite` to the root bin, where `npm run build` resolves it.
+2. **The root `build` script builds both workspaces in sequence.** Using it as one
+   service's build command compiles the sibling too, and fails as soon as that
+   sibling's dependencies are missing.
+
+So each service declares both commands. These keys are invalid at the top level in
+services mode and belong in the service object:
+
+| Service | `installCommand` | `buildCommand` | `outputDirectory` |
+| --- | --- | --- | --- |
+| `api` | `npm ci --include=dev --no-audit --no-fund` | `npm run build -w @relay/api` | — |
+| `web` | `npm ci --include=dev --no-audit --no-fund` | `npm run build` | `dist` |
+
+`vite` stays a devDependency. Moving it into `dependencies` would hide mistake 1
+rather than correct it: the build would work for the wrong reason, and the next
+build-time tool to be added would fail the same way.
+
+**Reproducing this locally.** `npm run build:service` runs
+`scripts/verify-service-builds.mjs` for each service in turn: cwd at the service
+`root`, `NODE_ENV=production`, the service's own `installCommand` and `buildCommand`,
+then asserts the tool (`vite` / `tsc`) exists *before* the build and the expected
+output exists after. One service per invocation, so a pass proves that service builds
+alone. It correctly reproduces the original failure when the install command is
+reverted to a production-only one.
+
+CI runs the same harness as a separate `service-builds` job. The main `verify` job
+installs at the root and builds both workspaces — a genuinely different thing, and
+exactly how a missing build tool reached production while CI stayed green.
+
+**Does `include=dev` ship the development toolchain to production?** No. The
+serverless bundle is not the install tree: Vercel traces the function's actual imports
+and ships only those. Traced from `apps/api/dist/entrypoints/vercel.js`: **80 packages,
+655 files, and zero files from `vite`, `typescript`, `playwright`, `embedded-postgres`,
+`@vitejs/*`, `tailwindcss` or `concurrently`.** The bundle is Fastify, `pg`, `argon2`,
+`zod` and their transitive dependencies.
+
+The dev toolchain occupies build-machine disk for the duration of the build and nothing
+else. That is the normal arrangement for compiling TypeScript at build time, and it is
+cheaper than the alternative: a runtime install that cannot rebuild the bundle.
+
+**Node version.** `engines.node` is a bounded range, `>=22.5.0 <23`, not `>=22.5.0`.
+An open-ended lower bound is satisfied by every future major, so Vercel would auto-upgrade
+the build image and change the runtime without anyone deciding to — the deploy log warned
+about precisely this. GitHub Actions uses `node-version: 22`, so CI and the platform stay
+on the same line.
+
+### 1.2.3 Install scripts: the Argon2 approval
+
+The build log also reported `argon2@0.41.1 (install: node-gyp-build)` not approved.
+npm 12 stopped running dependency lifecycle scripts by default; they run only when
+`package.json` approves them in `allowScripts`. The approval is version-pinned, so a
+version bump cannot silently inherit it:
+
+```json
+"allowScripts": { "argon2@0.41.1": true }
+```
+
+`argon2` ships **prebuilt** binaries for `linux-x64` (glibc and musl), so
+`node-gyp-build` selects and links one — it does not compile, and no toolchain is
+needed. Verified on a clean install: Argon2id hash, correct password verifies, wrong
+password does not.
+
+Only `argon2` is approved. `esbuild` and the `@embedded-postgres/*` binaries also
+carry install scripts; neither is needed for this deployment, and approving them
+would widen the allowlist for no benefit. The guard fails if the list grows, if an
+entry is unpinned, or if the pin stops matching the locked version — because a stale
+pin fails at *runtime*, not at build time.
+
+### 1.2.4 The `cache-dir` warning
+
+`npm warn Unknown env config "cache-dir"` does not come from this repository: there
+is no `.npmrc` that sets it, no such key in any manifest, and no environment variable
+locally. Vercel's build image exports `npm_config_cache_dir`, and npm 11+ rejects that
+as an unknown key. The value was never honoured either way — `cache-dir` is not an npm
+setting (`cache` is).
+
+Because it arrives from the build environment, a repository cannot unset it; what it
+can do is pin the supported key, which `.npmrc` does:
+
+```
+cache=~/.npm
+```
+
+The warning is cosmetic and does not fail a build. It is documented rather than
+suppressed, and the `.npmrc` deliberately does **not** use `ignore-scripts` — that
+would silently disable every dependency lifecycle script, which is precisely what
+`allowScripts` exists to decide per package.
+
+### 1.2.5 The `.npmrc` fallback, and why it is not redundant
+
+`.npmrc` also carries `include=dev`:
+
+```
+cache=~/.npm
+include=dev
+```
+
+The service `installCommand`s already pass `--include=dev`, and the guard enforces
+that. This setting exists because the failing deployment ran the **root**
+`npm run build` — not a service build — so the production install that starved it did
+not come from a service `installCommand` at all. With `include=dev` at the project
+level, a plain `npm ci` installs the build toolchain regardless of which command,
+which directory, or which config path drives it.
+
+That is deliberately belt-and-braces rather than the primary fix: the per-service
+commands state the requirement where a reader looks for it, and the `.npmrc` line
+means an unanticipated install path cannot reintroduce `vite: command not found`.
+Both are asserted by the guard.
 
 ### 1.3 Environment variables
 
@@ -268,6 +437,13 @@ the fallback and the entrypoint.
 * `api`'s declared entrypoint exists and does **not** call `app.listen()` or start a
   timer — the failure that would land the Fastify preset on the long-lived entry;
 * `web`'s output directory is `dist`, matching the service build;
+* **every service declares an `installCommand` containing `--include=dev`** — the
+  production-mode install that omitted `vite` and broke the deploy;
+* **`api` builds only `@relay/api` and `web` does not build the API** — the root
+  `npm run build` builds both workspaces and is not a valid service build command;
+* `package.json` has an `allowScripts` map, every approving entry is version-pinned,
+  `argon2` is approved at exactly the locked version, and nothing the deployment does
+  not need (`esbuild`, `@embedded-postgres/*`) is approved;
 * every binding (there are none today) names a real service, is not self-referential,
   and does not have its variable set in `.env.example`;
 * no server-side source file contains a hardcoded loopback URL.
@@ -288,7 +464,14 @@ never failed is a guard you do not know works.
 | `/api/ready` returns 503 | `DATABASE_URL` wrong, or TLS required but not requested | Add `?sslmode=require`; check the pooled host |
 | Random timeouts under load | Pool exhaustion — too many instances × pool size | Use the pooled endpoint; lower `DATABASE_POOL_MAX` |
 | `/api/cron/sweep` returns 503 | `CRON_SECRET` unset | Set it; redeploy |
-| Deep links 404 but the root works | The `web` service is not falling back to the document | `web` must declare `rewrites: [{source: "/(.*)", destination: "/index.html"}]`; confirm the request reached `web` and not `api` |
+| `vite: command not found` (or `tsc: command not found`) during the build | Vercel installed with production-mode npm, which omits `devDependencies` | The service's `installCommand` must be `npm ci --include=dev --no-audit --no-fund`; confirm with `npm run build:service` |
+| The API build fails on a deploy but the web build is fine | That service is running the root `build` script, which compiles both workspaces | `api` must use `npm run build -w @relay/api`; `web` must use `npm run build`. Each service builds only its own workspace |
+| Password login returns 500 `no such table: local_credentials` | The database predates migration 0014; login is the first thing to touch that table | Run `npm run db:migrate:prod`, then `npm run db:pg:assign-login` |
+| `argon2` works locally but fails on the platform | npm 12 skipped the install script because the version is not approved | Update the pinned `allowScripts` entry to the installed version; the guard fails when the pin and the lockfile disagree |
+| `npm warn Unknown env config "cache-dir"` | Vercel's build image exports `npm_config_cache_dir`; npm 11+ rejects the key | Cosmetic. `.npmrc` pins the supported `cache` key; see §1.2.4 |
+| Deep links 404 but the root works | The `web` service is not falling back to the document | `web` must declare a fallback to `/index.html` that excludes file-like paths, e.g. `{"source": "/((?!assets/)[^.]*)", "destination": "/index.html"}`; confirm the request reached `web` and not `api` |
+| The app loads but shows a MIME type error, or a page goes blank after a deploy | A stale or missing hashed asset was answered with the SPA document (200) instead of 404 | The fallback is too broad — `/(.*)` catches `/assets/*`. Use the extension-guarded pattern above |
+| The deployment builds the root app instead of the two services | Framework Preset is not `Services`, or a project-level Build Command overrides the service commands | See §1.2: set the preset to Services and clear Build/Install Command |
 | `/api/*` returns the HTML page | The `/api` rewrite is missing | Check `vercel.json` rewrites are present and ordered |
 
 ### 1.7 What is not proven about the Vercel path
