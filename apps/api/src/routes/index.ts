@@ -18,6 +18,15 @@ import { plan } from '../domain/planner.ts';
 import { createTask, updateTask, taskDetail, recordAcceptance, ensureTaskChecks, ACCEPTANCE_LADDER } from '../services/tasks.ts';
 import { clockHealth, liveTimers, resolveTimer, startTimer, sweepTimers, closeTimersFor, pauseTimerFor, resumeTimerFor, clockHistory } from '../services/clocks.ts';
 import { transition, lifecycleView, addEvidence, getStages } from '../services/lifecycle.ts';
+import {
+  commsOverview, createThread, threadDetail, addMessage, addFollowUp,
+  addMeetingNote, providerStatuses,
+} from '../services/communications.ts';
+import {
+  listDocuments, documentDetail, createDocument, addSignatory, recordSignatoryDecision,
+  setDocumentStatus, uploadSignedCopy, createChangeRequest, decideChangeRequest,
+  expiringDocuments, esignStatus,
+} from '../services/legal.ts';
 import { setGauge, renderMetrics, sweeperStats } from '../lib/metrics.ts';
 import { evaluateShipGate, markShipped } from '../services/shipgate.ts';
 
@@ -1493,6 +1502,245 @@ export async function registerRoutes(
     if (!timer.paused_at) throw badRequest('This clock is not paused.');
     const resumed = await resumeTimerFor(db(), timer.entity_type, timer.entity_id, { actorId: identity.userId });
     return ok({ timer: resumed, events: await clockHistory(db(), timerId) });
+  });
+
+
+  /* -------------------------------------------------------- communications -- */
+  /**
+   * Client communications (R43). Delivery is provider-backed and the provider is
+   * not configured in this deployment, so the honest states are draft / recorded
+   * / unconfigured. No endpoint here can claim a message was sent.
+   */
+  app.get('/api/comms/providers', async () => ok({ providers: providerStatuses() }));
+
+  app.get('/api/comms', async (req) => {
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    const clientId = queryStr(req, 'clientId');
+    const cw = clientsWhere(scope, 'c');
+    if (clientId) {
+      const visible = await db().get<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [clientId, ...cw.params]);
+      if (!(visible?.c ?? 0)) throw notFound('Client not found');
+      return ok(await commsOverview(db(), clientId));
+    }
+    // Without a client filter, only return threads on visible clients.
+    const threads = await db().all<Record<string, any>>(
+      `SELECT t.*, c.name AS client_name,
+              (SELECT COUNT(*) FROM comm_messages m WHERE m.thread_id = t.id) AS message_count
+         FROM comm_threads t JOIN clients c ON c.id = t.client_id
+        WHERE (${cw.sql}) ORDER BY COALESCE(t.last_activity_at, t.created_at) DESC LIMIT 100`,
+      cw.params,
+    );
+    return ok({ threads, providers: providerStatuses() });
+  });
+
+  app.get('/api/comms/threads/:id', async (req) => {
+    const { id: threadId } = req.params as { id: string };
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    const thread = await db().get<{ client_id: string }>('SELECT client_id FROM comm_threads WHERE id = ?', [threadId]);
+    if (!thread) throw notFound('Thread not found');
+    const cw = clientsWhere(scope, 'c');
+    const visible = await db().get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [thread.client_id, ...cw.params]);
+    if (!(visible?.c ?? 0)) throw notFound('Thread not found');
+    return ok(await threadDetail(db(), threadId));
+  });
+
+  app.post('/api/comms/threads', async (req, reply) => {
+    const identity = await currentIdentity(req);
+    const scope = await resolveReadScope(db(), identity);
+    const body = req.body as { clientId?: string; projectId?: string; channel?: string; subject?: string };
+    if (!body.clientId || !body.channel || !body.subject) throw badRequest('clientId, channel and subject are required');
+    const cw = clientsWhere(scope, 'c');
+    const visible = await db().get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [body.clientId, ...cw.params]);
+    if (!(visible?.c ?? 0)) throw notFound('Client not found');
+    if (body.projectId) await assertProjectInScope(scope, body.projectId);
+    const thread = await createThread(db(), {
+      clientId: body.clientId, projectId: body.projectId, channel: body.channel,
+      subject: body.subject, actorId: identity.userId,
+    });
+    reply.code(201);
+    return ok(thread);
+  });
+
+  app.post('/api/comms/threads/:id/messages', async (req, reply) => {
+    const { id: threadId } = req.params as { id: string };
+    const identity = await currentIdentity(req);
+    const scope = await resolveReadScope(db(), identity);
+    const body = req.body as { body?: string; direction?: string; mode?: string; recipient?: string; attachments?: string };
+    const thread = await db().get<{ client_id: string }>('SELECT client_id FROM comm_threads WHERE id = ?', [threadId]);
+    if (!thread) throw notFound('Thread not found');
+    const cw = clientsWhere(scope, 'c');
+    const visible = await db().get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [thread.client_id, ...cw.params]);
+    if (!(visible?.c ?? 0)) throw notFound('Thread not found');
+    if (!body.body) throw badRequest('A message needs a body');
+    const mode = (body.mode ?? 'draft') as 'draft' | 'send' | 'record';
+    if (!['draft', 'send', 'record'].includes(mode)) throw badRequest('mode must be draft, send or record');
+    const result = await addMessage(db(), {
+      threadId, direction: (body.direction ?? 'outbound') as any, body: body.body,
+      actorId: identity.userId, authorName: identity.name ?? '', mode,
+      recipient: body.recipient, attachments: body.attachments,
+    });
+    reply.code(201);
+    return ok(result);
+  });
+
+  app.post('/api/comms/follow-ups', async (req, reply) => {
+    const identity = await currentIdentity(req);
+    const scope = await resolveReadScope(db(), identity);
+    const body = req.body as { clientId?: string; projectId?: string; threadId?: string; action?: string; ownerId?: string; dueAt?: string };
+    if (!body.clientId || !body.action) throw badRequest('clientId and action are required');
+    const cw = clientsWhere(scope, 'c');
+    const visible = await db().get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [body.clientId, ...cw.params]);
+    if (!(visible?.c ?? 0)) throw notFound('Client not found');
+    if (body.projectId) await assertProjectInScope(scope, body.projectId);
+    const followUp = await addFollowUp(db(), {
+      clientId: body.clientId, projectId: body.projectId, threadId: body.threadId,
+      action: body.action, ownerId: body.ownerId, dueAt: body.dueAt,
+    });
+    reply.code(201);
+    return ok(followUp);
+  });
+
+  app.post('/api/meetings', async (req, reply) => {
+    const identity = await currentIdentity(req);
+    const scope = await resolveReadScope(db(), identity);
+    const body = req.body as Record<string, any>;
+    if (!body.title || !body.occurredAt) throw badRequest('title and occurredAt are required');
+    if (body.projectId) await assertProjectInScope(scope, body.projectId);
+    const note = await addMeetingNote(db(), {
+      projectId: body.projectId, clientId: body.clientId, title: body.title,
+      occurredAt: body.occurredAt, attendees: body.attendees, agenda: body.agenda,
+      notes: body.notes, decisions: body.decisions, followUps: body.followUps,
+      ownerId: body.ownerId, clientVisible: !!body.clientVisible, actorId: identity.userId,
+    });
+    reply.code(201);
+    return ok(note);
+  });
+
+  /* --------------------------------------------------------------- legal -- */
+  /**
+   * Legal and commercial records (R44). Execution requires evidence of a signed
+   * copy; there is no e-signature provider, and the service refuses to pretend.
+   */
+  app.get('/api/legal/esign', async () => ok({ esign: esignStatus() }));
+
+  app.get('/api/legal', async (req) => {
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    const cw = clientsWhere(scope, 'c');
+    const clientId = queryStr(req, 'clientId');
+    const kind = queryStr(req, 'kind');
+    const params: unknown[] = [...cw.params];
+    let sql = `SELECT d.*, c.name AS client_name FROM legal_documents d JOIN clients c ON c.id = d.client_id
+                WHERE (${cw.sql})`;
+    if (clientId) { sql += ' AND d.client_id = ?'; params.push(clientId); }
+    if (kind) { sql += ' AND d.kind = ?'; params.push(kind); }
+    sql += ' ORDER BY d.kind, d.version DESC';
+    const rows = await db().all<Record<string, any>>(sql, params);
+    return ok({ documents: rows, expiring: await expiringDocuments(db(), 60), esign: esignStatus() });
+  });
+
+  app.get('/api/legal/:id', async (req) => {
+    const { id: documentId } = req.params as { id: string };
+    const scope = await resolveReadScope(db(), await currentIdentity(req));
+    const found = await db().get<{ client_id: string }>('SELECT client_id FROM legal_documents WHERE id = ?', [documentId]);
+    if (!found) throw notFound('Document not found');
+    const cw = clientsWhere(scope, 'c');
+    const visible = await db().get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [found.client_id, ...cw.params]);
+    if (!(visible?.c ?? 0)) throw notFound('Document not found');
+    return ok(await documentDetail(db(), documentId));
+  });
+
+  app.post('/api/legal', async (req, reply) => {
+    const identity = await currentIdentity(req);
+    if (!['admin', 'lead'].includes(identity.role)) throw forbidden('Only an admin or lead may create a legal document.');
+    const scope = await resolveReadScope(db(), identity);
+    const body = req.body as Record<string, any>;
+    if (!body.clientId || !body.kind || !body.title) throw badRequest('clientId, kind and title are required');
+    const cw = clientsWhere(scope, 'c');
+    const visible = await db().get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM clients c WHERE c.id = ? AND (${cw.sql})`, [body.clientId, ...cw.params]);
+    if (!(visible?.c ?? 0)) throw notFound('Client not found');
+    const detail = await createDocument(db(), {
+      clientId: body.clientId, kind: body.kind, title: body.title, storageUrl: body.storageUrl,
+      valueCents: body.valueCents, currency: body.currency, effectiveAt: body.effectiveAt,
+      expiresAt: body.expiresAt, renewalNoticeDays: body.renewalNoticeDays,
+      supersedesId: body.supersedesId, actorId: identity.userId,
+    });
+    reply.code(201);
+    return ok(detail);
+  });
+
+  app.post('/api/legal/:id/signatories', async (req, reply) => {
+    const { id: documentId } = req.params as { id: string };
+    const identity = await currentIdentity(req);
+    if (!['admin', 'lead'].includes(identity.role)) throw forbidden('Only an admin or lead may record signatories.');
+    const body = req.body as { party?: 'agency' | 'client'; fullName?: string; email?: string; title?: string };
+    if (!body.party || !body.fullName) throw badRequest('party and fullName are required');
+    const signatory = await addSignatory(db(), {
+      documentId, party: body.party, fullName: body.fullName, email: body.email, title: body.title, actorId: identity.userId,
+    });
+    reply.code(201);
+    return ok(signatory);
+  });
+
+  app.post('/api/legal/:id/signatories/:signatoryId/decision', async (req) => {
+    const { id: documentId, signatoryId } = req.params as { id: string; signatoryId: string };
+    const identity = await currentIdentity(req);
+    const body = req.body as { state?: 'approved' | 'declined' | 'signed'; evidenceUrl?: string; reason?: string };
+    if (!body.state) throw badRequest('state is required');
+    const detail = await recordSignatoryDecision(db(), {
+      documentId, signatoryId, state: body.state, evidenceUrl: body.evidenceUrl,
+      reason: body.reason, actorId: identity.userId,
+    });
+    return ok(detail);
+  });
+
+  app.post('/api/legal/:id/status', async (req) => {
+    const { id: documentId } = req.params as { id: string };
+    const identity = await currentIdentity(req);
+    if (!['admin', 'lead'].includes(identity.role)) throw forbidden('Only an admin or lead may change a legal document status.');
+    const body = req.body as { status?: string; reason?: string };
+    if (!body.status) throw badRequest('status is required');
+    return ok(await setDocumentStatus(db(), { documentId, status: body.status, reason: body.reason, actorId: identity.userId }));
+  });
+
+  app.post('/api/legal/:id/upload', async (req) => {
+    const { id: documentId } = req.params as { id: string };
+    const identity = await currentIdentity(req);
+    if (!['admin', 'lead'].includes(identity.role)) throw forbidden('Only an admin or lead may file a signed copy.');
+    const body = req.body as { storageUrl?: string; note?: string };
+    if (!body.storageUrl) throw badRequest('storageUrl is required — this records where the signed copy lives.');
+    return ok(await uploadSignedCopy(db(), { documentId, storageUrl: body.storageUrl, note: body.note, actorId: identity.userId }));
+  });
+
+  app.post('/api/change-requests', async (req, reply) => {
+    const identity = await currentIdentity(req);
+    const body = req.body as Record<string, any>;
+    if (!body.clientId || !body.title) throw badRequest('clientId and title are required');
+    const scope = await resolveReadScope(db(), identity);
+    if (body.projectId) await assertProjectInScope(scope, body.projectId);
+    reply.code(201);
+    return ok(await createChangeRequest(db(), {
+      clientId: body.clientId, projectId: body.projectId, documentId: body.documentId,
+      title: body.title, description: body.description, impactValueCents: body.impactValueCents,
+      impactDays: body.impactDays, actorId: identity.userId,
+    }));
+  });
+
+  app.post('/api/change-requests/:id/decision', async (req) => {
+    const { id: changeRequestId } = req.params as { id: string };
+    const identity = await currentIdentity(req);
+    if (!['admin', 'lead'].includes(identity.role)) throw forbidden('Only an admin or lead may decide a change request.');
+    const body = req.body as { decision?: 'approved' | 'rejected'; reason?: string };
+    if (!body.decision) throw badRequest('decision is required');
+    return ok(await decideChangeRequest(db(), {
+      changeRequestId, decision: body.decision, reason: body.reason, actorId: identity.userId,
+    }));
   });
 
   /* ----------------------------------------------------------- documents -- */

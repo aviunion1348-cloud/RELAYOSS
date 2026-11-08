@@ -102,6 +102,12 @@ try {
   console.log('\n• client lifecycle suite on PostgreSQL 16');
   exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/lifecycle.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
 
+  console.log('\n• communications + legal suite on PostgreSQL 16');
+  exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/comms-legal.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
+
+  console.log('\n• clock pause/resume + calibration suite on PostgreSQL 16');
+  exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/clocks-pause.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
+
   console.log('\n• HTTP contract suite on PostgreSQL 16');
   exitCode ||= run(process.execPath, ['--no-warnings', '--test', 'apps/api/test/http.test.mjs'], { TEST_DATABASE_URL: external, SESSION_SECRET: 'pg-conformance-secret' });
 } catch (err) {

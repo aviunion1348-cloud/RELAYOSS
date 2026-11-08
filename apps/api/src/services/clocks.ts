@@ -8,7 +8,7 @@
  */
 import type { Db } from '../db/index.ts';
 import { id, nowIso } from '../lib/ids.ts';
-import { notFound } from '../lib/http.ts';
+import { badRequest, notFound } from '../lib/http.ts';
 import { toDate } from '../lib/dates.ts';
 
 const HOUR = 3600_000;
@@ -49,6 +49,16 @@ export async function startTimer(
       startedAt.toISOString().slice(0, 19).replace('T', ' '),
       due.toISOString().slice(0, 19).replace('T', ' '),
       warn.toISOString().slice(0, 19).replace('T', ' ')],
+  );
+  // The clock's own log starts at the moment it starts. Without this the history
+  // begins at the first pause, and a clock that ran and met its deadline has no
+  // record of when it began — which is exactly the question an audit asks.
+  await db.run(
+    `INSERT INTO clock_events (id, timer_id, clock_key, kind, reason, category, actor_id, created_at)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [id('cev'), timerId, clockKey, 'started',
+      `Started: ${label || clockKey} (target ${clock.target_hours}h, warn ${clock.warn_hours}h)`,
+      '', null, startedAt.toISOString().slice(0, 19).replace('T', ' ')],
   );
   return timerId;
 }
@@ -230,16 +240,26 @@ export async function pauseTimerFor(
   if (!timer) return null;
   // Idempotent: pausing an already-paused clock is a no-op, not a second event.
   if (timer.paused_at) return timer;
+  // A pause removes time from the agency's measurement, so it is only legitimate
+  // when someone states why. A blank reason is refused rather than defaulted:
+  // an unexplained pause is indistinguishable from hiding a delay.
+  const trimmed = String(reason ?? '').trim();
+  if (!trimmed) throw badRequest('A pause needs a reason — paused time is excluded from the clock.');
   const category = options.category ?? 'client';
+  // The category is what separates a client-caused wait from our own delay, so
+  // an unknown value is refused rather than coerced to a default.
+  if (!['client', 'internal', 'vendor'].includes(String(category))) {
+    throw badRequest('A pause category must be client, internal or vendor.');
+  }
   const now = nowIso();
   await db.run(
     'UPDATE sla_timers SET paused_at = ?, pause_reason = ?, pause_category = ?, paused_by = ? WHERE id = ?',
-    [now, reason, category, options.actorId ?? null, timer.id],
+    [now, trimmed, category, options.actorId ?? null, timer.id],
   );
   await db.run(
     `INSERT INTO clock_events (id, timer_id, clock_key, kind, reason, category, actor_id, created_at)
      VALUES (?,?,?,?,?,?,?,?)`,
-    [id('cev'), timer.id, timer.clock_key, 'paused', reason, category, options.actorId ?? null, now],
+    [id('cev'), timer.id, timer.clock_key, 'paused', trimmed, category, options.actorId ?? null, now],
   );
   return (await db.get('SELECT * FROM sla_timers WHERE id = ?', [timer.id])) ?? null;
 }
