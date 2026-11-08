@@ -5,8 +5,7 @@
   "description": "Relay OSS — Delivery OS: internal agile delivery board for agency client pipelines",
   "type": "module",
   "workspaces": [
-    "apps/api",
-    "apps/web"
+    "apps/api"
   ],
   "allowScripts": {
     "argon2@0.41.1": true
@@ -14,8 +13,8 @@
   "scripts": {
     "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm run dev -w @relay/api",
-    "dev:web": "npm run dev -w @relay/web",
-    "build": "npm run build -w @relay/api && npm run build -w @relay/web",
+    "dev:web": "npm run dev --prefix apps/web",
+    "build": "npm run build -w @relay/api && npm run build --prefix apps/web",
     "start": "node apps/api/dist/index.js",
     "db:migrate": "node apps/api/dist/db/cli.js migrate",
     "db:seed": "node apps/api/dist/db/cli.js seed",
@@ -46,10 +45,12 @@
     "db:assign-login": "node apps/api/src/db/cli.ts assign-login",
     "db:pg:assign-login": "DATABASE_URL=\"${DATABASE_URL:-$(node scripts/pg-dev.mjs url 2>/dev/null)}\"; export DATABASE_URL; node apps/api/src/db/cli.ts assign-login",
     "set-password": "node scripts/set-password.mjs",
-    "build:vercel": "npm run build -w @relay/api && npm run build -w @relay/web",
+    "build:vercel": "npm run build -w @relay/api && npm run build --prefix apps/web",
     "build:service": "node scripts/verify-service-builds.mjs . api && node scripts/verify-service-builds.mjs . web",
     "verify:routing": "node scripts/verify-web-routing.mjs",
-    "db:migrate:prod": "node apps/api/dist/db/cli.js migrate"
+    "db:migrate:prod": "node apps/api/dist/db/cli.js migrate",
+    "install:web": "npm ci --prefix apps/web --include=dev --no-audit --no-fund",
+    "build:web": "npm run build --prefix apps/web"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

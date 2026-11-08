@@ -8,11 +8,19 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-# Dependencies resolve from the lockfile only, so this layer caches on source edits.
+# Dependencies resolve from lockfiles only, so these layers cache on source edits.
+#
+# Two installs, because apps/web is deliberately not an npm workspace member any more:
+# a workspace member's `npm ci` resolves the workspace root and replaces the root
+# node_modules, which is what broke the Vercel deployment. Keeping the frontend
+# standalone everywhere — image, CI, platform — means one install cannot delete the
+# other's dependencies.
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
-COPY apps/web/package.json apps/web/
 RUN npm ci --no-audit --no-fund
+
+COPY apps/web/package.json apps/web/package-lock.json apps/web/
+RUN npm ci --include=dev --prefix apps/web --no-audit --no-fund
 
 COPY . .
 # Guard first: a Docker build must not succeed on a codebase that fails its own
@@ -34,10 +42,10 @@ ENV NODE_ENV=production \
 
 RUN apk add --no-cache tini curl && addgroup -S relay && adduser -S relay -G relay
 
-# Production dependencies only: the same lockfile, no dev toolchain in the image.
+# Production dependencies only: the same lockfiles, no dev toolchain in the image.
+# The SPA is already built, so the frontend needs no dependencies at runtime at all.
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
-COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 # The PostgreSQL driver must exist in a production-only install. It once did not:
 # `pg` resolved only through a dev tool, so the image built and then crashed on

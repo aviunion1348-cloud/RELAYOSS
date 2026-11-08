@@ -271,6 +271,51 @@ commands state the requirement where a reader looks for it, and the `.npmrc` lin
 means an unanticipated install path cannot reintroduce `vite: command not found`.
 Both are asserted by the guard.
 
+### 1.2.6 Why `apps/web` is not an npm workspace member
+
+The `api` service builds at the repository root; the `web` service builds in
+`apps/web`. Vercel runs every service's install and build, then `Deploying outputs`.
+That last step failed with:
+
+```
+ENOENT: no such file or directory, lstat '/vercel/path0/node_modules/fastify/package.json'
+```
+
+Both builds were green. The problem was ordering plus a shared tree:
+
+`npm ci` **deletes `node_modules` at the project root before installing.** For an npm
+workspace member, "the project root" is the workspace root. So when the `web` service
+ran its install from `apps/web`, npm walked up and replaced the repo-root
+`node_modules` — deleting `fastify` from under the API function that had just been
+compiled against it.
+
+Narrowing the command does not help. Verified: `npm ci --workspace @relay/web` run from
+`apps/web` also wipes the root tree. The conflict is structural, not a flag.
+
+So `apps/web` is a **standalone project**, not a workspace member:
+
+| | |
+| --- | --- |
+| root `package.json` | `"workspaces": ["apps/api"]` — the web app is not a member |
+| `apps/web/package.json` | no `workspaces` key, own `allowScripts` for `esbuild` |
+| `apps/web/package-lock.json` | **committed**; without it npm resolves the repo-root lockfile, treats the directory as part of the workspace, and wipes the shared tree again |
+
+Each service now installs into its own `node_modules`, so nothing can delete the
+other's. Verified by replaying Vercel's exact sequence — api install, api build, web
+install, web build — and then checking `node_modules/fastify/package.json` still exists.
+`scripts/verify-service-builds.mjs` asserts this on every CI run.
+
+Consequences worth knowing:
+
+* `npm run build` still builds both, using `npm run build --prefix apps/web` for the
+  web half. `npm run install:web` installs the frontend's own dependencies.
+* The Docker image does two installs for the same reason. Its runtime stage needs no
+  frontend dependencies at all — the SPA is already built.
+* `smoke:web` bundles inside `apps/web` so its imports resolve from the web project.
+
+Locally you may install however you like; the constraint is on the deployment path. Just
+do not add `apps/web` back to `workspaces` — the guard fails if you do.
+
 ### 1.3 Environment variables
 
 Set these in **Project → Settings → Environment Variables** for *Production* (and
@@ -464,6 +509,7 @@ never failed is a guard you do not know works.
 | `/api/ready` returns 503 | `DATABASE_URL` wrong, or TLS required but not requested | Add `?sslmode=require`; check the pooled host |
 | Random timeouts under load | Pool exhaustion — too many instances × pool size | Use the pooled endpoint; lower `DATABASE_POOL_MAX` |
 | `/api/cron/sweep` returns 503 | `CRON_SECRET` unset | Set it; redeploy |
+| `ENOENT: lstat '…/node_modules/fastify/package.json'` at **Deploying outputs**, after both builds succeeded | The web service's install replaced the shared workspace-root `node_modules` | `apps/web` must not be an npm workspace member and must keep its own `package-lock.json`; see §1.2.6 |
 | `vite: command not found` (or `tsc: command not found`) during the build | Vercel installed with production-mode npm, which omits `devDependencies` | The service's `installCommand` must be `npm ci --include=dev --no-audit --no-fund`; confirm with `npm run build:service` |
 | The API build fails on a deploy but the web build is fine | That service is running the root `build` script, which compiles both workspaces | `api` must use `npm run build -w @relay/api`; `web` must use `npm run build`. Each service builds only its own workspace |
 | Password login returns 500 `no such table: local_credentials` | The database predates migration 0014; login is the first thing to touch that table | Run `npm run db:migrate:prod`, then `npm run db:pg:assign-login` |

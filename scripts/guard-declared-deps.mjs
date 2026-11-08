@@ -144,12 +144,28 @@ function isRuntimeOnly(rel) {
 }
 
 // Sanity: the import surface must be resolvable on disk right now.
+//
+// Resolution is per workspace, not per repository. `apps/web` is deliberately not an npm
+// workspace member — that is what stops its install from deleting the API's dependencies —
+// so it has its own node_modules, and resolving a web import from the repo root would
+// look in the wrong tree. The path is anchored with pathToFileURL because a bare specifier
+// given to import.meta.resolve is resolved relative to *this guard's* URL; an absolute
+// directory only filesystem-resolves if it is a file: URL.
 for (const [name, rel] of seen) {
   if (BUILTINS.has(name)) continue;
-  try {
-    import.meta.resolve(name);
-  } catch {
-    problems.push(`${rel}: "${name}" is declared/imported but not installed (run npm ci)`);
+  const owner = rel.startsWith('apps/web/') ? path.join(ROOT, 'apps/web') : ROOT;
+  // Checked on disk rather than with import.meta.resolve: under Node 22 that function
+  // ignores the parent argument and resolves relative to this guard's own file, which
+  // collapses both workspaces onto the repo root. A missing package directory is exactly
+  // the failure this catches — `pg` was absent from a `--omit=dev` install and the image
+  // crashed on boot.
+  const installed = fs.existsSync(path.join(owner, 'node_modules', name, 'package.json'));
+  if (!installed) {
+    problems.push(
+      `${rel}: "${name}" is declared/imported but not installed in ` +
+        `${owner === ROOT ? 'the repo root' : 'apps/web'} ` +
+        `(run ${owner === ROOT ? 'npm ci' : 'npm run install:web'})`,
+    );
   }
 }
 

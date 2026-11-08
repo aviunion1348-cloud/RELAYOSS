@@ -128,4 +128,32 @@ if (serviceArg === 'api') {
   console.log(`✓ [api] handler compiled: ${path.relative(repoRoot, artefact)}`);
 }
 
+/*
+ * The cross-service regression: after BOTH services have installed and built, the API's
+ * dependencies must still be on disk.
+ *
+ * Vercel runs `Deploying outputs` only after every service has built. When `apps/web` was
+ * an npm workspace member, its `npm ci` resolved the workspace root and deleted the root
+ * `node_modules` — removing `fastify` from under the API function that had just been
+ * compiled against it, and failing the deployment at the very last step with
+ * ENOENT .../node_modules/fastify/package.json. Both builds were green; only the ordering
+ * exposed it. This asserts the invariant that ordering requires.
+ */
+if (serviceArg === 'web') {
+  const watched = [
+    path.join(repoRoot, 'node_modules', 'fastify', 'package.json'),
+    path.join(repoRoot, 'apps', 'api', 'dist', 'entrypoints', 'vercel.js'),
+  ];
+  const missing = watched.filter((f) => !existsSync(f));
+  if (missing.length) {
+    console.error(
+      '\n✗ the web install removed artefacts the api service depends on:\n' +
+        missing.map((f) => `    ${path.relative(repoRoot, f)}`).join('\n') +
+        '\n  This is the ENOENT fastify/package.json failure at "Deploying outputs".',
+    );
+    process.exit(1);
+  }
+  console.log('✓ [web] the api service tree survived the web install (no shared workspace)');
+}
+
 console.log(`\n✓ [${serviceArg}] service build passed independently`);
