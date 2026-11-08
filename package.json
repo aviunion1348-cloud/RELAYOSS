@@ -42,7 +42,9 @@
     "test:e2e": "node --no-warnings scripts/e2e-browser.mjs",
     "db:assign-login": "node apps/api/src/db/cli.ts assign-login",
     "db:pg:assign-login": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts assign-login",
-    "set-password": "node scripts/set-password.mjs"
+    "set-password": "node scripts/set-password.mjs",
+    "build:vercel": "npm run build -w @relay/api && npm run build -w @relay/web",
+    "db:migrate:prod": "node apps/api/dist/db/cli.js migrate"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

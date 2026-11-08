@@ -17,7 +17,24 @@ export type { Dialect } from './sql.ts';
 let singleton: Db | null = null;
 
 export function createDb(): Db {
-  if (config.databaseUrl) return new PostgresDb(config.databaseUrl);
+  if (config.databaseUrl) {
+    /**
+     * Serverless connection budgeting.
+     *
+     * `pg` defaults to 10 connections per pool. A single long-lived container can
+     * afford that; a serverless platform cannot, because every concurrent instance
+     * holds its own pool — twenty functions × ten connections exhausts a typical
+     * managed Postgres and the failure looks like random timeouts under load.
+     *
+     * DATABASE_POOL_MAX keeps the total bounded, and the provider's *pooled*
+     * connection string (PgBouncer, Neon pooler, Supabase pgBouncer) is what makes
+     * the product safe at scale. Both are documented in the deployment guide.
+     */
+    const poolMax = Number(process.env.DATABASE_POOL_MAX ?? (process.env.VERCEL ? 3 : 10));
+    return new PostgresDb(config.databaseUrl, {
+      max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 3,
+    });
+  }
   return new SqliteDb(config.dbPath);
 }
 

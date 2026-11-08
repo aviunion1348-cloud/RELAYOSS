@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { getDb } from '../db/index.ts';
 import { config } from '../config.ts';
 import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized, optionalString, optionalNumber } from '../lib/http.ts';
-import type { Identity } from '../auth/index.ts';
+import { authMode, type Identity } from '../auth/index.ts';
 import { requireProjectAccess } from '../auth/middleware.ts';
 import { resolveReadScope, tasksWhere, projectsWhere, docsWhere, clientsWhere, dealsWhere, assertProjectInScope } from '../auth/scope.ts';
 import { id, nowIso } from '../lib/ids.ts';
@@ -109,7 +109,7 @@ export async function registerRoutes(
       database: { ok: dbOk, engine, latencyMs },
       worker: { name: 'clock-sweeper', intervalMs: config.sweepIntervalMs },
       memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
-      authMode: config.authMode,
+      authMode: authMode(),
     };
     // No secrets, no connection strings, no user data — safe for an
     // unauthenticated probe to read.
@@ -130,6 +130,55 @@ export async function registerRoutes(
     }
     if (!ready) return reply.code(503).send({ error: { code: 'unavailable', message: 'Database unreachable' } });
     return ok({ ready: true, engine: db().dialect });
+  });
+
+  /**
+   * Scheduled work, for Vercel Cron.
+   *
+   * Why this shape:
+   *
+   *   - **Authenticated.** Vercel sends `Authorization: Bearer $CRON_SECRET` when
+   *     that variable is set. Without a secret configured the endpoint refuses
+   *     everything rather than running unauthenticated — an open endpoint that
+   *     mutates SLA state would be worse than no endpoint.
+   *   - **Idempotent.** The sweep only transitions timers whose deadline has passed
+   *     and whose outcome is still `running`, so a retry or an overlapping
+   *     invocation finds nothing new. Vercel can and does retry.
+   *   - **Not the only path.** Deadline processing also happens lazily on real
+   *     requests, because Vercel's Hobby plan allows only one cron run per day.
+   *     Correctness therefore does not depend on the schedule.
+   *
+   * Returns what it did, so a failed run is visible in the cron log rather than
+   * being reported as success.
+   */
+  app.get('/api/cron/sweep', async (req, reply) => {
+    const secret = process.env.CRON_SECRET ?? '';
+    if (!secret) {
+      return reply.code(503).send({
+        error: {
+          code: 'unavailable',
+          message: 'CRON_SECRET is not configured, so scheduled work is disabled. Set it in the deployment environment.',
+        },
+      });
+    }
+    const header = String(req.headers.authorization ?? '');
+    const supplied = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
+    // Constant-time comparison: a timing difference on a bearer secret is a
+    // practical way to recover it one byte at a time.
+    const crypto = await import('node:crypto');
+    const a = Buffer.from(supplied.padEnd(64, '\0'));
+    const b = Buffer.from(secret.padEnd(64, '\0'));
+    const authorised = supplied.length === secret.length && crypto.timingSafeEqual(a, b);
+    if (!authorised) {
+      req.log.warn({ url: req.url, ip: req.ip }, 'cron_unauthorised');
+      return reply.code(401).send({ error: { code: 'unauthorized', message: 'Cron secret required' } });
+    }
+
+    const started = Date.now();
+    const swept = await sweepTimers(db());
+    const elapsed = Date.now() - started;
+    if (swept) req.log.warn({ swept }, 'cron swept overdue clocks');
+    return ok({ swept, elapsedMs: elapsed, at: nowIso() });
   });
 
   /**

@@ -18,7 +18,13 @@ import { registerRoutes } from './routes/index.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerPasswordLogin } from './routes/password-login.ts';
 import { createAuth } from './auth/middleware.ts';
-import { assertAuthConfiguration } from './auth/index.ts';
+import {
+  assertAuthConfiguration,
+  assertStaticAuthConfiguration,
+  resetResolvedAuthMode,
+  setResolvedAuthMode,
+} from './auth/index.ts';
+import { hasProvisionedCredential } from './auth/password.ts';
 import { RateLimiter, LoginThrottle } from './lib/rate-limit.ts';
 import { tooMany } from './lib/http.ts';
 import { inc, routeTemplate } from './lib/metrics.ts';
@@ -40,6 +46,14 @@ export interface BuildOptions {
 }
 
 export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyInstance; db: Db }> {
+  /*
+   * Static configuration first — before any connection is opened.
+   *
+   * An unreachable database must not be able to masquerade as (or hide) a
+   * misconfigured deployment: the two problems have completely different fixes.
+   */
+  assertStaticAuthConfiguration();
+
   const db = opts.db ?? getDb();
   if (opts.db) setDb(opts.db);
   if (opts.migrateOnBoot ?? (process.env.SKIP_MIGRATE !== '1' && !opts.db)) {
@@ -53,7 +67,28 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     bodyLimit: 2 * 1024 * 1024,
   });
 
-  assertAuthConfiguration();
+  /**
+   * Resolve the effective authentication mode before any route exists.
+   *
+   * `AUTH_MODE=auto` (the default) means: use the shared login if a credential has
+   * been provisioned, otherwise fall back to whatever the environment says. This
+   * is what makes the repository work unchanged in three settings — a developer
+   * laptop with demo identities, a deployment with one shared password, and a
+   * deployment behind an IdP — without anyone editing source.
+   *
+   * A provisioned credential wins over `dev` because leaving demo identities
+   * reachable on a deployment that has a real password would be a bypass.
+   */
+  resetResolvedAuthMode();
+  const declared = config.authMode;
+  const effective =
+    declared === 'oidc' || declared === 'password' || declared === 'dev'
+      ? declared
+      : (await hasProvisionedCredential(db))
+        ? 'password'
+        : 'dev';
+  setResolvedAuthMode(effective);
+  assertAuthConfiguration(effective);
 
   await app.register(helmet, { contentSecurityPolicy: false, crossOriginEmbedderPolicy: false });
   await app.register(cors, {

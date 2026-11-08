@@ -23,6 +23,7 @@ import {
   verifyJwt,
   verifyCsrf,
   SESSION_COOKIE,
+  authMode,
   type Identity,
 } from './index.ts';
 
@@ -82,8 +83,13 @@ export function createAuth(ctx: AuthContext) {
     const header = req.headers.authorization;
     if (typeof header === 'string' && header.toLowerCase().startsWith('bearer ')) {
       const token = header.slice(7).trim();
-      if (config.authMode === 'dev' && token.startsWith('dev.')) {
-        // Dev tokens are minted by /api/auth/dev-login and are just session ids.
+      /*
+       * Dev bearer tokens are session ids minted by /api/auth/dev-login. They are
+       * accepted only in 'dev' mode, which cannot be selected in production — so in
+       * a real deployment this branch is unreachable and the cookie session is the
+       * only way in alongside a verified OIDC JWT.
+       */
+      if (authMode() === 'dev' && token.startsWith('dev.')) {
         const found = await lookupSession(ctx.db, token.slice(4));
         if (!found) throw unauthorized('Dev session expired');
         return found.identity;
@@ -118,7 +124,7 @@ export function createAuth(ctx: AuthContext) {
     }
 
     /* 3 — local development ------------------------------------------------ */
-    if (config.authMode === 'dev') {
+    if (authMode() === 'dev') {
       const actorHeader = req.headers['x-actor-id'];
       if (typeof actorHeader === 'string' && actorHeader.trim() && process.env.ALLOW_DEV_ACTOR_HEADER === '1') {
         const user = await ctx.db.get<{ id: string; email: string; role: Identity['role']; full_name: string }>(
@@ -155,6 +161,15 @@ export function createAuth(ctx: AuthContext) {
       // Operational probes are machine-consumed (orchestrators, Prometheus) and
       // expose no user data: health, liveness, readiness and metrics.
       if (url.startsWith('/api/health') || url === '/api/live' || url === '/api/ready' || url === '/api/metrics') return;
+
+      /**
+       * Scheduled work authenticates with its own bearer secret, not a session.
+       *
+       * The handler performs the comparison in constant time and refuses when
+       * CRON_SECRET is unset. Letting the session hook run first would make a
+       * machine-to-machine call depend on a cookie it can never have.
+       */
+      if (url === '/api/cron/sweep') return;
 
       // Creating a session is the one truly anonymous operation. `/api/auth/login`
       // and `/api/auth/session` are the shared-credential equivalents: the first

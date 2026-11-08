@@ -341,10 +341,108 @@ export function verifyCsrf(sessionId: string, token: string | undefined, secret:
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-/** Refuse to boot in production with demo authentication enabled. */
-export function assertAuthConfiguration(): void {
+/**
+ * Does this string look like a real Argon2id hash?
+ *
+ * Written as explicit parsing rather than a regular expression because the
+ * delimiter *is* `$` — the regex metacharacter for end-of-input — so the pattern
+ * needs six escaped dollar signs and is easy to get subtly wrong (this code did,
+ * once: `\\$` matches a literal backslash, and the check silently accepted a
+ * plaintext value).
+ *
+ * Structure, per the PHC string format:
+ *
+ *   $argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>
+ *
+ * The salt and hash are unpadded base64. Their exact length is not fixed (the salt
+ * is random), so this checks shape and non-emptiness rather than a byte count —
+ * enough to reject a plaintext password, a truncated value, or a stub.
+ */
+export function looksLikeArgon2id(value: string): boolean {
+  if (!value.startsWith('$argon2id$')) return false;
+  const parts = value.split('$');
+  // ['', 'argon2id', 'v=19', 'm=…,t=…,p=…', salt, hash]
+  if (parts.length !== 6) return false;
+  const [, algorithm, version, params, salt, hash] = parts;
+  if (algorithm !== 'argon2id') return false;
+  if (!/^v=\d+$/.test(version)) return false;
+  if (!/^m=\d+,t=\d+,p=\d+$/.test(params)) return false;
+  const base64 = /^[A-Za-z0-9+/]+$/;
+  if (salt.length < 8 || !base64.test(salt)) return false;
+  if (hash.length < 16 || !base64.test(hash)) return false;
+  return true;
+}
+
+/**
+ * The effective authentication mode.
+ *
+ * `config.authMode` is a live view over `AUTH_MODE` and may legitimately say
+ * `auto`, which is not itself a usable mode. This resolves `auto` once at boot,
+ * using the database, and remembers the answer: whether a shared credential exists
+ * cannot change while the process is serving.
+ *
+ * Resolution order, and why:
+ *
+ *   1. An explicit `AUTH_MODE` always wins. An operator who names a mode gets it.
+ *   2. Otherwise a provisioned shared credential means `password`. This must beat
+ *      `dev`, or a deployment with a real password would leave the demonstration
+ *      identities reachable — a bypass.
+ *   3. Otherwise `dev`, so a fresh clone works with no configuration at all.
+ */
+let resolvedMode: 'oidc' | 'password' | 'dev' | null = null;
+
+export function setResolvedAuthMode(mode: 'oidc' | 'password' | 'dev'): void {
+  resolvedMode = mode;
+}
+
+/** The mode the application is actually enforcing right now. */
+export function authMode(): 'oidc' | 'password' | 'dev' {
+  const declared = config.authMode;
+  if (declared === 'oidc' || declared === 'password' || declared === 'dev') return declared;
+  return resolvedMode ?? 'dev';
+}
+
+/** Reset the cached resolution. Tests switch configuration between cases. */
+export function resetResolvedAuthMode(): void {
+  resolvedMode = null;
+}
+
+/**
+ * Refuse to boot with an authentication configuration that cannot be safe.
+ *
+ * `mode` is the *effective* mode, which is `password` when a shared credential is
+ * provisioned rather than whatever `AUTH_MODE` happens to say. Passing it in
+ * avoids a second database round-trip during boot and keeps the decision in one
+ * place.
+ */
+/**
+ * Configuration checks that need no database.
+ *
+ * Run before the first connection is opened. A malformed hash or a missing session
+ * secret is a deployment mistake, and it must be reported as such — validating it
+ * after a query means an unreachable database masks a misconfiguration, and the
+ * operator debugs the wrong problem.
+ */
+export function assertStaticAuthConfiguration(): void {
+  const suppliedHash = process.env.RELAY_ADMIN_PASSWORD_HASH ?? '';
+  if (suppliedHash && !looksLikeArgon2id(suppliedHash)) {
+    throw new Error(
+      'RELAY_ADMIN_PASSWORD_HASH is not a complete Argon2id hash. Expected the PHC form ' +
+        '$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>. Generate one with: npm run set-password',
+    );
+  }
+  if (!config.sessionSecret) {
+    throw new Error('SESSION_SECRET is required (used to sign CSRF tokens and cookie sessions)');
+  }
+  if (config.env === 'production' && config.internalErrorDetail) {
+    throw new Error('INTERNAL_ERROR_DETAIL=1 is refused in production. Internal error text is not returned to clients.');
+  }
+}
+
+export function assertAuthConfiguration(mode: string = authMode()): void {
   const prod = config.env === 'production';
-  if (prod && config.authMode === 'dev') {
+  assertStaticAuthConfiguration();
+  if (prod && mode === 'dev') {
     // The escape hatch exists for one case: a local/demo container stack that
     // runs with NODE_ENV=production to exercise the production build. It must be
     // opted into explicitly, and it announces itself at boot and in /api/health.
@@ -362,17 +460,10 @@ export function assertAuthConfiguration(): void {
       }),
     );
   }
-  if (config.authMode === 'oidc' && (!config.oidcIssuer || !config.oidcAudience || !config.oidcJwksUri)) {
+  if (mode === 'oidc' && (!config.oidcIssuer || !config.oidcAudience || !config.oidcJwksUri)) {
     throw new Error('AUTH_MODE=oidc requires OIDC_ISSUER, OIDC_AUDIENCE and OIDC_JWKS_URI');
   }
-  if (!config.sessionSecret) {
-    throw new Error('SESSION_SECRET is required (used to sign CSRF tokens and dev sessions)');
-  }
-  // Detailed internal error messages are a debugging aid, never a production
-  // behaviour: a stack message can name a file, a table or a column.
-  if (prod && config.internalErrorDetail) {
-    throw new Error('INTERNAL_ERROR_DETAIL=1 is refused in production. Internal error text is not returned to clients.');
-  }
+
 }
 
 export { forbidden };

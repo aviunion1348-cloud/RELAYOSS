@@ -47,6 +47,7 @@ import {
   revokeSession,
   sessionCookie,
   verifyJwt,
+  authMode,
 } from '../auth/index.ts';
 
 const db = () => getDb();
@@ -69,7 +70,7 @@ export async function registerAuthRoutes(
     // Gate: refused in production unless the same explicit opt-in that lets the
     // boot guard run dev auth is set (a local demonstration stack). The two
     // checks must agree, otherwise the documented compose stack cannot sign in.
-    const demoAllowed = process.env.ALLOW_DEV_AUTH_IN_PRODUCTION === '1' && config.authMode === 'dev';
+    const demoAllowed = process.env.ALLOW_DEV_AUTH_IN_PRODUCTION === '1' && authMode() === 'dev';
     if (config.env === 'production' && !demoAllowed) {
       throw forbidden('Local development login is disabled in production');
     }
@@ -135,7 +136,7 @@ export async function registerAuthRoutes(
 
   /* ------------------------------------------------------ oidc exchange -- */
   app.post('/api/auth/oidc/exchange', async (req, reply) => {
-    if (config.authMode !== 'oidc') throw forbidden('OIDC is not the configured auth mode');
+    if (authMode() !== 'oidc') throw forbidden('OIDC is not the configured auth mode');
     const parsed = z.object({ token: z.string().min(20) }).safeParse(req.body ?? {});
     if (!parsed.success) throw badRequest('token is required');
 
@@ -179,7 +180,7 @@ export async function registerAuthRoutes(
    * should send the browser afterwards.
    */
   app.get('/api/auth/login', async (req, reply) => {
-    if (config.authMode !== 'oidc') throw forbidden('OIDC is not the configured auth mode');
+    if (authMode() !== 'oidc') throw forbidden('OIDC is not the configured auth mode');
     const status = oidcConfigStatus();
     if (!status.configured) {
       throw badRequest(
@@ -221,7 +222,7 @@ export async function registerAuthRoutes(
    * only then create a session. Any failure leaves no session behind.
    */
   app.get('/api/auth/callback', async (req, reply) => {
-    if (config.authMode !== 'oidc') throw forbidden('OIDC is not the configured auth mode');
+    if (authMode() !== 'oidc') throw forbidden('OIDC is not the configured auth mode');
     const q = req.query as { code?: string; state?: string; error?: string; error_description?: string };
 
     if (q.error) {
@@ -335,7 +336,12 @@ export async function registerAuthRoutes(
        * Reporting `config.authMode` here would show a sign-in screen whose only
        * button is guaranteed to fail.
        */
-      authMode: (await hasProvisionedCredential(db())) ? 'password' : config.authMode,
+      /**
+       * Report the mode the server is *enforcing*, not the raw environment value.
+       * `AUTH_MODE` defaults to `auto`; returning that would make the client unable
+       * to decide which sign-in screen to show.
+       */
+      authMode: authMode(),
       expiresAt: new Date(identity.expiresAt).toISOString(),
       csrfToken: sessionId ? issueCsrf(decodeURIComponent(sessionId), config.sessionSecret) : null,
       permissions: permissionsFor(identity.role),

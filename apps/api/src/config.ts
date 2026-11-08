@@ -44,8 +44,19 @@ const env = () => ({
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Background clock sweeper cadence. */
   sweepIntervalMs: int('SWEEP_INTERVAL_MS', 60_000),
-  /** Auth: 'oidc' enforces bearer/cookie sessions; 'dev' is local-only. */
-  authMode: (process.env.AUTH_MODE ?? 'dev') as 'oidc' | 'dev',
+  /**
+   * Authentication mode.
+   *
+   *   'password'  the single shared login (POST /api/auth/login). This is the
+   *               intended mode for a real deployment: the application owns the
+   *               credential, so neither an external IdP nor a demo identity is
+   *               required. Selected automatically when a shared credential has
+   *               been provisioned, unless AUTH_MODE names something else.
+   *   'oidc'      bearer/cookie sessions from an external identity provider.
+   *               Still fully supported, never required.
+   *   'dev'       local-only demonstration identities. Refused in production.
+   */
+  authMode: (process.env.AUTH_MODE ?? 'auto') as 'auto' | 'oidc' | 'password' | 'dev',
   oidcIssuer: process.env.OIDC_ISSUER ?? '',
   oidcAudience: process.env.OIDC_AUDIENCE ?? '',
   oidcJwksUri: process.env.OIDC_JWKS_URI ?? '',
