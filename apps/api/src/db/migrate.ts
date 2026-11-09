@@ -15,12 +15,68 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT } from '../config.ts';
+import { BUNDLED_MIGRATIONS } from './migrations-bundle.ts';
 import type { Db } from './types.ts';
 
 function migrationsDir(dialect: 'sqlite' | 'postgres') {
   return dialect === 'postgres'
     ? path.join(ROOT, 'db', 'migrations', 'pg')
     : path.join(ROOT, 'db', 'migrations');
+}
+
+/**
+ * The migration set, from disk when it is there and from the bundle when it is not.
+ *
+ * Reading from disk is the normal case — the CLI, the tests and a container all have
+ * the repository beside the process. A bundled serverless function does not: its
+ * migration files are only present if the bundler chose to copy them, and it cannot
+ * follow a path built from a computed `ROOT`. That produced a boot failure before any
+ * route existed, which surfaced as a platform-level 500 with no application body.
+ *
+ * Returning a reason alongside the set keeps the diagnosis available: a bundle that
+ * disagrees with the files must not silently apply the wrong schema.
+ */
+function loadMigrations(
+  dialect: 'sqlite' | 'postgres',
+  source: 'auto' | 'disk' | 'bundle',
+): {
+  files: ReadonlyArray<readonly [string, string]>;
+  source: 'disk' | 'bundle';
+} {
+  const dir = migrationsDir(dialect);
+  if (source !== 'bundle' && fs.existsSync(dir)) {
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .map((f) => [f, fs.readFileSync(path.join(dir, f), 'utf8')] as const);
+    return { files, source: 'disk' };
+  }
+  if (source === 'disk') {
+    throw new Error(
+      migrationsMissingHint(dialect, dir),
+    );
+  }
+  /*
+   * The bundle is generated from the same files by `scripts/gen-migrations-module.mjs`
+   * and a guard fails the build when it goes stale, so falling back is safe rather
+   * than convenient. An empty bundle means the generator never ran, which is worth
+   * failing loudly for.
+   */
+  const files = BUNDLED_MIGRATIONS[dialect];
+  if (!files || files.length === 0) {
+    throw new Error(
+      `Missing migrations for ${dialect}: ${path.relative(ROOT, dir)} is absent and the ` +
+        `embedded copy is empty. Run: node scripts/gen-migrations-module.mjs`,
+    );
+  }
+  return { files, source: 'bundle' };
+}
+
+function migrationsMissingHint(dialect: 'sqlite' | 'postgres', dir: string): string {
+  return dialect === 'postgres'
+    ? `Missing ${path.relative(ROOT, dir)}. Run: node scripts/gen-pg-migrations.mjs`
+    : `Missing migrations directory: ${dir}`;
 }
 
 function sha256(input: string) {
@@ -43,27 +99,41 @@ export interface MigrateResult {
   applied: string[];
   alreadyApplied: number;
   version: number;
+  /**
+   * Which copy was applied. Reported because "the migrations ran" is not the whole
+   * answer: in a function bundle the files are absent and the embedded copy is what
+   * runs, so a caller that needs to know which schema source it just trusted can
+   * read it here rather than infer it.
+   */
+  source: 'disk' | 'bundle';
 }
 
-export async function migrate(db: Db, opts: { log?: (m: string) => void } = {}): Promise<MigrateResult> {
+export async function migrate(
+  db: Db,
+  opts: {
+    log?: (m: string) => void;
+    /**
+     * Which copy to use. `auto` is what every caller wants: disk when it is there,
+     * the embedded bundle when it is not.
+     *
+     * `disk` and `bundle` exist so a test can pin one side and compare it with the
+     * other. The alternative — making the directory absent during a test — would
+     * mean deleting the repository's schema under a running suite, which is a worse
+     * idea than a two-word seam that does nothing unless asked.
+     */
+    from?: 'auto' | 'disk' | 'bundle';
+  } = {},
+): Promise<MigrateResult> {
   const log = opts.log ?? ((m: string) => console.log(m));
-  const dir = migrationsDir(db.dialect);
-  if (!fs.existsSync(dir)) {
-    throw new Error(
-      db.dialect === 'postgres'
-        ? `Missing ${path.relative(ROOT, dir)}. Run: node scripts/gen-pg-migrations.mjs`
-        : `Missing migrations directory: ${dir}`,
-    );
-  }
+  const { files, source: usedSource } = loadMigrations(db.dialect, opts.from ?? 'auto');
+  if (usedSource === 'bundle') log('  · migration files not on disk; using the embedded copy');
 
   await ensureLedger(db);
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
   const appliedRows = await db.all<{ id: string; checksum: string }>('SELECT id, checksum FROM schema_migrations');
   const applied = new Map(appliedRows.map((r) => [r.id, r.checksum]));
   const appliedNow: string[] = [];
 
-  for (const file of files) {
-    const sql = fs.readFileSync(path.join(dir, file), 'utf8');
+  for (const [file, sql] of files) {
     const checksum = sha256(sql);
     if (applied.has(file)) {
       if (applied.get(file) !== checksum) {
@@ -90,6 +160,7 @@ export async function migrate(db: Db, opts: { log?: (m: string) => void } = {}):
     applied: appliedNow,
     alreadyApplied: files.length - appliedNow.length,
     version: await schemaVersion(db),
+    source: usedSource,
   };
 }
 
