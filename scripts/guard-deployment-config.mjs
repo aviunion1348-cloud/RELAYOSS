@@ -127,7 +127,6 @@ if (cfg) {
         'root', 'framework', 'runtime', 'entrypoint', 'command', 'installCommand', 'buildCommand',
         'devCommand', 'ignoreCommand', 'outputDirectory', 'bindings', 'functions', 'headers',
         'redirects', 'rewrites', 'routes', 'cleanUrls', 'trailingSlash',
-        'includeFiles', 'excludeFiles',
       ];
       if (!known.includes(key)) fail(`service "${name}" has an unknown key "${key}"`);
     }
@@ -147,8 +146,8 @@ if (cfg) {
     /*
      * The entrypoint is declared explicitly rather than left to the Fastify preset's
      * filename scraping, so the file that production runs is the file CI can name.
-     * What it must *do* is bind a port — see the check below, which previously
-     * asserted the opposite and caused the deployment to serve nothing at all.
+     * What it must *do* is export a handler — see the check below, which has been wrong
+     * in both directions and caused two outages.
      */
     const entry = String(svc.entrypoint ?? '');
     if (!entry) {
@@ -197,27 +196,51 @@ if (cfg) {
       }
     }
     /*
-     * The SPA has to travel with the function.
+     * The SPA has to travel with the function, and it cannot be declared.
      *
-     * The platform's bundler follows `import` and `require`, and nothing else. The API
-     * serves the built SPA with `@fastify/static`, which reads the directory at runtime,
-     * so a plain fs read is invisible to tracing: the bundle deployed without
-     * `apps/web/dist`, found no document, and answered `/` with a JSON 404 while `/api`
-     * worked. `includeFiles` is the declaration that puts them in the bundle, and it is
-     * glob-based, so it has to be stated rather than inferred.
+     * The platform's bundler follows module imports only, so a directory the server reads
+     * with `fs` is not in the deployment. Declaring it with `includeFiles` on the service
+     * is rejected by the schema (`services.app should NOT have additional property
+     * includeFiles`), so the build embeds the built SPA into a compiled module instead —
+     * `scripts/embed-web-assets.mjs`, run by `build:service` before the API compiles.
+     *
+     * Two ways to lose that: the schema key comes back, or the build stops embedding
+     * before it compiles (which produces a stale or empty module and a 404 at `/`).
      */
-    if (svc.framework === 'fastify' || svc.runtime !== 'container') {
-      const include = Array.isArray(svc.includeFiles) ? svc.includeFiles.map(String) : [];
-      const coversSpa = include.some((glob) => /apps\/web\/dist/.test(glob));
-      if (!coversSpa) {
+    if (Object.prototype.hasOwnProperty.call(svc, 'includeFiles')) {
+      fail(
+        `service "${name}" sets includeFiles, which the services schema rejects. The built SPA ` +
+          'is embedded into a compiled module instead — see scripts/embed-web-assets.mjs',
+      );
+    }
+
+    const buildCmd = String(svc.buildCommand ?? '');
+    if (/build:service/.test(buildCmd)) {
+      const scripts = JSON.parse(read('package.json')).scripts ?? {};
+      const service = String(scripts['build:service'] ?? '');
+      const web = String(scripts['build:web:service'] ?? '');
+      const embeds = /embed-web-assets/.test(web) || /embed-web-assets/.test(service);
+      /*
+       * Order matters: the embed writes a module that `tsc` then compiles. Running the
+       * API build first leaves `dist` holding the previous (or empty) module, so the
+       * deployment serves a document that is not the one that was built.
+       */
+      const webAt = service.indexOf('build:web:service');
+      const apiAt = service.indexOf('build:api');
+      const apiAfter = webAt !== -1 && apiAt !== -1 && webAt < apiAt;
+      if (!embeds) {
         fail(
-          `service "${name}" does not include "apps/web/dist/**" in includeFiles. This service ` +
-            'serves the SPA itself, and the platform tracer only follows module imports — the ' +
-            'built document and assets would be left out of the deployment, so every browser ' +
-            'path would answer a JSON 404',
+          '"build:service" does not run scripts/embed-web-assets.mjs, so the deployment ships ' +
+            'without the built SPA and every browser path answers a JSON 404',
+        );
+      } else if (!apiAfter) {
+        fail(
+          '"build:service" must embed the web assets before it compiles the API ' +
+            '(`npm run build:web:service && npm run build:api`). Compiling first embeds the ' +
+            'assets into a module that is not the one that ships',
         );
       } else {
-        note('the built SPA travels with the function (includeFiles → apps/web/dist/**)');
+        note('the built SPA is compiled into the API (embed-web-assets → build:api)');
       }
     }
 
@@ -251,11 +274,19 @@ if (cfg) {
        */
       const scriptName = build.match(/npm run ([\w:-]+)/)?.[1] ?? '';
       const script = String(pkg.scripts?.[scriptName] ?? '');
+      /*
+       * The names alone are not evidence: a script can exist and do nothing. So the check
+       * follows the chain one level — `build:service` runs `build:web:service` and
+       * `build:api`, and each of those has to do the work its name claims.
+       */
+      const chain = [script, ...(script.match(/npm run ([\w:-]+)/g) ?? []).map((m) => String(pkg.scripts?.[m.replace('npm run ', '')] ?? ''))].join(' && ');
       if (!script) {
         fail(`buildCommand "${build}" does not resolve to a script in package.json (looked for "${scriptName}")`);
       } else {
-        const buildsApi = /-w @relay\/api|--workspace @relay\/api/.test(script);
-        const buildsWeb = /--prefix apps\/web|-w @relay\/web|install:web/.test(script);
+        const buildsApi = /-w @relay\/api|--workspace @relay\/api/.test(chain);
+        const buildsWeb = /--prefix apps\/web|-w @relay\/web|install:web/.test(chain);
+        const resolves = { chain };
+        void resolves;
         if (!buildsApi || !buildsWeb) {
           fail(
             `the build script "${scriptName}" does not produce both artefacts: ` +
@@ -378,6 +409,12 @@ if (cfg) {
           if (entry.isDirectory()) { walk(child); continue; }
           if (!/\.(ts|mjs|js)$/.test(entry.name)) continue;
           if (/\.test\.mjs$/.test(entry.name)) continue;
+          /*
+           * The embedded SPA is a build artefact: the strings inside it are the browser
+           * bundle's own, including whatever a library ships. Scanning it for a loopback
+           * URL would report the frontend's text as server-side egress.
+           */
+          if (child.includes(path.join('generated', 'web-assets'))) continue;
           const src = stripComments(fs.readFileSync(path.join(ROOT, child), 'utf8'));
           if (URL_LITERAL.test(src)) {
             fail(

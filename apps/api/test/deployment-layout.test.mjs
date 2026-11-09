@@ -4,14 +4,12 @@
  * Every "works locally, broken on Vercel" failure in this project's history came from
  * the difference between those two shapes. This test constructs the second one:
  *
- *   /<root>/apps/api/dist/**      the compiled application
- *   /<root>/apps/web/dist/**      the built SPA, placed there by `includeFiles`
+ *   /<root>/apps/api/dist/**      the compiled application, SPA embedded
  *   /<root>/node_modules          dependencies
  *
  * and runs the server with that directory as its working directory, with no repository
- * around it. The source tree's `import.meta.url`-relative path to `apps/web/dist` is
- * meaningless there — three levels up from a compiled module lands outside the artefact
- * — so this is the test that catches a document the deployment cannot find.
+ * around it and no `apps/web/dist` anywhere. The document has to come from inside the
+ * compiled module, which is the only form of static file a bundler carries.
  *
  * The failure it was written for: `/` answered with a JSON 404 and a correct dashboard
  * URL looked like a broken app, while `/api/*` worked perfectly.
@@ -40,7 +38,15 @@ function makeDeploymentRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-deploy-'));
 
   fs.cpSync(apiDist, path.join(root, 'apps/api/dist'), { recursive: true });
-  fs.cpSync(webDist, path.join(root, 'apps/web/dist'), { recursive: true });
+  /*
+   * `apps/web/dist` is deliberately **not** copied.
+   *
+   * The platform's bundler follows imports, so a directory the server reads with `fs`
+   * never reaches the deployment. What ships instead is the same build embedded into a
+   * compiled module (`scripts/embed-web-assets.mjs`), which is inside `apps/api/dist`
+   * and therefore already copied. Copying the directory here would make this test pass
+   * for the wrong reason — it did, before the embedding existed.
+   */
 
   const modules = path.join(repoRoot, 'node_modules');
   if (fs.existsSync(modules)) {
@@ -49,10 +55,10 @@ function makeDeploymentRoot() {
   /*
    * `db/migrations` is deliberately not copied.
    *
-   * `includeFiles` ships `apps/web/dist/**` and nothing else, so the SQL directory does
-   * not exist in the deployment either. Boot has to fall back to the generated
-   * `BUNDLED_MIGRATIONS` module — which is the reason that module exists, and this is
-   * the only test that proves the fallback under the conditions that need it.
+   * A bundle contains what the tracer followed, so the SQL directory is not in it either.
+   * Boot has to fall back to the generated `BUNDLED_MIGRATIONS` module — which is the
+   * reason that module exists, and this is the only test that proves the fallback under
+   * the conditions that need it.
    */
   return root;
 }
@@ -167,26 +173,37 @@ test(
 );
 
 test(
-  'with no built SPA present, the deployment says so instead of pretending',
+  'a build that did not embed the SPA refuses instead of pretending',
   { skip: !built && 'no dist/ build', timeout: 120_000 },
   async () => {
+    /*
+     * The way to have "no SPA" now is a build that skipped the embed step, not a missing
+     * directory — the directory is no longer involved. Replacing the embedded module with
+     * an empty one reproduces exactly that: the server runs, serves the API, and has no
+     * document to answer browsers with.
+     *
+     * The assertion is that the failure is *visible*: a JSON 404 naming the path, not a
+     * 200 with an empty body and not a document-shaped lie. This is what every deployment
+     * did before the SPA was embedded, and it is the reason the dashboard looked broken
+     * while the API logged nothing wrong.
+     */
     const root = makeDeploymentRoot();
-    /* Remove exactly the thing includeFiles is responsible for. */
-    fs.rmSync(path.join(root, 'apps/web/dist'), { recursive: true, force: true });
+    fs.writeFileSync(
+      path.join(root, 'apps/api/dist/generated/web-assets.js'),
+      'export const WEB_ASSETS = {};\nexport const WEB_ASSET_COUNT = 0;\n',
+    );
 
     const app = await bootInLayout(root);
     try {
       const res = await fetch(`http://127.0.0.1:${app.port}/`);
-      /*
-       * Not a 200 with an empty body, and not a document-shaped lie: a JSON 404 that
-       * names the path. This is what the API did on every deployment before the SPA was
-       * included in the bundle, which is why it is asserted as the *failure* mode rather
-       * than accepted as a valid state.
-       */
-      assert.equal(res.status, 404, `expected a JSON 404 without a build, got ${res.status}`);
+      assert.equal(res.status, 404, `expected a JSON 404 without an embedded build, got ${res.status}`);
       assert.match(res.headers.get('content-type') ?? '', /application\/json/);
       const body = await res.json();
       assert.equal(body.error?.code, 'not_found');
+
+      /* The API is unaffected — which is exactly why this failure was hard to see. */
+      const live = await fetch(`http://127.0.0.1:${app.port}/api/live`);
+      assert.equal(live.status, 200, 'the API keeps working with no document, as it always did');
     } finally {
       await app.stop();
       fs.rmSync(root, { recursive: true, force: true });

@@ -6,10 +6,7 @@
       "framework": "fastify",
       "entrypoint": "apps/api/src/entrypoints/index.ts",
       "installCommand": "npm ci --include=dev --no-audit --no-fund",
-      "buildCommand": "npm run build:service",
-      "includeFiles": [
-        "apps/web/dist/**"
-      ]
+      "buildCommand": "npm run build:service"
     }
   },
   "rewrites": [

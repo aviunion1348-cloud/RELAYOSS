@@ -47,13 +47,14 @@
     "db:pg:assign-login": "DATABASE_URL=\"${DATABASE_URL:-$(node scripts/pg-dev.mjs url 2>/dev/null)}\"; export DATABASE_URL; node apps/api/src/db/cli.ts assign-login",
     "set-password": "node scripts/set-password.mjs",
     "build:vercel": "npm run build:service",
-    "build:service": "npm run build -w @relay/api && npm run install:web && npm run build --prefix apps/web",
+    "build:service": "npm run build:web:service && npm run build:api",
     "verify:routing": "node scripts/verify-web-routing.mjs",
     "db:migrate:prod": "node apps/api/dist/db/cli.js migrate",
     "install:web": "npm ci --prefix apps/web --include=dev --no-audit --no-fund",
-    "postinstall": "node scripts/install-web-deps.mjs",
+    "postinstall": "node scripts/embed-web-assets.mjs --stub && node scripts/install-web-deps.mjs",
     "prestart": "npm run build",
     "build:web": "npm run build --prefix apps/web",
+    "build:web:service": "npm run install:web && npm run build --prefix apps/web && node scripts/embed-web-assets.mjs",
     "verify:boot": "node --no-warnings scripts/production-boot.mjs"
   },
   "devDependencies": {
