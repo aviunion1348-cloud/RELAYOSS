@@ -21,7 +21,8 @@
  *
  * This is not a fake user and not a mock session. It is the configured operator of
  * a single-tenant deployment, resolved from `OPERATOR_USER_ID` (default
- * `usr_maya`, the delivery principal the demo seed creates).
+ * `usr_owner`, the operator that first-run bootstrap creates). A database seeded with
+ * the demo data resolves to its administrator instead — see `resolveOperator`.
  */
 import type { FastifyRequest } from 'fastify';
 import { config } from '../config.ts';

@@ -154,8 +154,17 @@ function bootFailureStage(err: unknown): 'configuration' | 'database' {
     : 'database';
 }
 
-/** Answer with the recorded provisioning failure, in a shape an operator can act on. */
-function replyMisconfigured(res: ServerResponse): void {
+/**
+ * Answer with the recorded provisioning failure, in a shape the caller can act on.
+ *
+ * Two audiences, and serving both from one JSON blob served neither well. An API client
+ * needs JSON; a person who opened the deployment URL in a browser was shown a wall of
+ * `{"error":{...}}`. That is reported — correctly — as "the site is broken", even though
+ * the site was saying precisely what was wrong. A browser gets a page that states it,
+ * with the missing setting and the remedy spelled out; anything under `/api` keeps the
+ * machine-readable envelope.
+ */
+function replyMisconfigured(req: IncomingMessage, res: ServerResponse): void {
   const failure = bootFailure();
   const body = failure
     ? bootFailureBody(failure)
@@ -166,14 +175,108 @@ function replyMisconfigured(res: ServerResponse): void {
         invalid: [],
         remedy: [],
       };
-  const payload = JSON.stringify({ error: body });
+
+  const path = (() => {
+    try {
+      return String(req.url ?? '/');
+    } catch {
+      return '/';
+    }
+  })();
+  const wantsJson = path.startsWith('/api/') || path === '/api';
+
   res.statusCode = 503;
-  res.setHeader('content-type', 'application/json; charset=utf-8');
   res.setHeader('cache-control', 'no-store, max-age=0');
   // A provisioning problem is not a credential problem: never let a proxy or the
   // browser cache this, or the deployment keeps looking broken after it is fixed.
   res.setHeader('retry-after', '30');
-  res.end(payload);
+
+  if (wantsJson) {
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: body }));
+    return;
+  }
+
+  res.setHeader('content-type', 'text/html; charset=utf-8');
+  res.end(renderSetupPage(body, path));
+}
+
+/**
+ * A setup page for a deployment that cannot start.
+ *
+ * Everything on it comes from the recorded failure — there is no generic advice that
+ * would be true regardless of the problem, and no invented "contact support" step. The
+ * page is the error envelope, rendered.
+ */
+function renderSetupPage(
+  body: {
+    summary?: string;
+    stage?: string;
+    missing?: string[];
+    optional?: Array<{ name: string; consequence: string }>;
+    invalid?: Array<{ name: string; problem: string }>;
+    remedy?: string[];
+  },
+  path: string,
+): string {
+  const escape = (value: string) =>
+    value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const list = (title: string, items: string[] | undefined) =>
+    items && items.length
+      ? `<h2>${escape(title)}</h2><ul>${items.map((i) => `<li><code>${escape(i)}</code></li>`).join('')}</ul>`
+      : '';
+
+  const invalidRows = (body.invalid ?? []).length
+    ? `<h2>Present but unusable</h2><ul>${(body.invalid ?? [])
+        .map((i) => `<li><code>${escape(i.name)}</code> — ${escape(i.problem)}</li>`)
+        .join('')}</ul>`
+    : '';
+
+  const optionalRows = (body.optional ?? []).length
+    ? `<h2>Not set, and what that costs</h2><ul>${(body.optional ?? [])
+        .map((o) => `<li><code>${escape(o.name)}</code> — ${escape(o.consequence)}</li>`)
+        .join('')}</ul>`
+    : '';
+
+  const remedies = (body.remedy ?? []).length
+    ? `<h2>How to fix it</h2><ol>${(body.remedy ?? []).map((i) => `<li>${escape(i)}</li>`).join('')}</ol>`
+    : '';
+
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Relay is not configured yet</title>
+<style>
+  :root { color-scheme: dark }
+  body { margin:0; background:#0b0b0d; color:#e8e8ea;
+         font:16px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
+  main { max-width:44rem; margin:0 auto; padding:10vh 1.5rem }
+  h1 { font-size:1.6rem; margin:0 0 .5rem }
+  h2 { font-size:.8rem; letter-spacing:.08em; text-transform:uppercase;
+       color:#9a9aa2; margin:2rem 0 .5rem }
+  p.lead { color:#c9c9d1; margin:0 0 1.5rem }
+  code { background:#17171c; border:1px solid #26262e; border-radius:.35rem;
+         padding:.15rem .4rem; font-size:.9em; word-break:break-word }
+  li { margin:.35rem 0 }
+  .path { color:#7d7d87; font-size:.85rem }
+  footer { margin-top:3rem; color:#7d7d87; font-size:.85rem }
+</style></head>
+<body><main>
+  <h1>Relay is not configured yet</h1>
+  <p class="lead">${escape(body.summary ?? 'This instance cannot start.')}</p>
+  ${body.stage ? `<p class="path">Failed during: <code>${escape(body.stage)}</code></p>` : ''}
+  ${list('Missing', body.missing)}
+  ${invalidRows}
+  ${optionalRows}
+  ${remedies}
+  <footer>
+    <p class="path">Requested: <code>${escape(path)}</code> · HTTP 503 · this page is not
+    cached, so reloading after a fix shows the application.</p>
+    <p>The machine-readable form of this message is at <code>/api/health</code>.</p>
+  </footer>
+</main></body></html>`;
 }
 
 /**
@@ -279,7 +382,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
    * an afternoon of guessing.
    */
   if (!app) {
-    replyMisconfigured(res);
+    replyMisconfigured(req, res);
     return;
   }
 

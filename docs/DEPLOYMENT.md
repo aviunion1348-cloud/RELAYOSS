@@ -378,11 +378,18 @@ session secret and no credential to provision. Missing `SESSION_SECRET` or
 `RELAY_ADMIN_PASSWORD_HASH` — which are now inert if present — cannot stop the API
 from starting.
 
+**`DATABASE_URL` is nevertheless required for a deployment to be useful.** Without it
+the API boots, determines it is serving a deployment, and refuses to use a local file:
+every browser path answers the setup page and every `/api` path answers
+`503 misconfigured`. That is not a bug to route around — see §1.3.1.
+
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | **strongly recommended** | PostgreSQL connection string. Use the provider's **pooled** endpoint (Neon `-pooler`, Supabase `:6543`, PgBouncer). Append `?sslmode=require` if the provider requires TLS. Without it the API runs on SQLite in the instance temp directory: functional, but **not durable** — see §1.3.1. |
+| `DATABASE_URL` | **required on any deployment** | PostgreSQL connection string. Use the provider's **pooled** endpoint (Neon `-pooler`, Supabase `:6543`, PgBouncer). Append `?sslmode=require` if the provider requires TLS. Without it a deployed instance serves the setup page rather than a non-durable database — see §1.3.1. |
 | `CRON_SECRET` | recommended | Authenticates `/api/cron/sweep`. Without it the endpoint returns 503 rather than running unauthenticated. This is not user authentication and is unaffected by the removal. |
-| `OPERATOR_USER_ID` | optional | Which `users` row every request is attributed to. Defaults to `usr_maya`; if that row is absent the API uses the first administrator, then any user at all. |
+| `OPERATOR_USER_ID` | optional | Which `users` row every request is attributed to. Defaults to `usr_owner`; if that row is absent the API uses the first administrator, then any user at all. |
+| `OPERATOR_NAME` | optional | Display name of the single operator account created on a first run. Defaults to `Owner`. |
+| `OPERATOR_EMAIL` | optional | Email of that account. Defaults to `owner@localhost`. |
 | `DATABASE_POOL_MAX` | optional | Defaults to 3 on Vercel. Raise only if you are behind a connection pooler. |
 | `NODE_ENV` | set by Vercel | `production`. |
 | `CORS_ORIGIN` | optional | Only needed if the frontend is served from a different origin. Same-origin by default. |
@@ -423,24 +430,58 @@ durable storage — that is the only difference between the two modes, and it is
 why the API reports `"engine":"sqlite"` on `/api/ready` and names the consequence
 on any boot failure.
 
-**What this mode is not.** SQLite lives in `/tmp`, which is per-instance and
-discarded. Specifically:
+**This is a local-development mode only.** It is not available on a deployed
+instance, and that is enforced rather than documented: `createDb()` treats a serving
+runtime (Vercel, Lambda, Cloud Run, or `NODE_ENV=production`) as one that must have
+`DATABASE_URL`, and throws a message naming the remedy if it does not. On a deployment
+without `DATABASE_URL` every browser path answers the setup page (§1.1) and every
+`/api` path answers `503 misconfigured`.
 
-- **Data does not survive a cold start.** Write a task, let the instance recycle,
-  and it is gone — the seed runs again and you are back to the demo data.
-- **Two concurrent instances do not share state.** A second instance has its own
-  empty file and its own seed. Concurrent edits to "the same" row are not
-  conflicts, they are two different databases.
-- **Session cookies survive only while the instance does**, and the CSRF secret
-  is derived per instance.
+The reason is what SQLite in a serverless instance actually is:
 
-That makes this a way to *evaluate* the product and to see it working, not a way
-to run a studio. Set `DATABASE_URL` to make it durable — §1.4 has the exact
-commands. `SEED_DEMO_DATA=0` turns the automatic seed off if you want an empty
-instance instead.
+- **Data does not survive a cold start.** `/tmp` is per-instance. Write a task, let the
+  instance recycle, and it is gone.
+- **Two concurrent instances do not share state.** A second instance has its own empty
+  file. Concurrent edits to "the same" row are not conflicts, they are two different
+  databases.
+- **A first run is indistinguishable from data loss**, because both look like a
+  dashboard with nothing in it.
+
+That combination is why the deployment requires PostgreSQL. §1.4 has the exact
+commands.
 
 `/api/health` always reports the engine (`sqlite` or `postgres`), so which mode a
 deployment is in is never a guess.
+
+### 1.3.2 What a fresh deployment contains
+
+One row: the operator account, named from `OPERATOR_NAME` / `OPERATOR_EMAIL`. No
+clients, projects, tasks, deals, invoices, boards or teams.
+
+This is a change of behaviour, so it is worth stating why. Boot used to run the demo
+seed whenever `users` was empty, which filled a new deployment with a fictional studio —
+twelve people, six projects, 89 tasks, twelve deals. Two problems, both fatal to trust:
+
+- **Invented data and real data were indistinguishable.** Both arrived through the same
+  read endpoints, in the same shape. A dashboard showing "6 projects" said nothing about
+  whether anybody had six projects.
+- **It was impossible to start clean.** Deleting the demo rows and restarting re-created
+  them, because the trigger was "is `users` empty".
+
+The bind that makes *some* row necessary is attribution: `created_by`, `updated_by` and
+`actor_id` are foreign keys to `users`, so with no people the first write fails. One
+operator is the minimum that makes the product usable, and it is a fact only the
+operator can supply — hence the environment variables rather than a default person.
+
+The demo dataset still exists for screenshots and walkthroughs, behind an explicit
+command that nothing else calls:
+
+```bash
+npm run db:seed        # fictional studio, local evaluation only
+```
+
+It refuses in production unless `FORCE=1` is set, which is the CLI's way of asking
+whether you meant it.
 
 ### 1.4 Provision the database — the exact steps
 

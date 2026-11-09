@@ -76,32 +76,72 @@ test('vercel: the handler serves requests without binding a port itself', async 
   await app.close();
 });
 
-test('vercel: an unseeded database names its cause instead of refusing with 401', async () => {
+test('vercel: an empty database works, because boot creates exactly one operator', async () => {
   /**
-   * A migrated but empty database cannot attribute a request, because `users` is
-   * empty and every mutation has a foreign key to it. That is a *seeding* problem
-   * and must say so.
+   * This test used to assert the opposite: that a migrated-but-empty database answered
+   * every route with a `503 misconfigured`, because `users` is a foreign key target and
+   * nothing could be attributed.
    *
-   * The previous behaviour — which this test used to assert as correct — was a bare
-   * `401 unauthorized` for every route with no data in the tables. That is the worst
-   * possible answer: it names no cause, suggests no fix, and looks identical to an
-   * expired session, which is how a deployment mistake gets diagnosed as an auth
-   * bug for a week.
+   * The 503 was an improvement on the `401` before it — that one named no cause — but
+   * the underlying design was the problem. A database with no people is not a
+   * misconfiguration to be reported; it is a first run, and it should be made usable.
+   *
+   * Boot now creates one operator and nothing else (see `db/bootstrap.ts`). So the
+   * assertions here are: the API serves, and the database contains no invented records.
+   * That second half is the one that matters — the demo seed used to fill this database
+   * with a fictional studio, which made a fresh deployment lie about its own data.
    */
-  const { app } = await buildApp({ db: await freshDb(), logger: false });
+  const db = await freshDb();
+  const { app } = await buildApp({ db, logger: false });
 
   const read = await app.inject({ method: 'GET', url: '/api/projects' });
-  assert.equal(read.statusCode, 503, `expected a diagnosable 503, got ${read.statusCode}`);
-  assert.equal(read.json().error.code, 'misconfigured');
-  assert.match(read.json().error.message, /seed|OPERATOR_USER_ID/i, 'the message must name the remedy');
+  assert.equal(read.statusCode, 200, `an empty first run must serve, got ${read.statusCode}`);
+  assert.deepEqual(read.json().data, [], 'a fresh database has no projects to report');
 
-  // The probes still work, and they are how an operator finds out in the first place.
+  const people = await db.all('SELECT id, full_name, role FROM users');
+  assert.equal(people.length, 1, 'boot creates exactly one operator, not a cast of characters');
+  assert.equal(people[0].role, 'admin', 'the operator must be able to administer the instance');
+
+  for (const table of ['clients', 'projects', 'tasks', 'deals', 'boards', 'activity', 'teams']) {
+    const row = await db.get(`SELECT COUNT(*) AS c FROM ${table}`);
+    assert.equal(Number(row.c), 0, `${table} must be empty on a first run — nothing is invented`);
+  }
+
+  // The probes still work, and they are how an operator finds out about the engine.
   for (const url of ['/api/live', '/api/health']) {
     const res = await app.inject({ method: 'GET', url });
     assert.equal(res.statusCode, 200, `${url} must survive an empty database`);
   }
 
   await app.close();
+});
+
+test('vercel: the operator identity comes from configuration, not a hardcoded demo name', async () => {
+  const previous = { name: process.env.OPERATOR_NAME, email: process.env.OPERATOR_EMAIL, id: process.env.OPERATOR_USER_ID };
+  process.env.OPERATOR_NAME = 'Excali Operations';
+  process.env.OPERATOR_EMAIL = 'ops@excali.example';
+  process.env.OPERATOR_USER_ID = 'usr_excali';
+  try {
+    const db = await freshDb();
+    const { app } = await buildApp({ db, logger: false });
+
+    const people = await db.all('SELECT id, full_name, email FROM users');
+    assert.equal(people.length, 1);
+    assert.equal(people[0].id, 'usr_excali');
+    assert.equal(people[0].full_name, 'Excali Operations');
+    assert.equal(people[0].email, 'ops@excali.example');
+
+    await app.close();
+  } finally {
+    for (const [key, value] of [
+      ['OPERATOR_NAME', previous.name],
+      ['OPERATOR_EMAIL', previous.email],
+      ['OPERATOR_USER_ID', previous.id],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 test('vercel: health endpoints stay reachable without a session', async () => {
@@ -874,7 +914,7 @@ test('db: a serving runtime without DATABASE_URL throws instead of creating a fi
  * is genuinely usable without signing in — on a local engine, which is the engine a
  * developer actually runs.
  */
-test('a locally-run deployment serves real seeded data with no credential', async () => {
+test('a locally-run deployment starts empty, serves, and accepts its first real record', async () => {
   const saved = { ...process.env };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-local-'));
   try {
@@ -893,13 +933,33 @@ test('a locally-run deployment serves real seeded data with no credential', asyn
       const ready = await app.inject({ method: 'GET', url: '/api/ready' });
       assert.equal(ready.statusCode, 200, ready.body);
 
+      /*
+       * A fresh local run is empty. It used to be filled by the demo seed on every boot
+       * — a fictional studio with invented projects, clients and tasks — which made it
+       * impossible to tell the product's own data from fabricated data. The lists are
+       * empty now, and the product has to be usable in that state: this asserts the
+       * empty read, then writes a real record and reads it back.
+       */
       const projects = await app.inject({ method: 'GET', url: '/api/projects' });
       assert.equal(projects.statusCode, 200, projects.body);
-      assert.ok(projects.json().data.length > 0, 'the seeded projects must be visible without signing in');
+      assert.deepEqual(projects.json().data, [], 'a fresh install has no projects to show');
 
       const dashboard = await app.inject({ method: 'GET', url: '/api/dashboard' });
       assert.equal(dashboard.statusCode, 200);
-      assert.ok(dashboard.json().data.kpis, 'the dashboard aggregates must be present');
+      assert.ok(dashboard.json().data.kpis, 'the dashboard aggregates must be present even when empty');
+
+      /* The first real record: entered here, not invented by boot. */
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/clients',
+        payload: { name: 'Excali' },
+      });
+      assert.equal(created.statusCode, 201, created.body);
+
+      const clients = await app.inject({ method: 'GET', url: '/api/clients' });
+      assert.equal(clients.statusCode, 200);
+      assert.equal(clients.json().data.length, 1, 'the record just created is the only one');
+      assert.equal(clients.json().data[0].name, 'Excali');
 
       // The retired login endpoints must be unmistakably gone, not merely quiet.
       for (const url of ['/api/auth/login', '/api/auth/dev-login']) {
