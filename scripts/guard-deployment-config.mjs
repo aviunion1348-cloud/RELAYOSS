@@ -127,6 +127,7 @@ if (cfg) {
         'root', 'framework', 'runtime', 'entrypoint', 'command', 'installCommand', 'buildCommand',
         'devCommand', 'ignoreCommand', 'outputDirectory', 'bindings', 'functions', 'headers',
         'redirects', 'rewrites', 'routes', 'cleanUrls', 'trailingSlash',
+        'includeFiles', 'excludeFiles',
       ];
       if (!known.includes(key)) fail(`service "${name}" has an unknown key "${key}"`);
     }
@@ -195,6 +196,31 @@ if (cfg) {
         );
       }
     }
+    /*
+     * The SPA has to travel with the function.
+     *
+     * The platform's bundler follows `import` and `require`, and nothing else. The API
+     * serves the built SPA with `@fastify/static`, which reads the directory at runtime,
+     * so a plain fs read is invisible to tracing: the bundle deployed without
+     * `apps/web/dist`, found no document, and answered `/` with a JSON 404 while `/api`
+     * worked. `includeFiles` is the declaration that puts them in the bundle, and it is
+     * glob-based, so it has to be stated rather than inferred.
+     */
+    if (svc.framework === 'fastify' || svc.runtime !== 'container') {
+      const include = Array.isArray(svc.includeFiles) ? svc.includeFiles.map(String) : [];
+      const coversSpa = include.some((glob) => /apps\/web\/dist/.test(glob));
+      if (!coversSpa) {
+        fail(
+          `service "${name}" does not include "apps/web/dist/**" in includeFiles. This service ` +
+            'serves the SPA itself, and the platform tracer only follows module imports — the ' +
+            'built document and assets would be left out of the deployment, so every browser ' +
+            'path would answer a JSON 404',
+        );
+      } else {
+        note('the built SPA travels with the function (includeFiles → apps/web/dist/**)');
+      }
+    }
+
     if (svc.framework !== 'fastify') {
       note(`the service framework is "${svc.framework ?? '(auto)'}" rather than "fastify"`);
     }

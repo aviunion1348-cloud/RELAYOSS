@@ -15,6 +15,7 @@ import { config } from './config.ts';
 import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
 import { ensureOperator, type BootstrapResult } from './db/bootstrap.ts';
+import { resolveWebDist } from './lib/web-dist.ts';
 import { registerRoutes } from './routes/index.ts';
 import { createOperatorAuth, registerOperatorHook, resolveOperator } from './auth/operator-middleware.ts';
 import { registerOperatorRoutes } from './routes/operator.ts';
@@ -388,8 +389,14 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
       return reply.code(404).send({ error: { code: 'not_found', message: `No such file: ${pathname}` } });
     }
 
-    const indexFile = path.join(opts.webDist ?? config.webDist, 'index.html');
-    if (fs.existsSync(indexFile)) {
+    /*
+     * The same search as the static root, so the not-found handler answers with the
+     * document from wherever it was found — or, when there is genuinely no build,
+     * refuses as JSON instead of reading a path that does not exist.
+     */
+    const notFoundDist = resolveWebDist(opts.webDist ?? config.webDist).dir;
+    const indexFile = notFoundDist ? path.join(notFoundDist, 'index.html') : null;
+    if (indexFile && fs.existsSync(indexFile)) {
       return reply.type('text/html').send(fs.readFileSync(indexFile));
     }
     return reply.code(404).send({ error: { code: 'not_found', message: 'Build the web app first (npm run build).' } });
@@ -484,8 +491,14 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   await app.register(registerOperatorRoutes);
   await registerRoutes(app, { auth });
 
-  const webDist = opts.webDist ?? config.webDist;
-  if (serveStatic && fs.existsSync(webDist)) {
+  /*
+   * Locate the built SPA rather than assuming where it is. In a platform bundle the
+   * module-relative answer points outside the artefact, so a correct build answered `/`
+   * with a JSON 404 — see `lib/web-dist.ts`.
+   */
+  const resolved = resolveWebDist(opts.webDist ?? config.webDist);
+  const webDist = resolved.dir;
+  if (serveStatic && webDist) {
     await app.register(fastifyStatic, { root: webDist, wildcard: false, cacheControl: true, maxAge: '1h' });
   }
 
