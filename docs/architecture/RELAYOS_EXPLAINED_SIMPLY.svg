@@ -1,0 +1,256 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2480" height="5539" viewBox="-40 -40 2480 5539">
+<defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a3b8"/></marker></defs>
+<rect x="-40" y="-40" width="2480" height="5539" fill="#ffffff"/>
+<rect x="0" y="0" width="2400" height="553" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="24.0" y="72.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" font-weight="700" fill="#1f2937">Start here — what is RelayOS?</text>
+<text x="26.0" y="102.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">A back office for a design studio. One website, one program, one database. Read it top to bottom.</text>
+<rect x="60" y="132" width="720" height="150.5" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="84.0" y="182.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">In one sentence</text>
+<text x="84.0" y="214.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">RelayOS is where a studio keeps its clients, its projects, the tasks inside those</text>
+<text x="84.0" y="235.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">projects, and the deadlines that are about to slip — in one place the whole</text>
+<text x="84.0" y="256.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">team shares.</text>
+<rect x="840" y="132" width="720" height="129.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="864.0" y="182.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">What makes it unusual</text>
+<text x="864.0" y="214.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">It is one program, not five. The screens and the server ship together as a single</text>
+<text x="864.0" y="235.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">thing, so there is nothing to wire up between them.</text>
+<rect x="1620" y="132" width="720" height="129.25" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="1644.0" y="182.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Why you can trust this page</text>
+<text x="1644.0" y="214.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Every box names a file in the repository. If any claim here were wrong, you</text>
+<text x="1644.0" y="235.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">could open that file and see it.</text>
+<text x="60.0" y="361.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">How to read the boxes</text>
+<rect x="60" y="380.5" width="261.0" height="32" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="74.0" y="405.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="400" fill="#1f2937">solid = exists and works today</text>
+<rect x="339.0" y="380.5" width="311.0" height="32" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="10 7"/>
+<text x="353.0" y="405.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="400" fill="#1f2937">dashed = only sometimes, or not yet</text>
+<rect x="668.0" y="380.5" width="261.0" height="32" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="682.0" y="405.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="400" fill="#1f2937">grey = someone else's system</text>
+<rect x="947.0" y="380.5" width="186.0" height="32" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="961.0" y="405.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="400" fill="#1f2937">red = an honest gap</text>
+<rect x="60" y="446.5" width="2280" height="71.75" rx="10" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
+<text x="84.0" y="492.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" fill="#475569">One line to remember: one program, one database, and the important rules written down twice — in the code that runs, and in the database that stores.</text>
+<rect x="0" y="673" width="2400" height="552" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="24.0" y="745.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" font-weight="700" fill="#1f2937">What you can actually do with it</text>
+<text x="26.0" y="775.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">Six screens of real work. None of it is a mock-up.</text>
+<rect x="60" y="805" width="740" height="129.25" rx="10" fill="#fff1f2" stroke="#e11d48" stroke-width="2"/>
+<text x="84.0" y="855.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Dashboard</text>
+<text x="84.0" y="887.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Today at a glance: what is late, what is due this week, and what is waiting on a</text>
+<text x="84.0" y="908.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">client.</text>
+<rect x="840" y="805" width="740" height="129.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="864.0" y="855.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Clients</text>
+<text x="864.0" y="887.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Every studio client, the contracts behind them, and how far along the</text>
+<text x="864.0" y="908.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">relationship is.</text>
+<rect x="1620" y="805" width="740" height="129.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1644.0" y="855.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Projects</text>
+<text x="1644.0" y="887.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A body of work with phases, a board of columns, a budget, and the tasks inside</text>
+<text x="1644.0" y="908.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">each column.</text>
+<rect x="60" y="960.25" width="740" height="129.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="84.0" y="1010.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Tasks</text>
+<text x="84.0" y="1042.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Create a task, give it an owner and a due date, attach a checklist, and record</text>
+<text x="84.0" y="1063.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">approvals step by step.</text>
+<rect x="840" y="960.25" width="740" height="129.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="864.0" y="1010.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">QA and releases</text>
+<text x="864.0" y="1042.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A checklist that must pass before a release ships. The server refuses the ship</text>
+<text x="864.0" y="1063.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">while any check is open.</text>
+<rect x="1620" y="960.25" width="740" height="129.25" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1644.0" y="1010.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Contracts and clocks</text>
+<text x="1644.0" y="1042.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Contract value and hours, plus timers that flag a deadline as close, met, or</text>
+<text x="1644.0" y="1063.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">missed.</text>
+<rect x="60" y="1121.5" width="2280" height="69.25" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+<text x="84.0" y="1165.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Everything here is read and written through the same server, so a number you see on one screen is the same number every other screen sees.</text>
+<rect x="0" y="1345" width="2400" height="934" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="24.0" y="1417.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" font-weight="700" fill="#1f2937">What happens when you click a button</text>
+<text x="26.0" y="1447.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">Six steps, roughly forty milliseconds. This is the whole round trip.</text>
+<rect x="60" y="1477" width="1560" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="88" y="1494.0" width="54" height="54" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="106.0" y="1533.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#2563eb">1</text>
+<text x="170.0" y="1516.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#1f2937">You click Save</text>
+<text x="170.0" y="1540.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The button sends the form to the server as one request.</text>
+<rect x="60" y="1605" width="1560" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="88" y="1622.0" width="54" height="54" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="106.0" y="1661.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#2563eb">2</text>
+<text x="170.0" y="1644.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#1f2937">The screen asks the server</text>
+<text x="170.0" y="1668.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">It calls /api/tasks on the same website it was loaded from. No second address, nothing to configure.</text>
+<rect x="60" y="1733" width="1560" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="88" y="1750.0" width="54" height="54" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="106.0" y="1789.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#2563eb">3</text>
+<text x="170.0" y="1772.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#1f2937">The server checks the form</text>
+<text x="170.0" y="1796.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A missing or wrong field stops here and comes back named. Nothing is stored.</text>
+<rect x="60" y="1861" width="1560" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="88" y="1878.0" width="54" height="54" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="106.0" y="1917.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#2563eb">4</text>
+<text x="170.0" y="1900.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#1f2937">The rules check it is allowed</text>
+<text x="170.0" y="1924.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Is that column real? Is this the next approval step? If not, the server refuses.</text>
+<rect x="60" y="1989" width="1560" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="88" y="2006.0" width="54" height="54" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="106.0" y="2045.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#2563eb">5</text>
+<text x="170.0" y="2028.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#1f2937">The database stores it</text>
+<text x="170.0" y="2052.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The database keeps its own guards too, so even a buggy script cannot write nonsense.</text>
+<rect x="60" y="2117" width="1560" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="88" y="2134.0" width="54" height="54" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="106.0" y="2173.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#2563eb">6</text>
+<text x="170.0" y="2156.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#1f2937">The screen updates</text>
+<text x="170.0" y="2180.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The list refreshes and the new row appears. Other open tabs catch up within seconds.</text>
+<line x1="840.0" y1="1565" x2="840.0" y2="1605" stroke="#cbd5e1" stroke-width="2" marker-end="url(#a)"/>
+<line x1="840.0" y1="1693" x2="840.0" y2="1733" stroke="#cbd5e1" stroke-width="2" marker-end="url(#a)"/>
+<line x1="840.0" y1="1821" x2="840.0" y2="1861" stroke="#cbd5e1" stroke-width="2" marker-end="url(#a)"/>
+<line x1="840.0" y1="1949" x2="840.0" y2="1989" stroke="#cbd5e1" stroke-width="2" marker-end="url(#a)"/>
+<line x1="840.0" y1="2077" x2="840.0" y2="2117" stroke="#cbd5e1" stroke-width="2" marker-end="url(#a)"/>
+<rect x="1680" y="1477" width="660" height="129.25" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="1704.0" y="1527.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">If something goes wrong</text>
+<text x="1704.0" y="1559.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">You get a sentence you can act on - "title is too short", "that column</text>
+<text x="1704.0" y="1580.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">does not exist" - not a blank screen and not a bare 500.</text>
+<rect x="1680" y="1677" width="660" height="129.25" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="1704.0" y="1727.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">How big is it, really</text>
+<text x="1704.0" y="1759.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One page load is one database query. A save is two or three. Nothing</text>
+<text x="1704.0" y="1780.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">waits in a queue in between.</text>
+<rect x="1680" y="1877" width="660" height="129.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1704.0" y="1927.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">What you never have to do</text>
+<text x="1704.0" y="1959.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">No cache to clear, no worker to restart, no second server to keep in step</text>
+<text x="1704.0" y="1980.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">with the first.</text>
+<rect x="0" y="2399" width="2400" height="567" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="24.0" y="2471.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" font-weight="700" fill="#1f2937">Where everything lives</text>
+<text x="26.0" y="2501.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">Five places. Learning these five is enough to find any behaviour in the system.</text>
+<rect x="60" y="2531" width="740" height="134.0" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<rect x="84" y="2555" width="137.0" height="26" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="97.0" y="2577.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#2563eb">apps/web/src</text>
+<text x="84.0" y="2615.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">The screens</text>
+<text x="84.0" y="2647.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">React. Thirteen pages. Every call goes through one file: lib/api.ts.</text>
+<rect x="840" y="2531" width="740" height="134.0" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<rect x="864" y="2555" width="128.0" height="26" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="877.0" y="2577.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#059669">apps/api/src</text>
+<text x="864.0" y="2615.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">The server</text>
+<text x="864.0" y="2647.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Fastify. About a hundred endpoints, all in routes/index.ts.</text>
+<rect x="1620" y="2531" width="740" height="134.0" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<rect x="1644" y="2555" width="184.0" height="26" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1657.0" y="2577.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#7c3aed">services/ · domain/</text>
+<text x="1644.0" y="2615.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">The rules</text>
+<text x="1644.0" y="2647.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">What is allowed to happen next: approvals, lifecycles, deadline timers.</text>
+<rect x="60" y="2691.0" width="740" height="134.0" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<rect x="84" y="2715.0" width="144.0" height="26" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="97.0" y="2737.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#d97706">db/migrations</text>
+<text x="84.0" y="2775.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">The memory</text>
+<text x="84.0" y="2807.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Seventeen numbered SQL files that rebuild the database, in order, at start-up.</text>
+<rect x="840" y="2691.0" width="1520" height="134.0" rx="10" fill="#fff1f2" stroke="#e11d48" stroke-width="2"/>
+<rect x="864" y="2715.0" width="233.0" height="26" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="877.0" y="2737.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#e11d48">scripts/build-service.mjs</text>
+<text x="864.0" y="2775.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">The build</text>
+<text x="864.0" y="2807.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One command turns screens plus server into one deployable thing.</text>
+<rect x="60" y="2861.0" width="2280" height="70.5" rx="10" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+<text x="84.0" y="2905.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">Why the split matters: a wrong number on a screen is the server or the SQL; a wrong message is the screens; a refused save is the rules. You always know where to look.</text>
+<rect x="0" y="3086" width="2400" height="731" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="24.0" y="3158.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" font-weight="700" fill="#1f2937">What the system remembers</text>
+<text x="26.0" y="3188.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">Six kinds of row. Everything else in the database hangs off these.</text>
+<rect x="60" y="3218" width="480" height="129.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="84.0" y="3268.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Clients</text>
+<text x="84.0" y="3300.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A company you work for. One client can have</text>
+<text x="84.0" y="3321.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">many projects.</text>
+<rect x="720" y="3218" width="480" height="129.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="744.0" y="3268.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Projects</text>
+<text x="744.0" y="3300.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A body of work: phases, a board, a budget, and the</text>
+<text x="744.0" y="3321.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">client it belongs to.</text>
+<rect x="1380" y="3218" width="480" height="129.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="1404.0" y="3268.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Tasks</text>
+<text x="1404.0" y="3300.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One job, sitting in a column of a board, with an</text>
+<text x="1404.0" y="3321.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">owner and a due date.</text>
+<rect x="1380" y="3407.25" width="480" height="129.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="1404.0" y="3457.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Checks</text>
+<text x="1404.0" y="3489.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Turnover gates and approval steps. A task is not</text>
+<text x="1404.0" y="3510.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">done until they pass.</text>
+<line x1="540" y1="3282.62" x2="720" y2="3282.62" stroke="#64748b" stroke-width="2" marker-end="url(#a)"/>
+<rect x="568.5" y="3268.62" width="123.0" height="28" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="579.5" y="3293.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" fill="#475569">one to many</text>
+<line x1="1200" y1="3282.62" x2="1380" y2="3282.62" stroke="#64748b" stroke-width="2" marker-end="url(#a)"/>
+<rect x="1228.5" y="3268.62" width="123.0" height="28" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1239.5" y="3293.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" fill="#475569">one to many</text>
+<line x1="1620.0" y1="3347.25" x2="1620.0" y2="3407.25" stroke="#64748b" stroke-width="2" marker-end="url(#a)"/>
+<rect x="1576.5" y="3363.25" width="87.0" height="28" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1587.5" y="3387.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" fill="#475569">per task</text>
+<text x="60.0" y="3621.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">Two more kinds of row, and two deliberate exceptions</text>
+<rect x="60" y="3632.5" width="480" height="129.25" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="84.0" y="3682.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Users</text>
+<text x="84.0" y="3714.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Who did it. Today there is exactly one person, and</text>
+<text x="84.0" y="3736.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">no password.</text>
+<rect x="720" y="3632.5" width="480" height="129.25" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="744.0" y="3682.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Clocks</text>
+<text x="744.0" y="3714.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Deadlines: running, paused, met, missed. Swept</text>
+<text x="744.0" y="3736.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">once a day.</text>
+<rect x="1380" y="3632.5" width="480" height="150.5" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="1404.0" y="3682.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Two things are deliberately loose</text>
+<text x="1404.0" y="3714.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A deadline timer can point at a deal, a project, a</text>
+<text x="1404.0" y="3736.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">task or a release, so it is not tied to one table. A</text>
+<text x="1404.0" y="3757.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">QA report outlives the release it tested.</text>
+<rect x="0" y="3937" width="2400" height="826" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="24.0" y="4009.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" font-weight="700" fill="#1f2937">What this does better than the usual way</text>
+<text x="26.0" y="4039.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">Six choices, each with the problem it removes. No benchmarks — just cause and effect.</text>
+<rect x="60" y="4069" width="660" height="44" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="80.0" y="4101.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#94a3b8">The usual way</text>
+<rect x="740" y="4069" width="660" height="44" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="760.0" y="4101.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#059669">How RelayOS does it</text>
+<rect x="1420" y="4069" width="660" height="44" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1440.0" y="4101.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#2563eb">What it saves you</text>
+<rect x="60" y="4131" width="660" height="100.5" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="84.0" y="4184.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Two apps to deploy, with addresses, CORS and environment variables</text>
+<text x="84.0" y="4205.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">kept in sync</text>
+<rect x="740" y="4131" width="660" height="100.5" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="764.0" y="4184.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One program serves the screens and the data, and the screens call /api</text>
+<text x="764.0" y="4205.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">on their own address</text>
+<rect x="1420" y="4131" width="660" height="100.5" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1444.0" y="4184.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">No wiring to break between them: one URL, one deploy, nothing to keep</text>
+<text x="1444.0" y="4205.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">in step</text>
+<rect x="60" y="4247.5" width="660" height="79.25" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="84.0" y="4301.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Rules only in application code, so one stray script can write bad data</text>
+<rect x="740" y="4247.5" width="660" height="79.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="764.0" y="4301.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The database also refuses impossible rows with its own constraints</text>
+<rect x="1420" y="4247.5" width="660" height="79.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1444.0" y="4301.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Bad data cannot get in, even while the code has a bug</text>
+<rect x="60" y="4342.75" width="660" height="79.25" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="84.0" y="4396.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Falls back to a temporary database when the real one is missing</text>
+<rect x="740" y="4342.75" width="660" height="79.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="764.0" y="4396.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Refuses to start, and names the setting that is missing</text>
+<rect x="1420" y="4342.75" width="660" height="79.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1444.0" y="4396.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">You find out in ten seconds instead of after losing a day of work</text>
+<rect x="60" y="4438.0" width="660" height="100.5" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="84.0" y="4491.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A green build is treated as a working deployment</text>
+<rect x="740" y="4438.0" width="660" height="100.5" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="764.0" y="4491.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The build pipeline builds exactly like production, then starts the server</text>
+<text x="764.0" y="4512.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">and calls it</text>
+<rect x="1420" y="4438.0" width="660" height="100.5" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1444.0" y="4491.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The failures a build cannot see get caught before anyone relies on them</text>
+<rect x="60" y="4554.5" width="660" height="79.25" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="84.0" y="4608.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A screen shows "approved" and everyone believes it</text>
+<rect x="740" y="4554.5" width="660" height="79.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="764.0" y="4608.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Approvals are rows the server checks before it lets work move on</text>
+<rect x="1420" y="4554.5" width="660" height="79.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1444.0" y="4608.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">No green tick without a record behind it</text>
+<rect x="60" y="4649.75" width="660" height="79.25" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="84.0" y="4703.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Docs written once, wrong within a month</text>
+<rect x="740" y="4649.75" width="660" height="79.25" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="764.0" y="4703.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Every claim on this page names the file it comes from</text>
+<rect x="1420" y="4649.75" width="660" height="79.25" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1444.0" y="4703.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">You can check it yourself instead of trusting it</text>
+<rect x="0" y="4883" width="2400" height="576" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="24.0" y="4955.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" font-weight="700" fill="#1f2937">What it does not do yet — honestly</text>
+<text x="26.0" y="4985.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">Read this before you show it to anyone. None of it is hidden anywhere else.</text>
+<rect x="60" y="5015" width="740" height="150.5" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="84.0" y="5065.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">No login — by choice</text>
+<text x="84.0" y="5097.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Anyone with the link can read and change everything. The only gate is the</text>
+<text x="84.0" y="5118.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">hosting provider's password screen. This was a deliberate decision, not an</text>
+<text x="84.0" y="5139.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">oversight.</text>
+<rect x="840" y="5015" width="740" height="150.5" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="864.0" y="5065.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">Nothing is actually sent</text>
+<text x="864.0" y="5097.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">It records that a message or a signature happened. It does not send email, texts,</text>
+<text x="864.0" y="5118.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">or documents.</text>
+<rect x="1620" y="5015" width="740" height="150.5" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1644.0" y="5065.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">One scheduled job, no queue</text>
+<text x="1644.0" y="5097.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A single daily sweep marks overdue timers as missed. There is no worker, retry</text>
+<text x="1644.0" y="5118.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">queue, or broker.</text>
+<rect x="60" y="5191.5" width="740" height="129.25" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="84.0" y="5241.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">No undo</text>
+<text x="84.0" y="5273.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Two append-only history tables exist, but there is no undo button and no</text>
+<text x="84.0" y="5295.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">per-record version history.</text>
+<rect x="840" y="5191.5" width="1520" height="129.25" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="864.0" y="5241.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="23" font-weight="700" fill="#1f2937">One user for everyone</text>
+<text x="864.0" y="5273.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Every change is filed under the same person, so history says what changed, not who changed it.</text>
+<rect x="60" y="5352.75" width="2280" height="71.75" rx="10" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
+<text x="84.0" y="5398.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" fill="#475569">If you remember one thing: this is one program with one database, and the rules that matter are enforced by the database itself — so it stays small, and it is hard to break.</text>
+</svg>
