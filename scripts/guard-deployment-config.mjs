@@ -144,27 +144,41 @@ if (cfg) {
 
     /* ------------------------------------------------------- the entrypoint -- */
     /*
-     * The Fastify preset discovers its entrypoint from a fixed list of filenames,
-     * and that list includes `src/index.ts` — the long-lived container entry, which
-     * calls `app.listen()` and starts a `setInterval`. Landing on it in a function is
-     * a deployment that looks healthy and never sweeps a deadline, so the declared
-     * entrypoint must be the serverless one.
+     * The entrypoint is declared explicitly rather than left to the Fastify preset's
+     * filename scraping, so the file that production runs is the file CI can name.
+     * What it must *do* is bind a port — see the check below, which previously
+     * asserted the opposite and caused the deployment to serve nothing at all.
      */
     const entry = String(svc.entrypoint ?? '');
     if (!entry) {
       fail(
         `service "${name}" declares no entrypoint. The Fastify preset would scrape the service root ` +
-          'and may resolve apps/api/src/index.ts, which calls app.listen() — which a function cannot do',
+          'for a filename, and the file it picks is not necessarily the one CI verifies',
       );
     } else if (!exists(entry.replace(/^\.\//, ''))) {
       fail(`service "${name}" entrypoint "${entry}" does not exist`);
     } else {
+      /*
+       * `services` with `framework: "fastify"` runs the entrypoint as a long-lived
+       * server and routes traffic to whatever listens on `PORT`. It is not invoked
+       * per request, so an entrypoint that builds the app and exports a `(req, res)`
+       * handler without listening is not "serverless" — it is a process that never
+       * binds a port. The platform then has nothing to route to and answers every
+       * path, including `/`, with `500 FUNCTION_INVOCATION_FAILED`, before any
+       * application code runs and therefore with no way for the app to explain
+       * itself. That is exactly the failure this check now prevents.
+       */
       const src = stripComments(read(entry.replace(/^\.\//, '')));
-      if (/\bapp\.listen\s*\(/.test(src)) {
-        fail(`service "${name}" entrypoint "${entry}" calls app.listen(): a function is invoked per request`);
-      }
-      if (/setInterval\s*\(/.test(src) && !/re-export/i.test(read(entry.replace(/^\.\//, '')))) {
-        fail(`service "${name}" entrypoint "${entry}" starts a background timer, which will not survive`);
+      const bindsPort =
+        /\b(?:app|server|fastify|instance)\s*\.\s*listen\s*\(/.test(src) ||
+        /\bcreateServer\s*\(/.test(src) ||
+        /\bBun\.serve\s*\(/.test(src);
+      if (!bindsPort) {
+        fail(
+          `service "${name}" entrypoint "${entry}" never binds a port. A fastify service is a ` +
+            'long-lived server: the platform routes requests to PORT, so an entrypoint that only ' +
+            'exports a request handler answers every path with 500 FUNCTION_INVOCATION_FAILED',
+        );
       }
     }
     if (svc.framework !== 'fastify') {
@@ -469,7 +483,26 @@ if (cfg) {
         'major Node version. Pin the supported LTS line, e.g. ">=22.5.0 <23"',
     );
   } else {
-    note(`engines.node ${engines} (bounded to the Node 22 LTS line)`);
+    /*
+     * The deployed entrypoint is TypeScript, and its imports name `.ts` files. Running
+     * it requires Node's type stripping, enabled by default from 22.18.0. Below that the
+     * module graph fails to resolve before any application code runs, which the platform
+     * reports as the same opaque `500 FUNCTION_INVOCATION_FAILED` this deployment has
+     * already been bitten by once. The floor is therefore a correctness bound, not a
+     * preference: a lower one is a range that cannot execute the file it selects.
+     */
+    const floor = /^>=\s*(\d+)\.(\d+)\.(\d+)/.exec(engines);
+    const minMinor = floor ? Number(floor[1]) * 1000 + Number(floor[2]) : 0;
+    if (minMinor < 22_018) {
+      fail(
+        `engines.node "${engines}" allows a Node without default type stripping. ` +
+          'The service entrypoint is TypeScript importing `.ts` specifiers, so it needs ' +
+          '">=22.18.0 <23"; below that the entry fails to load and production answers ' +
+          '500 FUNCTION_INVOCATION_FAILED',
+      );
+    } else {
+      note(`engines.node ${engines} (bounded to the Node 22 LTS line, type stripping available)`);
+    }
   }
 }
 

@@ -1,30 +1,21 @@
 /**
- * Vercel Functions entry point.
+ * In-process request handler.
  *
- * The difference from `index.ts` is deliberate and important:
+ * **This is not the deployed entry.** `vercel.json` declares
+ * `apps/api/src/entrypoints/index.ts` as the service entrypoint, and that file binds
+ * `PORT` and owns the listening socket — see its header for why. This module exports
+ * a `(req, res)` handler over the same app, and two things use it:
  *
- *   index.ts    builds the app, calls `app.listen()`, and starts a `setInterval`
- *               sweeper. That is correct for a long-lived container and wrong for
- *               serverless — a function executes per request, `listen` would try to
- *               bind a port nothing routes to, and an interval would either never
- *               fire or fire unpredictably across instances.
+ *   - `apps/api/test/vercel.test.mjs`, which mounts it on a real `http.createServer`
+ *     to exercise Fastify's lifecycle including readiness, auth and cron;
+ *   - `api/index.js`, the wrapper retained for a function-shaped deployment.
  *
- *   vercel.ts   builds the app once per instance and exports the request handler.
- *               No listen, no interval, no reliance on process memory surviving.
- *
- * This file lives in `entrypoints/` rather than beside `index.ts`, and that is a
- * deployment requirement rather than tidiness. Vercel's Fastify framework preset
- * discovers its entrypoint from a fixed list of names in the service root — `src/
- * index.{js,ts}`, `src/app.{js,ts}`, `src/server.{js,ts}`, or those three at the
- * top level. It does not find `src/vercel.ts`. Without a file it recognises, Vercel
- * infers the runtime from whatever it *can* see and can end up invoking
- * `src/index.ts`, which is the long-lived entry: it calls `app.listen()` and boots
- * a `setInterval` sweeper. A serverless invocation dies on the listen and the
- * sweeper never fires, so the deployment would look healthy and process deadlines
- * never.
- *
- * `entrypoints/index.ts` re-exports this handler under a name Vercel looks for, so
- * the preset resolves to the serverless entry and never to the container one.
+ * It exists because a handler is easier to drive in a test than a spawned process, and
+ * because the wrapper needs a stable import target. It must not be mistaken for the
+ * production entrypoint: an earlier revision of `index.ts` re-exported this handler
+ * instead of listening, which is precisely the deployment failure documented in
+ * `docs/DEPLOYMENT.md` §1.1.1 — the module exported a handler while the platform
+ * waited for a socket.
  *
  * Two serverless-specific concerns are handled here rather than being left to
  * chance:

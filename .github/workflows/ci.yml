@@ -190,19 +190,37 @@ jobs:
         env:
           NODE_ENV: production
 
-      # Both artefacts, asserted independently: the handler the platform invokes and
-      # the document the SPA is served from.
-      - name: The build produced both artefacts
+      # The artefacts are asserted to exist *and then executed*. Existence alone let a
+      # deployment ship whose entrypoint never bound a port: the build was green, every
+      # unit test passed, and production answered every path with
+      # 500 FUNCTION_INVOCATION_FAILED because the platform had nothing to route to.
+      - name: The build produced the service entry and the SPA
         run: |
+          test -f apps/api/dist/entrypoints/index.js
           test -f apps/api/dist/entrypoints/vercel.js
           test -f apps/api/dist/index.js
           test -f apps/web/dist/index.html
           test -d apps/web/dist/assets
           grep -q '<div id="root">' apps/web/dist/index.html
-          echo "✓ serverless handler, container entry, SPA document and assets all present"
+          echo "✓ service entry, in-process handler, container entry, SPA document and assets all present"
 
       - name: Built output routes correctly (deep links, asset 404s, /api not HTML)
         run: npm run verify:routing
+
+      # The routing suite above boots `dist/index.js` — the container entry. This runs
+      # the same assertions against `dist/entrypoints/index.js`, the file `vercel.json`
+      # deploys, because they are different artefacts and only one of them is production.
+      - name: The deployed entrypoint routes correctly, not just the container entry
+        run: RELAY_ENTRY=apps/api/dist/entrypoints/index.js npm run verify:routing
+        env:
+          NODE_ENV: test
+
+      # Spawns `apps/api/dist/entrypoints/index.js` as its own process and talks to it
+      # over a real socket — the contract `framework: "fastify"` actually uses.
+      - name: The service entry boots, binds a port and serves the app
+        run: node --test apps/api/test/service-entry.test.mjs
+        env:
+          NODE_ENV: test
 
   audit-trail:
     name: Requirement traceability present
