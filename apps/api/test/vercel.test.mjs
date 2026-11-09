@@ -432,6 +432,8 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
     //    The status is 404 now that no authentication runs before routing. What is
     //    asserted is the content type and the error envelope, because those are what
     //    the SPA fallback would break.
+    const spaIsBuilt = fs.existsSync(new URL('../../web/dist/index.html', import.meta.url));
+
     const missing = await fetch(`${base}/api/no-such-endpoint`);
     assert.match(String(missing.headers.get('content-type')), /application\/json/i,
       'the SPA fallback swallowed an /api path');
@@ -458,10 +460,26 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
     //    test insisted it was correct — so it now asserts the behaviour the deployment
     //    depends on: a browser route is the SPA document, and `/api` is never.
     const spa = await fetch(`${base}/projects/some-deep-link`);
-    assert.equal(spa.status, 200, 'a browser route must be answered with the SPA document');
-    assert.match(String(spa.headers.get('content-type')), /text\/html/i,
-      'a browser route must be answered with a document, not JSON');
-    assert.match(await spa.text(), /<!doctype html>/i);
+    if (spaIsBuilt) {
+      assert.equal(spa.status, 200, 'a browser route must be answered with the SPA document');
+      assert.match(String(spa.headers.get('content-type')), /text\/html/i,
+        'a browser route must be answered with a document, not JSON');
+      assert.match(await spa.text(), /<!doctype html>/i);
+    } else {
+      /*
+       * No `apps/web/dist` yet: this suite runs before the web build in CI, and the
+       * application cannot invent a document it does not have. What it must not do is
+       * pretend — so the assertion is that the miss is a JSON 404 that says "not
+       * found", not a 200 with an empty body or an HTML parse error.
+       *
+       * The behaviour production depends on is asserted where the document genuinely
+       * exists: `platform-launcher.test.mjs` and `service-entry.test.mjs` both skip
+       * unless the build is present, and CI runs them after `build:service`.
+       */
+      assert.equal(spa.status, 404, 'without a built SPA, a browser route cannot be a success');
+      assert.match(String(spa.headers.get('content-type')), /application\/json/i);
+      assert.ok((await spa.json()).error?.code, 'the miss must carry a JSON error code');
+    }
 
     /*
      * 5. A request with a body reaches the handler intact — the adapter must not
