@@ -3,6 +3,15 @@
 Companion to `RELAYOS_SYSTEM_ARCHITECTURE.excalidraw` (14 frames).
 Everything here refers to commit **`ad79aa1b201b68ba42445a0f830614085c2e3cb6`**.
 
+There are two boards, for two readers:
+
+| Board | For | Shape |
+| --- | --- | --- |
+| `RELAYOS_GUIDED_TOUR` | someone who has never opened the repository | 14 frames, plain English on top, the real file / line / SQL underneath |
+| `RELAYOS_SYSTEM_ARCHITECTURE` | an engineer navigating the code | 14 frames, dense, every component, path and line number |
+
+The guided tour is the front door; this document is the script you talk over while pointing at the dense one.
+
 Read it in the order the board is drawn: 00 overview → 01 deployment → 02 frontend → 03 backend → 04 database → 05 request lifecycle → 06 workflow → 07 background → 08 security → 09 failure → 10 testing → 11 stack → 12 source map → 13 gaps.
 
 ---
