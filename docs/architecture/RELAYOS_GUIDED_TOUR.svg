@@ -1,0 +1,548 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2480" height="10826" viewBox="-40 -40 2480 10826">
+<defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a3b8"/></marker></defs>
+<rect x="-40" y="-40" width="2480" height="10826" fill="#fff"/>
+<rect x="0" y="0" width="2400" height="1398" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<rect x="60" y="36" width="2280" height="176" rx="9" fill="#dbeafe" stroke="#93c5fd" stroke-width="2"/>
+<text x="767.0" y="136.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="42" font-weight="700" fill="#1f2937">00 — EXECUTIVE SYSTEM OVERVIEW</text>
+<text x="967.0" y="173.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" fill="#475569">Users · Browser · Web · API · PostgreSQL · Vercel</text>
+<rect x="60" y="236" width="2280" height="61.25" rx="9" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
+<text x="80.0" y="275.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">How to read every card: the bold heading is plain English · the grey sentence is the detail · the mono block is the exact file, line or statement. Read only the bold lines and the board still makes complete sense.</text>
+<rect x="60" y="331.25" width="1120" height="196" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="88.0" y="383.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">01 — FRONTEND</text>
+<text x="88.0" y="416.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">React · Router · Pages · Components · API client</text>
+<rect x="88" y="467.25" width="1064" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="100.0" y="497.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/web/src · 13 pages · lib/api.ts</text>
+<rect x="1220" y="331.25" width="1120" height="196" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1248.0" y="383.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">02 — BACKEND</text>
+<text x="1248.0" y="416.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Entrypoint · Fastify · Routes · Validation · Logic</text>
+<rect x="1248" y="467.25" width="1064" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1260.0" y="497.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">94 handlers · routes/index.ts · 3,370 lines</text>
+<rect x="60" y="547.25" width="1120" height="196" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="88.0" y="599.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">03 — DATABASE</text>
+<text x="88.0" y="632.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">PostgreSQL · Tables · Relationships · Migrations</text>
+<rect x="88" y="683.25" width="1064" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="100.0" y="714.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">81 live tables · 17 migrations · the real DDL</text>
+<rect x="1220" y="547.25" width="1120" height="196" rx="9" fill="#fff1f2" stroke="#e11d48" stroke-width="2"/>
+<text x="1248.0" y="599.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">04 — DEPLOYMENT</text>
+<text x="1248.0" y="632.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">GitHub · Vercel services · Builds · Runtime</text>
+<rect x="1248" y="683.25" width="1064" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1260.0" y="714.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">one service "app" · embed-web-assets.mjs</text>
+<rect x="60" y="763.25" width="1120" height="196" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="88.0" y="815.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">05 — REQUEST FLOWS</text>
+<text x="88.0" y="848.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Read project · Create task · Error handling</text>
+<rect x="88" y="899.25" width="1064" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="100.0" y="930.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">GET :945 · POST :412 · one envelope</text>
+<rect x="1220" y="763.25" width="1120" height="196" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1248.0" y="815.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">06 — BUSINESS LOGIC</text>
+<text x="1248.0" y="848.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Client journey · Projects · QA · Releases</text>
+<rect x="1248" y="899.25" width="1064" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1260.0" y="930.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">18 stages · 4-step ladder · 8 gate rules</text>
+<rect x="60" y="979.25" width="1120" height="196" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="88.0" y="1031.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">07 — RELIABILITY</text>
+<text x="88.0" y="1064.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Health · Jobs · Logs · Backups · Recovery</text>
+<rect x="88" y="1115.25" width="1064" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="100.0" y="1146.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">/api/live · /api/ready · daily sweep · 2 outages</text>
+<rect x="1220" y="979.25" width="1120" height="196" rx="9" fill="#fff1f2" stroke="#e11d48" stroke-width="2"/>
+<text x="1248.0" y="1031.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">08 — ENGINEERING</text>
+<text x="1248.0" y="1064.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Tests · CI/CD · Security · Technical debt</text>
+<rect x="1248" y="1115.25" width="1064" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1260.0" y="1146.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">283 tests · 10 gates · no authentication</text>
+<rect x="60" y="1195.25" width="2280" height="172" rx="9" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+<text x="88.0" y="1247.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#1f2937">09 — SOURCE-CODE MAP + EXPLANATION GUIDE</text>
+<text x="88.0" y="1282.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Where every file is · reading order for a new engineer · the thirty words you need · how to verify every claim on this board</text>
+<rect x="88" y="1303.25" width="1120" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="100.0" y="1334.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">tools/boardgen/build_board.py draws this board from the repository</text>
+<rect x="0" y="1508" width="2400" height="1007" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="1580.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">01 — FRONTEND</text>
+<text x="62.0" y="1611.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">What the operator actually loads: a compiled React app that talks to exactly one address, on its own origin.</text>
+<rect x="60" y="1640" width="1120" height="197.75" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="82.0" y="1686.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">One entry, one router</text>
+<text x="82.0" y="1715.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">main.tsx creates a single query client and mounts the app. App.tsx owns every route, the error boundary and the suspense</text>
+<text x="82.0" y="1737.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">fallback. No second router, no state library.</text>
+<rect x="82" y="1750.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="1781.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/web/src/main.tsx</text>
+<text x="94.0" y="1804.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/web/src/App.tsx  ·  13 routes</text>
+<rect x="60" y="1855.75" width="1120" height="197.75" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="82.0" y="1901.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Server state lives in one cache</text>
+<text x="82.0" y="1931.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Every request goes through TanStack Query: fifteen-second stale time, one retry and only for 5xx, no refetch on focus. A</text>
+<text x="82.0" y="1952.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">mutation invalidates the keys it touched, so a save and a list cannot disagree.</text>
+<rect x="82" y="1966.5" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="1997.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">staleTime: 15_000    retry: 1 (only ≥ 500)</text>
+<text x="94.0" y="2019.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">invalidate(['projects','dashboard'])</text>
+<rect x="60" y="2071.5" width="1120" height="197.75" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="2117.7" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">One client, no configuration</text>
+<text x="82.0" y="2147.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The whole backend contract is one file. The base URL is the literal string /api, so the browser calls the address it was already</text>
+<text x="82.0" y="2168.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">loaded from — no hostname, no CORS rule, no per-environment variable.</text>
+<rect x="82" y="2182.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="2212.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">const BASE = '/api'</text>
+<text x="94.0" y="2235.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">credentials: 'omit'</text>
+<rect x="60" y="2287.25" width="1120" height="197.75" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="82.0" y="2333.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Two failure kinds, told apart</text>
+<text x="82.0" y="2363.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">ApiError means the server answered and refused. NetworkError means it never answered. The UI shows different text for each,</text>
+<text x="82.0" y="2384.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">and the smoke suite asserts both.</text>
+<rect x="82" y="2398.0" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="2428.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">class ApiError     { code, message }</text>
+<text x="94.0" y="2451.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">class NetworkError { cause }</text>
+<rect x="1220" y="1640" width="1120" height="197.75" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="1242.0" y="1686.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Thirteen screens</text>
+<text x="1242.0" y="1715.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Dashboard, Projects, Tasks, Clients, Partners, QA, Releases, Contracts, Insights, Activity, Workload, Settings, plus a catch-all.</text>
+<text x="1242.0" y="1737.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Retired URLs (/login, /sign-in) redirect rather than 404.</text>
+<rect x="1242" y="1750.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="1781.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/web/src/pages/*.tsx  ·  13 files</text>
+<text x="1254.0" y="1804.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">removed auth screens → redirect</text>
+<rect x="1220" y="1855.75" width="1120" height="176.5" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="1242.0" y="1901.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">One shape for every screen</text>
+<text x="1242.0" y="1931.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">useQueryState normalises loading / error / empty / data, so no page invents its own spinner or its own failure text.</text>
+<rect x="1242" y="1945.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="1976.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">lib/query-state.ts</text>
+<text x="1254.0" y="1998.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">loading · error · empty · data</text>
+<rect x="1220" y="2050.25" width="1120" height="197.75" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="1242.0" y="2096.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Live-ish updates</text>
+<text x="1242.0" y="2126.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Open tabs poll /api/changes and invalidate whatever changed. Not websockets, not a queue — one endpoint that answers</text>
+<text x="1242.0" y="2147.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">"what changed since X".</text>
+<rect x="1242" y="2161.0" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="2191.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">useLiveUpdates() → GET /api/changes</text>
+<text x="1254.0" y="2214.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">the same hook writes the log it reads</text>
+<rect x="1220" y="2266.0" width="1120" height="197.75" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1242.0" y="2312.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">The build</text>
+<text x="1242.0" y="2341.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Vite compiles the screens to static files, and the service build turns those files into a TypeScript module so they travel inside</text>
+<text x="1242.0" y="2363.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">the API (frame 04).</text>
+<rect x="1242" y="2376.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="2407.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">vite build → apps/web/dist</text>
+<text x="1254.0" y="2429.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">scripts/embed-web-assets.mjs → 16 assets</text>
+<rect x="0" y="2625" width="2400" height="965" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="2697.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">02 — BACKEND</text>
+<text x="62.0" y="2728.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">app.ts defines the request path; routes/index.ts holds every handler; services and domain hold the rules.</text>
+<rect x="60" y="2757" width="1120" height="424.0" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="82.0" y="2803.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">The request path, in order</text>
+<text x="82.0" y="2832.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Thirteen lines are the entire lifecycle. Order is the design: the error handler sits after the hooks so it can catch their failures.</text>
+<rect x="82" y="2846.5" width="1076" height="312.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="2877.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:54   buildApp()</text>
+<text x="94.0" y="2899.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:145  helmet</text>
+<text x="94.0" y="2922.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:153  cors</text>
+<text x="94.0" y="2944.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:163  body limit 2 MB</text>
+<text x="94.0" y="2967.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:191  onRequest</text>
+<text x="94.0" y="2989.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:205  onResponse → RED metrics</text>
+<text x="94.0" y="3012.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:250  onResponse → change_log</text>
+<text x="94.0" y="3034.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:267  setErrorHandler</text>
+<text x="94.0" y="3057.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:362  setNotFoundHandler</text>
+<text x="94.0" y="3079.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:476  rate limits</text>
+<text x="94.0" y="3102.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:493  operator hook → req.identity</text>
+<text x="94.0" y="3124.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:530  operator routes</text>
+<text x="94.0" y="3147.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">:558  static (lazy import)</text>
+<rect x="60" y="3199.0" width="1120" height="220.25" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="82.0" y="3245.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Layers, honestly</text>
+<text x="82.0" y="3274.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Handlers call SQL directly for reads. Services own multi-step writes and invariants. repositories/ is a mapper module, not a</text>
+<text x="82.0" y="3296.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">repository layer. No ORM, no DI, no per-resource routers.</text>
+<rect x="82" y="3309.75" width="1076" height="87.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="3340.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">services/tasks.ts · clocks · lifecycle · shipgate</text>
+<text x="94.0" y="3362.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">domain/turnover.ts  (pure functions)</text>
+<text x="94.0" y="3385.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">repositories/query.ts  (row → object)</text>
+<rect x="1220" y="2757" width="1120" height="197.75" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1242.0" y="2803.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Routing</text>
+<text x="1242.0" y="2832.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Ninety-four handlers in one file, grouped by domain with blank-line sections. Every route is easy to find; the file is 3,370 lines,</text>
+<text x="1242.0" y="2854.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">which is the largest single piece of debt here.</text>
+<rect x="1242" y="2867.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="2898.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">app.get / post / patch / delete</text>
+<text x="1254.0" y="2920.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">routes/index.ts  ·  94 handlers</text>
+<rect x="1220" y="2972.75" width="1120" height="176.5" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1242.0" y="3018.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Validation</text>
+<text x="1242.0" y="3048.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Zod at the route, before any business logic; small helpers for scalars. A failure throws badRequest with the field named.</text>
+<rect x="1242" y="3062.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="3092.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">routes/index.ts:392   title: z.string().min(4)</text>
+<text x="1254.0" y="3115.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">lib/http.ts  requireString / optionalNumber</text>
+<rect x="1220" y="3167.25" width="1120" height="197.75" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="1242.0" y="3213.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">One envelope</text>
+<text x="1242.0" y="3243.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">ok() gives {data}, page() adds meta, and every error — 400/404/409/500 — is rendered by the same handler, so the client</text>
+<text x="1242.0" y="3264.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">parses one shape.</text>
+<rect x="1242" y="3278.0" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="3308.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">{ data } · { data, meta } · { error }</text>
+<text x="1254.0" y="3331.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">setErrorHandler   app.ts:267</text>
+<rect x="1220" y="3383.0" width="1120" height="176.5" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="1242.0" y="3429.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Identity</text>
+<text x="1242.0" y="3458.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One onRequest hook resolves the single operator row and caches it per instance. Every write is attributed to that user.</text>
+<rect x="1242" y="3472.5" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="3503.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">app.ts:493 → auth/operator-middleware.ts:68</text>
+<text x="1254.0" y="3525.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">resolveOperator(db) → usr_owner</text>
+<rect x="0" y="3700" width="2400" height="1029" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="3772.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">03 — DATABASE</text>
+<text x="62.0" y="3803.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The interesting part of a table is not its columns — it is what it refuses to store. This is the DDL that actually runs.</text>
+<rect x="60" y="3832" width="1120" height="446.5" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="82.0" y="3878.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">The table that is actually created</text>
+<text x="82.0" y="3907.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Read the constraints as sentences: rules the application cannot bypass.</text>
+<rect x="82" y="3921.5" width="1076" height="335.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="3952.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">-- db/migrations/pg/0002_work.sql</text>
+<text x="94.0" y="3974.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">CREATE TABLE tasks (</text>
+<text x="94.0" y="3997.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  key        TEXT NOT NULL UNIQUE,</text>
+<text x="94.0" y="4019.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  project_id TEXT REFERENCES projects(id)</text>
+<text x="94.0" y="4042.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">             ON DELETE CASCADE,</text>
+<text x="94.0" y="4064.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  column_id  TEXT NOT NULL</text>
+<text x="94.0" y="4087.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">             REFERENCES columns(id),</text>
+<text x="94.0" y="4109.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  title      TEXT NOT NULL,</text>
+<text x="94.0" y="4132.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  status     task_status NOT NULL</text>
+<text x="94.0" y="4154.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">             CHECK (status IN ('backlog',</text>
+<text x="94.0" y="4177.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">               'todo','in_progress',</text>
+<text x="94.0" y="4199.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">               'review','blocked','done',</text>
+<text x="94.0" y="4222.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">               'cancelled')),</text>
+<text x="94.0" y="4244.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  position   DOUBLE PRECISION DEFAULT 1000);</text>
+<rect x="60" y="4296.5" width="1120" height="219.0" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="82.0" y="4342.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Ids and timestamps are decided in code</text>
+<text x="82.0" y="4372.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Ids are prefixed and time-sortable, so a row says what it is and roughly when. Timestamps are stored as "YYYY-MM-DD</text>
+<text x="82.0" y="4393.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">HH:MM:SS" UTC — deliberately not ISO with a T, because a space sorts before a T and mixing the two silently reorders every</text>
+<text x="82.0" y="4414.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">comparison.</text>
+<rect x="82" y="4428.5" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="4459.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">id("tsk") → tsk_m3k9x1a + 8 random chars</text>
+<text x="94.0" y="4481.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">nowIso()   → 2026-11-08 09:14:02</text>
+<rect x="1220" y="3832" width="1120" height="197.75" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="1242.0" y="3878.2" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">The chain that matters</text>
+<text x="1242.0" y="3907.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A client has projects; a project has boards and phases; a board has columns; a column holds tasks; a task has checks. Every</text>
+<text x="1242.0" y="3929.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">arrow is a real foreign key except the two below.</text>
+<rect x="1242" y="3942.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="3973.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">clients → projects → boards → columns → tasks</text>
+<text x="1254.0" y="3995.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">tasks.parent_id → tasks  (self)</text>
+<rect x="1220" y="4047.75" width="1120" height="197.75" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="1242.0" y="4093.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Two references deliberately not keys</text>
+<text x="1242.0" y="4123.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A deadline timer points at any entity (deal, project, task, release), so it is polymorphic by design. A QA report outlives the</text>
+<text x="1242.0" y="4144.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">release it tested, so it is not deleted with it.</text>
+<rect x="1242" y="4158.5" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="4189.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">sla_timers: entity_type + entity_id</text>
+<text x="1254.0" y="4211.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">qa_reports.release_id  (no FK)</text>
+<rect x="1220" y="4263.5" width="1120" height="219.0" rx="9" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="1242.0" y="4309.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Two schema sources, one inert</text>
+<text x="1242.0" y="4339.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">db/postgres/schema.sql calls itself "the production system of record" and carries CHECK (length(title) &gt;= 4). Nothing applies</text>
+<text x="1242.0" y="4360.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">it: boot migrates from db/migrations/pg, and CI never runs schema.sql. The title rule is really enforced at routes/index.ts:392</text>
+<text x="1242.0" y="4381.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">and services/tasks.ts:99.</text>
+<rect x="1242" y="4395.5" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="4426.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">scripts/test-pg.mjs → db/cli.ts migrate</text>
+<text x="1254.0" y="4448.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">db/postgres/README.md → "psql -f", by hand</text>
+<rect x="1220" y="4500.5" width="1120" height="197.75" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1242.0" y="4546.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Migrations</text>
+<text x="1242.0" y="4576.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Seventeen numbered files, applied in order at boot, each recorded with a checksum in schema_migrations. A slow migration</text>
+<text x="1242.0" y="4597.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">delays every cold start; a broken one blocks it.</text>
+<rect x="1242" y="4611.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="4641.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">0001_core … 0017_change_log</text>
+<text x="1254.0" y="4664.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">ensureLedger() → schema_migrations</text>
+<rect x="0" y="4839" width="2400" height="698" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="4911.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">04 — DEPLOYMENT</text>
+<text x="62.0" y="4942.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Four build steps and five runtime steps. Nothing compiles while a page is loading.</text>
+<text x="60.0" y="4992.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#1f2937">Build time — once per deploy, on Vercel</text>
+<rect x="60" y="5006.75" width="540" height="154.0" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="82.0" y="5052.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">1 · Install</text>
+<text x="82.0" y="5082.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Dev dependencies included: the build needs vite and tsc.</text>
+<rect x="82" y="5096.25" width="496" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="5126.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm ci --include=dev</text>
+<rect x="640" y="5006.75" width="540" height="154.0" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="662.0" y="5052.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">2 · Screens</text>
+<text x="662.0" y="5082.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Vite compiles React into static files.</text>
+<rect x="662" y="5096.25" width="496" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="674.0" y="5126.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm run build:web:service</text>
+<rect x="1220" y="5006.75" width="540" height="154.0" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1242.0" y="5052.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">3 · Embed</text>
+<text x="1242.0" y="5082.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Those files become one TypeScript module.</text>
+<rect x="1242" y="5096.25" width="496" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="5126.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">scripts/embed-web-assets.mjs</text>
+<rect x="1800" y="5006.75" width="540" height="154.0" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1822.0" y="5052.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">4 · Compile</text>
+<text x="1822.0" y="5082.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">tsc emits apps/api/dist, screens included.</text>
+<rect x="1822" y="5096.25" width="496" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1834.0" y="5126.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm run build:api</text>
+<text x="60.0" y="5226.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#1f2937">Runtime — on every cold start</text>
+<rect x="60" y="5240.5" width="430" height="175.25" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="5286.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">1 · Settings</text>
+<text x="82.0" y="5316.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">DATABASE_URL must exist. Missing → refuse</text>
+<text x="82.0" y="5337.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">to boot.</text>
+<rect x="82" y="5351.25" width="386" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="5381.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">db/index.ts (throws)</text>
+<rect x="522" y="5240.5" width="430" height="175.25" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="544.0" y="5286.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">2 · Pool</text>
+<text x="544.0" y="5316.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Ten reusable connections, not one per</text>
+<text x="544.0" y="5337.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">request.</text>
+<rect x="544" y="5351.25" width="386" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="556.0" y="5381.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">postgres.ts: max 10</text>
+<rect x="984" y="5240.5" width="430" height="175.25" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="1006.0" y="5286.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">3 · Migrate</text>
+<text x="1006.0" y="5316.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">17 SQL files, in order, checksummed.</text>
+<rect x="1006" y="5330.0" width="386" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1018.0" y="5360.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">db/migrate.ts</text>
+<rect x="1446" y="5240.5" width="430" height="175.25" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="1468.0" y="5286.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">4 · Operator</text>
+<text x="1468.0" y="5316.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Ensure exactly one users row exists.</text>
+<rect x="1468" y="5330.0" width="386" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1480.0" y="5360.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">ensureOperator()</text>
+<rect x="1908" y="5240.5" width="430" height="175.25" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="1930.0" y="5286.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">5 · Listen</text>
+<text x="1930.0" y="5316.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Bind PORT on 0.0.0.0 and serve.</text>
+<rect x="1930" y="5330.0" width="386" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1942.0" y="5360.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">entrypoints/index.ts</text>
+<rect x="60" y="5445.75" width="2280" height="61.25" rx="9" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
+<text x="80.0" y="5485.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Why step 3 of the build exists: Vercel bundles what is imported, not what sits in a folder — and the services schema rejects includeFiles. So the built screens are compiled into the API as a module (16 assets) instead of copied next to it.</text>
+<rect x="0" y="5647" width="2400" height="846" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="5719.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">05 — REQUEST FLOWS</text>
+<text x="62.0" y="5750.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Two journeys cover almost everything: fetching a list, and creating a record. Both are single round trips.</text>
+<rect x="60" y="5779" width="1120" height="332.75" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="82.0" y="5825.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Read — GET /api/projects</text>
+<text x="82.0" y="5854.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One request, one query. The counts are correlated subqueries, so there is no N+1, and the mapper turns snake_case into what</text>
+<text x="82.0" y="5876.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">the screen expects.</text>
+<rect x="82" y="5889.75" width="1076" height="200.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="5920.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">routes/index.ts:945</text>
+<text x="94.0" y="5942.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">SELECT p.*, c.name,</text>
+<text x="94.0" y="5965.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  (SELECT COUNT(*) FROM tasks t</text>
+<text x="94.0" y="5987.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">    WHERE t.project_id = p.id) AS task_count,</text>
+<text x="94.0" y="6010.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  … three more counts …</text>
+<text x="94.0" y="6032.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">FROM projects p JOIN clients c ON …</text>
+<text x="94.0" y="6055.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">mapProject(row)  snake_case → camelCase</text>
+<text x="94.0" y="6077.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">reply  { data: [ … ] }</text>
+<rect x="60" y="6129.75" width="1120" height="332.75" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="6175.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Write — POST /api/tasks</text>
+<text x="82.0" y="6205.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Six steps, each able to stop the write with a named reason. The column is looked up by (board_id, key), never guessed; the</text>
+<text x="82.0" y="6226.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">key comes from the highest existing suffix, not the row count.</text>
+<rect x="82" y="6240.5" width="1076" height="200.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="6271.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">routes/index.ts:412</text>
+<text x="94.0" y="6293.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">1  zod.safeParse(body)     → 400 + field name</text>
+<text x="94.0" y="6316.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">2  board must exist        → 400 unknown board</text>
+<text x="94.0" y="6338.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">3  SELECT id FROM columns</text>
+<text x="94.0" y="6361.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">     WHERE board_id=? AND key=?  → 400</text>
+<text x="94.0" y="6383.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">4  nextKey()  highest suffix + 1</text>
+<text x="94.0" y="6406.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">5  INSERT tasks + checklist + gates (tx)</text>
+<text x="94.0" y="6428.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">6  201 { data: taskDetail }</text>
+<rect x="1220" y="5779" width="1120" height="221.5" rx="9" fill="#fff1f2" stroke="#e11d48" stroke-width="2"/>
+<text x="1242.0" y="5825.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Errors, in one table</text>
+<text x="1242.0" y="5854.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The status is a fact about the request, not a mood. Every one arrives in the same envelope.</text>
+<rect x="1242" y="5868.5" width="1076" height="110.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="5899.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">400  validation, unknown board or column</text>
+<text x="1254.0" y="5921.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">404  missing record</text>
+<text x="1254.0" y="5944.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">409  conflict — duplicate key, bad transition</text>
+<text x="1254.0" y="5966.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">500  anything uncaught</text>
+<rect x="1220" y="6018.5" width="1120" height="199.0" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="1242.0" y="6064.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">What the client can rely on</text>
+<text x="1242.0" y="6094.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One parser for the whole API, because there is one error renderer.</text>
+<rect x="1242" y="6108.0" width="1076" height="87.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="6138.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">{ data: … }</text>
+<text x="1254.0" y="6161.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">{ data: […], meta: { total, limit, offset } }</text>
+<text x="1254.0" y="6183.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">{ error: { code, message, detail? } }</text>
+<rect x="1220" y="6235.5" width="1120" height="197.75" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="1242.0" y="6281.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Eleven steps of a save</text>
+<text x="1242.0" y="6311.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">click → rewrite → router → onRequest → identity → zod → service → column → key → insert → response hooks (log, metric,</text>
+<text x="1242.0" y="6332.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">change_log).</text>
+<rect x="1242" y="6346.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="6376.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">app.ts:191 · :493 · :205 · :250</text>
+<text x="1254.0" y="6399.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">tasks.ts:119  (column)  ·  :40  (key)  ·  :138  (insert)</text>
+<rect x="0" y="6603" width="2400" height="944" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="6675.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">06 — BUSINESS LOGIC</text>
+<text x="62.0" y="6706.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The distinction most diagrams get wrong: a corridor with locked doors is not the same thing as a signpost.</text>
+<rect x="60" y="6735" width="1120" height="176.5" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="6781.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Client lifecycle, 18 stages</text>
+<text x="82.0" y="6810.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A transition that is not in the table is refused with 409. Guarded moves require evidence rows.</text>
+<rect x="82" y="6824.5" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="6855.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">services/lifecycle.ts</text>
+<text x="94.0" y="6877.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">STAGE_KEYS (18)  ·  TRANSITIONS</text>
+<rect x="60" y="6929.5" width="1120" height="176.5" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="6975.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Acceptance ladder, 4 steps</text>
+<text x="82.0" y="7005.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">dev_complete → qa_approved → lead_approved → client_accepted, unique per task and step.</text>
+<rect x="82" y="7019.0" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="7049.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">services/tasks.ts:19</text>
+<text x="94.0" y="7072.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">ACCEPTANCE_LADDER = […4…]</text>
+<rect x="60" y="7124.0" width="1120" height="176.5" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="7170.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Turnover gates, 8 rules</text>
+<text x="82.0" y="7199.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A task cannot be called done while a gate rule is unsatisfied: description written, owner assigned, estimate set, and five more.</text>
+<rect x="82" y="7213.5" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="7244.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">domain/turnover.ts:77</text>
+<text x="94.0" y="7266.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">AUTO_RULES = has_description, has_assignee, …</text>
+<rect x="60" y="7318.5" width="1120" height="197.75" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="7364.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Ship gate and clock sweep</text>
+<text x="82.0" y="7394.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A release cannot ship while a required QA check is open. A running timer past its due date becomes missed — daily, and on</text>
+<text x="82.0" y="7415.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">boot.</text>
+<rect x="82" y="7429.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="7459.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">services/shipgate.ts   evaluateShipGate()</text>
+<text x="94.0" y="7482.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">services/clocks.ts   outcome='running' → missed</text>
+<rect x="1220" y="6735" width="1120" height="197.75" rx="9" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="1242.0" y="6781.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Pipeline stages, 12</text>
+<text x="1242.0" y="6810.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A deal can be PATCHed to any stage. There is no rule about which may follow which — the arrows on any diagram of it are</text>
+<text x="1242.0" y="6832.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">decoration.</text>
+<rect x="1242" y="6845.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="6876.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">PIPELINE_STAGES (12)</text>
+<text x="1254.0" y="6898.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">PATCH /api/deals/:id → any stage</text>
+<rect x="1220" y="6950.75" width="1120" height="176.5" rx="9" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="1242.0" y="6996.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Task status</text>
+<text x="1242.0" y="7026.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Seven allowed values in a CHECK constraint. A constraint is not a state machine: any allowed value can follow any other.</text>
+<rect x="1242" y="7040.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="7070.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">status CHECK (… 'done' …)</text>
+<text x="1254.0" y="7093.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">no transition guard anywhere</text>
+<rect x="1220" y="7145.25" width="1120" height="176.5" rx="9" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="1242.0" y="7191.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">WIP limits</text>
+<text x="1242.0" y="7221.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">columns.wip_limit is stored and seeded, and nothing reads it. No column refuses a card because it is full.</text>
+<rect x="1242" y="7234.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="7265.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">grep -r wip_limit apps/api/src/services</text>
+<text x="1254.0" y="7287.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">→ no results (seed + scaffolding only)</text>
+<rect x="1220" y="7339.75" width="1120" height="176.5" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="1242.0" y="7385.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Why say it out loud</text>
+<text x="1242.0" y="7415.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A diagram with arrows looks enforced, and a reader will believe it. Only the left column is code that can refuse you.</text>
+<rect x="1242" y="7429.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="7459.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">An earlier version of this board</text>
+<text x="1254.0" y="7482.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">got exactly this wrong.</text>
+<rect x="0" y="7657" width="2400" height="860" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="7729.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">07 — RELIABILITY</text>
+<text x="62.0" y="7760.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">There is no queue and no worker. Reliability here means health endpoints, one honest sweep, and tests written after real failures.</text>
+<rect x="60" y="7789" width="1120" height="221.5" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="82.0" y="7835.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Health, in four endpoints</text>
+<text x="82.0" y="7864.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Liveness and readiness are separate questions, and the answers are different on purpose.</text>
+<rect x="82" y="7878.5" width="1076" height="110.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="7909.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">/api/live     :157   process up + uptime</text>
+<text x="94.0" y="7931.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">/api/ready    :160   database reachable</text>
+<text x="94.0" y="7954.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">/api/health   :116   config (authMode, storage)</text>
+<text x="94.0" y="7976.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">/api/metrics  :224   Prometheus text</text>
+<rect x="60" y="8028.5" width="1120" height="242.75" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="82.0" y="8074.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">The only job that exists</text>
+<text x="82.0" y="8104.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A running timer past its due date must become missed. That is one UPDATE, so it runs wherever a process is awake: the</text>
+<text x="82.0" y="8125.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Vercel cron at 03:00, an interval every 60 s in the container, and a throttled inline sweep on the serverless path.</text>
+<rect x="82" y="8139.25" width="1076" height="110.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="8169.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">0 3 * * * → /api/cron/sweep   :190</text>
+<text x="94.0" y="8192.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">CRON_SECRET compared in constant time</text>
+<text x="94.0" y="8215.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">503 when the secret is unset</text>
+<text x="94.0" y="8237.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">idempotent: only rows still running</text>
+<rect x="60" y="8289.25" width="1120" height="197.75" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="8335.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Backups and recovery</text>
+<text x="82.0" y="8365.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A restore drill creates a fresh database, applies a dump and reads the data back — because an untested backup is a hope, not</text>
+<text x="82.0" y="8386.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">a backup.</text>
+<rect x="82" y="8400.0" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="8430.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm run backup:verify</text>
+<text x="94.0" y="8453.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm run test:persistence  (restart, read)</text>
+<rect x="1220" y="7789" width="1120" height="219.0" rx="9" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="1242.0" y="7835.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Story 1 · the database that was not there</text>
+<text x="1242.0" y="7864.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">An earlier revision fell back to a file database when DATABASE_URL was missing. On a serverless host that file lives in /tmp</text>
+<text x="1242.0" y="7886.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">and dies with the instance — the app booted, accepted writes, read them back, and lost them. The fix was to refuse to start</text>
+<text x="1242.0" y="7907.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">and name the missing setting.</text>
+<rect x="1242" y="7921.0" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="7951.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">db/index.ts throws → 503 + setup page</text>
+<text x="1254.0" y="7974.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">lib/misconfigured.ts names the variable</text>
+<rect x="1220" y="8026.0" width="1120" height="220.25" rx="9" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="1242.0" y="8072.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Story 2 · the outage with no route to report it</text>
+<text x="1242.0" y="8101.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">@fastify/static was imported at the top of app.ts. 10.1.4 pulled in an ESM-only dependency; on a runtime without</text>
+<text x="1242.0" y="8123.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">require(esm) that threw while the module loaded, before any route existed. Every request answered boot_failed.</text>
+<rect x="1242" y="8136.75" width="1076" height="87.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="8167.4" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">fix: pin 10.1.3 + import inside the branch</text>
+<text x="1254.0" y="8189.9" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">test: 4 child-process cases with</text>
+<text x="1254.0" y="8212.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">      --no-experimental-require-module</text>
+<rect x="1220" y="8264.25" width="1120" height="197.75" rx="9" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="1242.0" y="8310.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Retries, stated honestly</text>
+<text x="1242.0" y="8340.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">There is no retry ladder and no dead-letter queue. A failed write returns its error to the client; the client decides. Nothing</text>
+<text x="1242.0" y="8361.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">retries behind your back.</text>
+<rect x="1242" y="8375.0" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="8405.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">✗ queue   ✗ worker   ✗ dead-letter</text>
+<text x="1254.0" y="8428.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">✓ idempotent sweep   ✓ one error envelope</text>
+<rect x="0" y="8627" width="2400" height="1034" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="8699.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">08 — ENGINEERING</text>
+<text x="62.0" y="8730.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">What "green" means, what is actually protected, and what a new engineer should know before touching it.</text>
+<rect x="60" y="8759" width="1120" height="199.0" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="82.0" y="8805.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">npm run verify — ten gates</text>
+<text x="82.0" y="8834.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One command a person runs before pushing. It stops at the first failure.</text>
+<rect x="82" y="8848.5" width="1076" height="87.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="8879.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">guard · typecheck · test · test:pg · build:service</text>
+<text x="94.0" y="8901.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">verify:routing · smoke:web · verify:boot</text>
+<text x="94.0" y="8924.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">test:persistence · backup:verify</text>
+<rect x="60" y="8976.0" width="1120" height="197.75" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="82.0" y="9022.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">What the numbers are</text>
+<text x="82.0" y="9051.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">283 tests across 24 files; 19 of them run again against a real PostgreSQL 16, because SQLite and Postgres disagree about</text>
+<text x="82.0" y="9073.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">enough to matter.</text>
+<rect x="82" y="9086.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="9117.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/api/test/*.test.mjs  ·  24 files</text>
+<text x="94.0" y="9140.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">scripts/test-pg.mjs  ·  19 PG-only</text>
+<rect x="60" y="9191.75" width="1120" height="176.5" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="82.0" y="9237.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Why "it built" is not "it works"</text>
+<text x="82.0" y="9267.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A build can pass while the server never starts. So CI builds the way production builds, then starts the artefact and calls it.</text>
+<rect x="82" y="9281.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="9312.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">ci.yml → single-service-build</text>
+<text x="94.0" y="9334.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm ci --omit=dev → build → GET /api/live</text>
+<rect x="60" y="9386.25" width="1120" height="176.5" rx="9" fill="#fff1f2" stroke="#e11d48" stroke-width="2"/>
+<text x="82.0" y="9432.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Four tests that exist because of an outage</text>
+<text x="82.0" y="9462.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">A child process loads the server with ESM require disabled — the runtime shape that broke in July — and asserts it still boots.</text>
+<rect x="82" y="9475.75" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="9506.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">module-format.test.mjs</text>
+<text x="94.0" y="9529.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">service-entry  ·  platform-launcher</text>
+<rect x="1220" y="8759" width="1120" height="199.0" rx="9" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="1242.0" y="8805.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Security, said out loud</text>
+<text x="1242.0" y="8834.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">There is no authentication, and the API says so in its own response rather than leaving you to guess.</text>
+<rect x="1242" y="8848.5" width="1076" height="87.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="8879.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">{ authMode: "none", csrfToken: null }</text>
+<text x="1254.0" y="8901.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">permissions: Proxy(all → true)</text>
+<text x="1254.0" y="8924.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">POST /api/auth/login → 410 Gone</text>
+<rect x="1220" y="8976.0" width="1120" height="221.5" rx="9" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="1242.0" y="9022.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">What is actually protecting it</text>
+<text x="1242.0" y="9051.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Platform password protection on the deployment, plus these application controls.</text>
+<rect x="1242" y="9065.5" width="1076" height="110.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="9096.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">helmet · cors · 2 MB body · rate limits</text>
+<text x="1254.0" y="9118.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">parameterised SQL · DB constraints</text>
+<text x="1254.0" y="9141.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">constant-time CRON_SECRET</text>
+<text x="1254.0" y="9163.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">audit_log + change_log, append-only</text>
+<rect x="1220" y="9215.5" width="1120" height="197.75" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1242.0" y="9261.6" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">RBAC: present and idle</text>
+<text x="1242.0" y="9291.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">project_members, partner_iam_users and client_portal_users exist, and scope.ts can restrict by membership. With one admin</text>
+<text x="1242.0" y="9312.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">operator the scope resolves to everything, so it never fires.</text>
+<rect x="1242" y="9326.25" width="1076" height="65.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="9357.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/api/src/auth/scope.ts</text>
+<text x="1254.0" y="9379.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">enforcement: none   ·   403 path: none</text>
+<rect x="1220" y="9431.25" width="1120" height="199.0" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="1242.0" y="9477.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">The debt, ranked</text>
+<text x="1242.0" y="9507.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">The router file is first, then the missing per-user identity, then the dashboard aggregates computed on every request.</text>
+<rect x="1242" y="9520.75" width="1076" height="87.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="9551.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">1  routes/index.ts  3,370 lines</text>
+<text x="1254.0" y="9574.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">2  no per-user identity</text>
+<text x="1254.0" y="9596.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">3  no cache tier for aggregates</text>
+<rect x="0" y="9771" width="2400" height="975" fill="none" stroke="#c7d2fe" stroke-width="2" rx="10"/>
+<text x="60.0" y="9843.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#1f2937">09 — SOURCE-CODE MAP + EXPLANATION GUIDE</text>
+<text x="62.0" y="9874.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">If you only have ten minutes: read the map on the left, then follow the reading order on the right.</text>
+<rect x="60" y="9903" width="1120" height="289.0" rx="9" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="82.0" y="9949.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">The map</text>
+<text x="82.0" y="9978.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Six folders hold everything. Learn these and you can find any behaviour in the system.</text>
+<rect x="82" y="9992.5" width="1076" height="177.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="10023.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/web/src        screens · 13 pages · lib/api.ts</text>
+<text x="94.0" y="10045.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/api/src        server · app.ts 636 · routes 3,370</text>
+<text x="94.0" y="10068.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  services/ domain/  rules: lifecycle, gates, clocks</text>
+<text x="94.0" y="10090.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">  db/                pool · migrations · dialect</text>
+<text x="94.0" y="10113.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">db/migrations/pg/   17 numbered SQL files</text>
+<text x="94.0" y="10135.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">scripts/            build, guards, smoke, backup</text>
+<text x="94.0" y="10158.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">apps/api/test/       24 test files, 283 tests</text>
+<rect x="60" y="10210.0" width="1120" height="244.0" rx="9" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="82.0" y="10256.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">How to verify every claim</text>
+<text x="82.0" y="10285.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Every statement on this board has a command or a file behind it. In a fresh clone:</text>
+<rect x="82" y="10299.5" width="1076" height="132.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="10330.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm ci --include=dev</text>
+<text x="94.0" y="10352.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm run verify        # all ten gates</text>
+<text x="94.0" y="10375.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm run test:pg       # needs a real PostgreSQL</text>
+<text x="94.0" y="10397.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">npm run build:service &amp;&amp; node apps/api/dist/index.js</text>
+<text x="94.0" y="10420.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">grep -n "ACCEPTANCE_LADDER" apps/api/src/services/tasks.ts</text>
+<rect x="60" y="10472.0" width="1120" height="244.0" rx="9" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="82.0" y="10518.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">The words you need</text>
+<text x="82.0" y="10547.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Twenty terms, each in one line, all of them used on this board.</text>
+<rect x="82" y="10561.5" width="1076" height="132.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="94.0" y="10592.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">handler · hook · route · envelope</text>
+<text x="94.0" y="10614.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">migration · ledger · constraint · FK/PK</text>
+<text x="94.0" y="10637.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">pool · transaction · cron · idempotent</text>
+<text x="94.0" y="10659.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">serverless · ORM · RBAC · CORS</text>
+<text x="94.0" y="10682.2" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">rate limit · embedded SPA · cold start</text>
+<rect x="1220" y="9903" width="1120" height="287.75" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="1242.0" y="9949.1" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">Reading order for a new engineer</text>
+<text x="1242.0" y="9978.8" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Six files, in this order, is the whole system: how it starts, how it routes, how it writes, how it migrates, how the screen calls it,</text>
+<text x="1242.0" y="10000.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">how it deploys.</text>
+<rect x="1242" y="10013.75" width="1076" height="155.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="10044.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">1  apps/api/src/app.ts</text>
+<text x="1254.0" y="10067.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">2  routes/index.ts  (the tasks group only)</text>
+<text x="1254.0" y="10089.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">3  services/tasks.ts</text>
+<text x="1254.0" y="10112.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">4  db/migrate.ts</text>
+<text x="1254.0" y="10134.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">5  apps/web/src/lib/api.ts</text>
+<text x="1254.0" y="10157.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">6  vercel.json</text>
+<rect x="1220" y="10208.75" width="1120" height="221.5" rx="9" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+<text x="1242.0" y="10254.9" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">What is deliberately not claimed</text>
+<text x="1242.0" y="10284.5" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">Three things could not be observed from outside the deployment, so they are asserted nowhere on this board.</text>
+<rect x="1242" y="10298.25" width="1076" height="110.0" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="10329.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">1  the exact Vercel runtime version</text>
+<text x="1254.0" y="10351.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">2  the production environment variables</text>
+<text x="1254.0" y="10374.0" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">3  the running function — the URL answers</text>
+<text x="1254.0" y="10396.5" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">   302 → vercel.com/login (Deployment Protection)</text>
+<rect x="1220" y="10448.25" width="1120" height="175.25" rx="9" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
+<text x="1242.0" y="10494.4" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#1f2937">If you remember one thing</text>
+<text x="1242.0" y="10524.0" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">One program, one database, and the rules that matter enforced by the database itself — so it stays small, and it is hard to</text>
+<text x="1242.0" y="10545.3" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#475569">break.</text>
+<rect x="1242" y="10559.0" width="1076" height="42.5" rx="9" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1254.0" y="10589.7" font-family="DejaVu Sans Mono, monospace" font-size="15" font-weight="400" fill="#334155">94 endpoints · 81 tables · 283 tests · 0 logins</text>
+</svg>

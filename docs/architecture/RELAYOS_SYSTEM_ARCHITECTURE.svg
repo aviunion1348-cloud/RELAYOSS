@@ -1,0 +1,1289 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2528" height="16936" viewBox="-48 -56 2528 16936" font-family="DejaVu Sans, Helvetica, Arial, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/></marker><marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1d4ed8"/></marker><marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6d28d9"/></marker><marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309"/></marker></defs>
+<rect x="-48" y="-56" width="2528" height="16936" fill="#ffffff"/>
+<rect x="0" y="0" width="2400" height="1030" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="-14" font-size="15" fill="#94a3b8" letter-spacing="0.5">00 · Architecture overview</text>
+<rect x="0" y="1200" width="2400" height="1140" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="1186" font-size="15" fill="#94a3b8" letter-spacing="0.5">01 · Deployment architecture</text>
+<rect x="0" y="2510" width="2400" height="1040" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="2496" font-size="15" fill="#94a3b8" letter-spacing="0.5">02 · Frontend architecture</text>
+<rect x="0" y="3720" width="2400" height="1060" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="3706" font-size="15" fill="#94a3b8" letter-spacing="0.5">03 · Backend architecture</text>
+<rect x="0" y="4950" width="2400" height="1730" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="4936" font-size="15" fill="#94a3b8" letter-spacing="0.5">04 · Database architecture / ER diagram</text>
+<rect x="0" y="6850" width="2400" height="1180" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="6836" font-size="15" fill="#94a3b8" letter-spacing="0.5">05 · Request lifecycle — two real sequences</text>
+<rect x="0" y="8200" width="2400" height="1160" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="8186" font-size="15" fill="#94a3b8" letter-spacing="0.5">06 · Business domain — the delivery workflow the code defines</text>
+<rect x="0" y="9530" width="2400" height="920" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="9516" font-size="15" fill="#94a3b8" letter-spacing="0.5">07 · Background jobs and time</text>
+<rect x="0" y="10620" width="2400" height="940" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="10606" font-size="15" fill="#94a3b8" letter-spacing="0.5">08 · Security, access and data boundaries</text>
+<rect x="0" y="11730" width="2400" height="1030" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="11716" font-size="15" fill="#94a3b8" letter-spacing="0.5">09 · Error handling and reliability</text>
+<rect x="0" y="12930" width="2400" height="900" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="12916" font-size="15" fill="#94a3b8" letter-spacing="0.5">10 · Testing and CI/CD</text>
+<rect x="0" y="14000" width="2400" height="720" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="13986" font-size="15" fill="#94a3b8" letter-spacing="0.5">11 · Technology inventory and why each piece is here</text>
+<rect x="0" y="14890" width="2400" height="800" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="14876" font-size="15" fill="#94a3b8" letter-spacing="0.5">12 · Source map — from architecture box to file</text>
+<rect x="0" y="15860" width="2400" height="940" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="18" y="15846" font-size="15" fill="#94a3b8" letter-spacing="0.5">13 · Known gaps and technical debt</text>
+<rect x="40" y="120" width="300" height="90" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>
+<rect x="400" y="120" width="300" height="90" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>
+<rect x="800" y="108" width="700" height="492" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+<rect x="830" y="196" width="640" height="92" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="830" y="330" width="640" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="830" y="470" width="200" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2" stroke-dasharray="7 5"/>
+<rect x="1050" y="470" width="200" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2" stroke-dasharray="7 5"/>
+<rect x="1270" y="470" width="200" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2" stroke-dasharray="7 5"/>
+<rect x="1640" y="120" width="400" height="110" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1640" y="300" width="400" height="96" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+<rect x="40" y="660" width="740" height="160" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="820" y="660" width="700" height="160" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1560" y="660" width="800" height="160" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="856" width="2320" height="120" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="2"/>
+<rect x="40" y="1350" width="280" height="92" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>
+<rect x="370" y="1350" width="280" height="92" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>
+<rect x="700" y="1328" width="760" height="500" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+<rect x="730" y="1400" width="700" height="78" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="730" y="1492" width="700" height="88" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="730" y="1594" width="700" height="78" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="730" y="1686" width="700" height="78" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1520" y="1350" width="380" height="100" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1520" y="1485" width="380" height="112" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1520" y="1632" width="380" height="90" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1520" y="1758" width="380" height="90" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>
+<rect x="40" y="1890" width="740" height="120" rx="8" fill="#fffbeb" stroke="#a16207" stroke-width="2"/>
+<rect x="820" y="1890" width="700" height="120" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1560" y="1890" width="800" height="120" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="2046" width="1100" height="120" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1180" y="2046" width="1180" height="120" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="40" y="2202" width="2320" height="96" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="2626" width="520" height="104" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="600" y="2626" width="520" height="104" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1160" y="2626" width="520" height="104" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1720" y="2626" width="640" height="104" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="40" y="2778" width="740" height="170" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="820" y="2778" width="740" height="170" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1600" y="2778" width="760" height="170" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="40" y="3010" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="350" y="3010" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="820" y="3010" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1130" y="3010" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1600" y="3010" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1910" y="3010" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="40" y="3072" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="350" y="3072" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="820" y="3072" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1130" y="3072" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1600" y="3072" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1910" y="3072" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="40" y="3134" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="350" y="3134" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="820" y="3134" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1130" y="3134" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1600" y="3134" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1910" y="3134" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="40" y="3196" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="350" y="3196" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="820" y="3196" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1130" y="3196" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1600" y="3196" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1910" y="3196" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="40" y="3258" width="300" height="52" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="350" y="3258" width="450" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="40" y="3340" width="2320" height="150" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="3836" width="520" height="118" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="600" y="3836" width="520" height="118" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1160" y="3836" width="520" height="118" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1720" y="3836" width="640" height="118" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="3988" width="520" height="230" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="600" y="3988" width="520" height="230" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1160" y="3988" width="520" height="230" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1720" y="3988" width="640" height="230" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="40" y="4248" width="1100" height="200" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1180" y="4248" width="1180" height="200" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="4482" width="2320" height="130" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="4634" width="2320" height="110" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="60" y="5060" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="60" y="5240" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="60" y="5420" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="60" y="5600" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="60" y="5780" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="60" y="5960" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="60" y="6140" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="60" y="6320" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1300" y="5060" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1300" y="5240" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1300" y="5420" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1300" y="5600" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1300" y="5780" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1300" y="5960" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1300" y="6140" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1300" y="6320" width="940" height="132" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="60" y="6510" width="2180" height="130" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="40" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="40" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="230" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="230" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="230" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="420" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="420" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="420" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="610" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="610" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="610" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="800" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="800" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="800" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="990" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="990" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="990" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1180" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1180" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1180" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1370" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1370" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1370" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1560" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1560" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1560" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1750" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1750" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1750" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1940" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="1940" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1940" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="2130" y="7000" width="176" height="96" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="2130" y="7106" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="2130" y="7192" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="7270" width="2320" height="110" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="40" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="230" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="230" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="230" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="420" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="420" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="420" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="610" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="610" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="610" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="800" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="800" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="800" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="990" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="990" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="990" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1180" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1180" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1180" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1370" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1370" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1370" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1560" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1560" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1560" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1750" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1750" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1750" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1940" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1940" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="1940" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="2130" y="7460" width="176" height="96" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="2130" y="7566" width="176" height="76" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="2130" y="7652" width="176" height="62" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="7730" width="1120" height="130" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="2"/>
+<rect x="1200" y="7730" width="1160" height="130" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="40" y="8342" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8342" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8342" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8396" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8396" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8396" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8450" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8450" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8450" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8504" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8504" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8504" width="340" height="44" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8568" width="1120" height="82" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="8714" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8714" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8714" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8760" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8760" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8760" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8806" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8806" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8806" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8852" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8852" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8852" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8898" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8898" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8898" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="8944" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="420" y="8944" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="800" y="8944" width="340" height="38" rx="8" fill="#ffe4e6" stroke="#be123c" stroke-width="2"/>
+<rect x="40" y="9006" width="1120" height="104" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1200" y="8308" width="1160" height="190" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1200" y="8522" width="1160" height="210" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1200" y="8756" width="1160" height="150" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1200" y="8930" width="1160" height="150" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1200" y="9104" width="1160" height="140" rx="8" fill="#fffbeb" stroke="#a16207" stroke-width="2"/>
+<rect x="40" y="9138" width="1120" height="114" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="9650" width="700" height="140" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+<rect x="800" y="9650" width="700" height="140" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1560" y="9650" width="760" height="140" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="700" y="9896" width="900" height="150" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="10096" width="1120" height="190" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1200" y="10096" width="1120" height="190" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="10320" width="2280" height="96" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="2"/>
+<rect x="40" y="10732" width="740" height="230" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="2"/>
+<rect x="800" y="10732" width="740" height="230" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="1560" y="10732" width="800" height="230" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="40" y="11038" width="300" height="86" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>
+<rect x="390" y="11038" width="340" height="86" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="780" y="11038" width="420" height="86" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1250" y="11038" width="380" height="86" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1680" y="11038" width="680" height="86" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="11166" width="740" height="200" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="800" y="11166" width="740" height="200" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1560" y="11166" width="800" height="200" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="11406" width="2320" height="120" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="11842" width="740" height="190" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="800" y="11842" width="740" height="190" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1560" y="11842" width="800" height="190" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="40" y="12060" width="740" height="200" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="800" y="12060" width="740" height="200" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1560" y="12060" width="800" height="200" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="40" y="12318" width="560" height="108" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="630" y="12318" width="560" height="108" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1220" y="12318" width="560" height="108" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1810" y="12318" width="550" height="108" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="12460" width="1120" height="180" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1200" y="12460" width="1160" height="180" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="40" y="12664" width="2320" height="80" rx="8" fill="#fffbeb" stroke="#a16207" stroke-width="2"/>
+<rect x="40" y="13072" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="510" y="13072" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="980" y="13072" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1450" y="13072" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1920" y="13072" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="13168" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="510" y="13168" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="980" y="13168" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1450" y="13168" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1920" y="13168" width="430" height="68" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="13278" width="740" height="200" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="800" y="13278" width="740" height="200" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1560" y="13278" width="800" height="200" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="40" y="13508" width="1120" height="170" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+<rect x="1200" y="13508" width="1160" height="170" rx="8" fill="#fffbeb" stroke="#a16207" stroke-width="2"/>
+<rect x="40" y="13708" width="2320" height="90" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="40" y="14110" width="560" height="236" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="620" y="14110" width="560" height="236" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1200" y="14110" width="560" height="236" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="1780" y="14110" width="580" height="236" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+<rect x="40" y="14372" width="1120" height="150" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="1200" y="14372" width="1160" height="150" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="40" y="14552" width="2320" height="110" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="15000" width="740" height="250" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="800" y="15000" width="740" height="250" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="1560" y="15000" width="800" height="250" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+<rect x="40" y="15288" width="740" height="230" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<rect x="800" y="15288" width="740" height="230" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+<rect x="1560" y="15288" width="800" height="230" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+<rect x="40" y="15554" width="2320" height="90" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="2"/>
+<rect x="40" y="15970" width="740" height="250" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="800" y="15970" width="740" height="250" rx="8" fill="#fffbeb" stroke="#a16207" stroke-width="2"/>
+<rect x="1560" y="15970" width="800" height="250" rx="8" fill="#fffbeb" stroke="#a16207" stroke-width="2"/>
+<rect x="40" y="16250" width="1120" height="210" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<rect x="1200" y="16250" width="1160" height="210" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<rect x="40" y="16486" width="2320" height="150" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="2"/>
+<rect x="40" y="16660" width="2320" height="100" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<polyline points="340.0,165.0 400.0,165.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="700.0,165.0 800.0,165.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1150.0,288.0 1150.0,330.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1000.0,330.0 1000.0,288.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1470.0,380.0 1560.0,380.0 1560.0,210.0 1640.0,210.0" fill="none" stroke="#b45309" stroke-width="2" stroke-linejoin="round" marker-end="url(#ao)"/>
+<polyline points="1640.0,348.0 1470.0,348.0" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linejoin="round" marker-end="url(#ap)"/>
+<polyline points="320.0,1396.0 370.0,1396.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="650.0,1396.0 700.0,1396.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1460.0,1500.0 1520.0,1414.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1710.0,1450.0 1710.0,1485.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1710.0,1597.0 1710.0,1632.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1710.0,1722.0 1710.0,1758.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="560.0,2678.0 600.0,2678.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1120.0,2678.0 1160.0,2678.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1680.0,2678.0 1720.0,2678.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="560.0,3895.0 600.0,3895.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1120.0,3895.0 1160.0,3895.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1680.0,3895.0 1720.0,3895.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="530.0,5192.0 530.0,5240.0" fill="none" stroke="#b45309" stroke-width="2" stroke-linejoin="round" marker-end="url(#ao)"/>
+<polyline points="530.0,5372.0 530.0,5420.0" fill="none" stroke="#b45309" stroke-width="2" stroke-linejoin="round" marker-end="url(#ao)"/>
+<polyline points="1770.0,5372.0 1770.0,5420.0" fill="none" stroke="#b45309" stroke-width="2" stroke-linejoin="round" marker-end="url(#ao)"/>
+<polyline points="530.0,5552.0 530.0,5600.0" fill="none" stroke="#b45309" stroke-width="2" stroke-linejoin="round" marker-end="url(#ao)"/>
+<polyline points="1770.0,5912.0 1770.0,5960.0" fill="none" stroke="#b45309" stroke-width="2" stroke-linejoin="round" marker-end="url(#ao)"/>
+<polyline points="1770.0,6092.0 1770.0,6140.0" fill="none" stroke="#b45309" stroke-width="2" stroke-linejoin="round" marker-end="url(#ao)"/>
+<polyline points="1000.0,5150.0 1060.0,5150.0 1060.0,6060.0 1300.0,6060.0" fill="none" stroke="#0f766e" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#a)"/>
+<polyline points="1000.0,5486.0 1130.0,5486.0 1130.0,5126.0 1300.0,5126.0" fill="none" stroke="#0f766e" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#a)"/>
+<polyline points="1000.0,5306.0 1200.0,5306.0 1200.0,5306.0 1300.0,5306.0" fill="none" stroke="#0f766e" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#a)"/>
+<polyline points="216.0,7048.0 230.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="406.0,7048.0 420.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="596.0,7048.0 610.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="786.0,7048.0 800.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="976.0,7048.0 990.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1166.0,7048.0 1180.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1356.0,7048.0 1370.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1546.0,7048.0 1560.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1736.0,7048.0 1750.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1926.0,7048.0 1940.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="2116.0,7048.0 2130.0,7048.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="216.0,7508.0 230.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="406.0,7508.0 420.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="596.0,7508.0 610.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="786.0,7508.0 800.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="976.0,7508.0 990.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1166.0,7508.0 1180.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1356.0,7508.0 1370.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1546.0,7508.0 1560.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1736.0,7508.0 1750.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1926.0,7508.0 1940.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="2116.0,7508.0 2130.0,7508.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="380.0,8364.0 420.0,8364.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="760.0,8364.0 800.0,8364.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="380.0,8418.0 420.0,8418.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="760.0,8418.0 800.0,8418.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="380.0,8472.0 420.0,8472.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="760.0,8472.0 800.0,8472.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="380.0,8526.0 420.0,8526.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="760.0,8526.0 800.0,8526.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="390.0,9790.0 390.0,9830.0 760.0,9830.0 760.0,9896.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1150.0,9790.0 1150.0,9896.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1940.0,9790.0 1940.0,9830.0 1540.0,9830.0 1540.0,9896.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="340.0,11081.0 390.0,11081.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="730.0,11081.0 780.0,11081.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1200.0,11081.0 1250.0,11081.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1630.0,11081.0 1680.0,11081.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="470.0,13106.0 510.0,13106.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="940.0,13106.0 980.0,13106.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1410.0,13106.0 1450.0,13106.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1880.0,13106.0 1920.0,13106.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="470.0,13202.0 510.0,13202.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="940.0,13202.0 980.0,13202.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1410.0,13202.0 1450.0,13202.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<polyline points="1880.0,13202.0 1920.0,13202.0" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<text x="32.0" y="47.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">00 · RELAYOS — architecture overview</text>
+<text x="32.0" y="73.5" font-size="12.5" fill="#64748b" text-anchor="start">One Vercel service: a Fastify 5 API that also serves the compiled React SPA · PostgreSQL 16 · every box maps to a file in this repository</text>
+<text x="190.0" y="150.7" font-size="15" fill="#0f172a" text-anchor="middle">Operator</text>
+<text x="190.0" y="169.4" font-size="15" fill="#0f172a" text-anchor="middle"></text>
+<text x="190.0" y="188.2" font-size="15" fill="#0f172a" text-anchor="middle">the person using RelayOS</text>
+<text x="550.0" y="150.7" font-size="15" fill="#0f172a" text-anchor="middle">Browser</text>
+<text x="550.0" y="169.4" font-size="15" fill="#0f172a" text-anchor="middle"></text>
+<text x="550.0" y="188.2" font-size="15" fill="#0f172a" text-anchor="middle">Chrome / Edge, one tab</text>
+<text x="814.0" y="137.6" font-size="17" fill="#0f172a" text-anchor="start">Vercel service `app`</text>
+<text x="814.0" y="160.3" font-size="11.5" fill="#334155" text-anchor="start">framework: fastify · root: . · one runtime, one origin</text>
+<text x="844.0" y="223.8" font-size="15" fill="#0f172a" text-anchor="start">SPA — React 19 + Vite</text>
+<text x="844.0" y="245.8" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src → built at deploy time, served as bytes</text>
+<text x="844.0" y="358.7" font-size="16" fill="#0f172a" text-anchor="start">API — Fastify 5</text>
+<text x="844.0" y="381.1" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/app.ts · ~100 routes · /api/*</text>
+<text x="930.0" y="507.5" font-size="11" fill="#0f172a" text-anchor="middle">embedded SPA module</text>
+<text x="930.0" y="521.2" font-size="11" fill="#0f172a" text-anchor="middle"></text>
+<text x="930.0" y="535.0" font-size="11" fill="#0f172a" text-anchor="middle">built in (production)</text>
+<text x="1150.0" y="507.5" font-size="11" fill="#0f172a" text-anchor="middle">@fastify/static</text>
+<text x="1150.0" y="521.2" font-size="11" fill="#0f172a" text-anchor="middle"></text>
+<text x="1150.0" y="535.0" font-size="11" fill="#0f172a" text-anchor="middle">dist on disk (dev)</text>
+<text x="1370.0" y="507.5" font-size="11" fill="#0f172a" text-anchor="middle">sweeper</text>
+<text x="1370.0" y="521.2" font-size="11" fill="#0f172a" text-anchor="middle"></text>
+<text x="1370.0" y="535.0" font-size="11" fill="#0f172a" text-anchor="middle">setInterval 60s</text>
+<text x="1654.0" y="148.7" font-size="16" fill="#0f172a" text-anchor="start">PostgreSQL 16</text>
+<text x="1654.0" y="171.1" font-size="11.5" fill="#334155" text-anchor="start">one database · DATABASE_URL · 81 tables</text>
+<text x="1654.0" y="326.9" font-size="14" fill="#0f172a" text-anchor="start">Vercel Cron 0 3 * * *</text>
+<text x="1654.0" y="348.5" font-size="11.5" fill="#334155" text-anchor="start">GET /api/cron/sweep · bearer CRON_SECRET</text>
+<text x="344.0" y="158.1" font-size="11" fill="#475569" text-anchor="start">opens</text>
+<text x="596.0" y="106.1" font-size="11" fill="#334155" text-anchor="start">HTTPS · same origin</text>
+<text x="1160.0" y="306.1" font-size="11" fill="#15803d" text-anchor="start">fetch('/api/…')</text>
+<text x="1012.0" y="306.1" font-size="11" fill="#334155" text-anchor="start">JSON</text>
+<text x="1652.0" y="256.1" font-size="11" fill="#b45309" text-anchor="start">SQL · parameterised, pg Pool (max 10)</text>
+<text x="1420.0" y="310.1" font-size="11" fill="#6d28d9" text-anchor="start">sweep</text>
+<text x="54.0" y="688.7" font-size="16" fill="#7f1d1d" text-anchor="start">NOT in this system</text>
+<text x="54.0" y="711.1" font-size="11.5" fill="#334155" text-anchor="start">no message queue · no worker fleet · no Redis / cache</text>
+<text x="54.0" y="726.2" font-size="11.5" fill="#334155" text-anchor="start">no object storage · no second service</text>
+<text x="54.0" y="741.4" font-size="11.5" fill="#334155" text-anchor="start">no authentication at all — the deliberate current state (frame 08)</text>
+<text x="54.0" y="756.6" font-size="11.5" fill="#334155" text-anchor="start">the SPA is bytes served by this same process</text>
+<text x="834.0" y="688.7" font-size="16" fill="#0f172a" text-anchor="start">Legend</text>
+<text x="834.0" y="711.1" font-size="11.5" fill="#334155" text-anchor="start">solid border — implemented and exercised by tests</text>
+<text x="834.0" y="726.2" font-size="11.5" fill="#334155" text-anchor="start">dashed border — conditional or development-only path</text>
+<text x="834.0" y="741.4" font-size="11.5" fill="#334155" text-anchor="start">red — known limitation or deployment caveat</text>
+<text x="834.0" y="756.6" font-size="11.5" fill="#334155" text-anchor="start">grey — outside this codebase (browser, platform, DB)</text>
+<text x="834.0" y="771.8" font-size="11.5" fill="#334155" text-anchor="start">text on an arrow — the mechanism, never an assumption</text>
+<text x="1574.0" y="688.7" font-size="16" fill="#0f172a" text-anchor="start">How one page load works</text>
+<text x="1574.0" y="711.1" font-size="11.5" fill="#334155" text-anchor="start">1. browser GET / → rewrite /(.*) → service app</text>
+<text x="1574.0" y="726.2" font-size="11.5" fill="#334155" text-anchor="start">2. Fastify answers with the compiled index.html</text>
+<text x="1574.0" y="741.4" font-size="11.5" fill="#334155" text-anchor="start">3. the bundle loads and asks GET /api/dashboard</text>
+<text x="1574.0" y="756.6" font-size="11.5" fill="#334155" text-anchor="start">4. same origin, same process, same DATABASE_URL</text>
+<text x="1574.0" y="771.8" font-size="11.5" fill="#334155" text-anchor="start">5. TanStack Query caches it for 15s, then a poll refreshes</text>
+<text x="54.0" y="885.6" font-size="17" fill="#0f172a" text-anchor="start">The one-sentence version</text>
+<text x="54.0" y="909.7" font-size="13" fill="#334155" text-anchor="start">RelayOS is a single Node process (Fastify) that owns both the JSON API and the built single-page app, persists every entity in PostgreSQL through one async `Db` interface, and derives its delivery-governance behaviour — SLA clocks, turnover gates, acceptance ladders, ship gates — from rows in</text>
+<text x="54.0" y="926.9" font-size="13" fill="#334155" text-anchor="start">that same database rather than from a workflow engine.</text>
+<text x="32.0" y="1247.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">01 · Deployment — how a commit becomes a running service</text>
+<text x="32.0" y="1273.5" font-size="12.5" fill="#64748b" text-anchor="start">vercel.json · package.json scripts · .github/workflows/ci.yml</text>
+<text x="180.0" y="1381.7" font-size="15" fill="#0f172a" text-anchor="middle">git push</text>
+<text x="180.0" y="1400.4" font-size="15" fill="#0f172a" text-anchor="middle"></text>
+<text x="180.0" y="1419.2" font-size="15" fill="#0f172a" text-anchor="middle">branch or PR</text>
+<text x="510.0" y="1381.7" font-size="15" fill="#0f172a" text-anchor="middle">GitHub repository</text>
+<text x="510.0" y="1400.4" font-size="15" fill="#0f172a" text-anchor="middle"></text>
+<text x="510.0" y="1419.2" font-size="15" fill="#0f172a" text-anchor="middle">main · CI runs here</text>
+<text x="714.0" y="1357.6" font-size="17" fill="#0f172a" text-anchor="start">Vercel build — services mode</text>
+<text x="714.0" y="1380.3" font-size="11.5" fill="#334155" text-anchor="start">one service named app</text>
+<text x="744.0" y="1426.9" font-size="14" fill="#0f172a" text-anchor="start">1 · installCommand</text>
+<text x="744.0" y="1448.5" font-size="11.5" fill="#334155" text-anchor="start">npm ci --include=dev --no-audit --no-fund</text>
+<text x="744.0" y="1518.9" font-size="14" fill="#0f172a" text-anchor="start">2 · buildCommand → npm run build:service</text>
+<text x="744.0" y="1540.5" font-size="11.5" fill="#334155" text-anchor="start">install:web → vite build → apps/web/dist</text>
+<text x="744.0" y="1620.0" font-size="13" fill="#0f172a" text-anchor="start">3 · embed-web-assets.mjs</text>
+<text x="744.0" y="1641.2" font-size="11.5" fill="#334155" text-anchor="start">apps/web/dist → apps/api/src/generated/web-assets.ts (16 files)</text>
+<text x="744.0" y="1712.0" font-size="13" fill="#0f172a" text-anchor="start">4 · tsc -p apps/api</text>
+<text x="744.0" y="1733.2" font-size="11.5" fill="#334155" text-anchor="start">→ apps/api/dist (entrypoints, app.js, db)</text>
+<text x="1534.0" y="1376.9" font-size="14" fill="#0f172a" text-anchor="start">deploy service app</text>
+<text x="1534.0" y="1398.5" font-size="11.5" fill="#334155" text-anchor="start">framework: fastify · entrypoint index.ts</text>
+<text x="1534.0" y="1511.9" font-size="14" fill="#0f172a" text-anchor="start">function start</text>
+<text x="1534.0" y="1533.5" font-size="11.5" fill="#334155" text-anchor="start">buildApp() → migrate → ensureOperator →</text>
+<text x="1534.0" y="1548.7" font-size="11.5" fill="#334155" text-anchor="start">listen(PORT)</text>
+<text x="1534.0" y="1658.9" font-size="14" fill="#0f172a" text-anchor="start">rewrite /(.*) → app</text>
+<text x="1534.0" y="1680.5" font-size="11.5" fill="#334155" text-anchor="start">every path reaches this process</text>
+<text x="1534.0" y="1784.9" font-size="14" fill="#0f172a" text-anchor="start">browser request</text>
+<text x="1534.0" y="1806.5" font-size="11.5" fill="#334155" text-anchor="start">HTTPS → / or /api/*</text>
+<text x="330.0" y="1322.1" font-size="11" fill="#475569" text-anchor="start">commit</text>
+<text x="560.0" y="1322.1" font-size="11" fill="#475569" text-anchor="start">webhook</text>
+<text x="1466.0" y="1328.1" font-size="11" fill="#6d28d9" text-anchor="start">artefact</text>
+<text x="1722.0" y="1738.1" font-size="11" fill="#475569" text-anchor="start">serves</text>
+<text x="54.0" y="1918.7" font-size="16" fill="#0f172a" text-anchor="start">Build time — never on a request</text>
+<text x="54.0" y="1941.1" font-size="11.5" fill="#334155" text-anchor="start">TypeScript compilation · Vite bundling · SPA embedding</text>
+<text x="54.0" y="1956.2" font-size="11.5" fill="#334155" text-anchor="start">dependency installation · migration SQL bundled as text</text>
+<text x="54.0" y="1971.4" font-size="11.5" fill="#334155" text-anchor="start">the build machine needs devDependencies; the runtime does not</text>
+<text x="834.0" y="1918.7" font-size="16" fill="#0f172a" text-anchor="start">Runtime — every cold start</text>
+<text x="834.0" y="1941.1" font-size="11.5" fill="#334155" text-anchor="start">read DATABASE_URL · open pg Pool (max 10)</text>
+<text x="834.0" y="1956.2" font-size="11.5" fill="#334155" text-anchor="start">apply pending migrations (SKIP_MIGRATE=1 disables)</text>
+<text x="834.0" y="1971.4" font-size="11.5" fill="#334155" text-anchor="start">ensure operator + Studio board · listen on PORT</text>
+<text x="1574.0" y="1918.7" font-size="16" fill="#0f172a" text-anchor="start">Environment that actually matters</text>
+<text x="1574.0" y="1941.1" font-size="11.5" fill="#334155" text-anchor="start">DATABASE_URL — required; there is no SQLite fallback in production</text>
+<text x="1574.0" y="1956.2" font-size="11.5" fill="#334155" text-anchor="start">CRON_SECRET · PORT · HOST · LOG_LEVEL · WEB_DIST</text>
+<text x="1574.0" y="1971.4" font-size="11.5" fill="#334155" text-anchor="start">OPERATOR_USER_ID · RATE_LIMIT_* · SWEEP_INTERVAL_MS</text>
+<text x="54.0" y="2074.7" font-size="16" fill="#0f172a" text-anchor="start">Two entrypoints, one application</text>
+<text x="54.0" y="2097.1" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/entrypoints/index.ts — the deployed entry: owns the listening socket</text>
+<text x="54.0" y="2112.2" font-size="11.5" fill="#334155" text-anchor="start">api/index.js → dist/entrypoints/vercel.js — a (req,res) handler retained for a</text>
+<text x="54.0" y="2127.4" font-size="11.5" fill="#334155" text-anchor="start">function-shaped deployment and for tests; it awaits app.ready() because listen() does</text>
+<text x="1194.0" y="2074.7" font-size="16" fill="#7f1d1d" text-anchor="start">Deployment protection — an honest caveat</text>
+<text x="1194.0" y="2097.1" font-size="11.5" fill="#334155" text-anchor="start">Every deployment URL on this Vercel scope answers 302 → vercel.com/login</text>
+<text x="1194.0" y="2112.2" font-size="11.5" fill="#334155" text-anchor="start">(Deployment Protection / Vercel Authentication). Build and deploy checks pass;</text>
+<text x="1194.0" y="2127.4" font-size="11.5" fill="#334155" text-anchor="start">runtime behaviour could not be observed from outside the account.</text>
+<text x="54.0" y="2230.7" font-size="16" fill="#0f172a" text-anchor="start">GitHub Actions runs in parallel, not instead</text>
+<text x="54.0" y="2253.1" font-size="11.5" fill="#334155" text-anchor="start">ci.yml → verify: guards · typecheck · 283 tests · PostgreSQL 16 · build · screen smoke · browser e2e · docker + single-service-build (production install and the service's own build command) + Node 24 compatibility.</text>
+<text x="32.0" y="2557.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">02 · Frontend — the React application</text>
+<text x="32.0" y="2583.5" font-size="12.5" fill="#64748b" text-anchor="start">apps/web/src · React 19 · react-router 7 · @tanstack/react-query 5 · Vite 7</text>
+<text x="54.0" y="2653.8" font-size="15" fill="#0f172a" text-anchor="start">main.tsx</text>
+<text x="54.0" y="2675.8" font-size="11.5" fill="#334155" text-anchor="start">createRoot · QueryClient · BrowserRouter</text>
+<text x="614.0" y="2653.8" font-size="15" fill="#0f172a" text-anchor="start">App.tsx</text>
+<text x="614.0" y="2675.8" font-size="11.5" fill="#334155" text-anchor="start">ErrorBoundary · Suspense · &lt;Routes&gt;</text>
+<text x="1174.0" y="2653.8" font-size="15" fill="#0f172a" text-anchor="start">components/Shell.tsx</text>
+<text x="1174.0" y="2675.8" font-size="11.5" fill="#334155" text-anchor="start">nav rail · command palette · live pulse</text>
+<text x="1734.0" y="2653.8" font-size="15" fill="#0f172a" text-anchor="start">13 pages</text>
+<text x="1734.0" y="2675.8" font-size="11.5" fill="#334155" text-anchor="start">one file per route, lazy-loaded chunks</text>
+<text x="54.0" y="2806.7" font-size="16" fill="#0f172a" text-anchor="start">Routing — react-router 7</text>
+<text x="54.0" y="2829.1" font-size="11.5" fill="#334155" text-anchor="start">/ · /board · /pipeline · /clocks · /projects · /projects/:id</text>
+<text x="54.0" y="2844.2" font-size="11.5" fill="#334155" text-anchor="start">/workload · /qa · /releases · /clients · /partners · /intel · /docs</text>
+<text x="54.0" y="2859.4" font-size="11.5" fill="#334155" text-anchor="start">/login, /signin, /sign-in → &lt;Navigate to=&quot;/&quot; /&gt; · * → dashboard</text>
+<text x="54.0" y="2874.6" font-size="11.5" fill="#334155" text-anchor="start">deep links work because the API answers any browser path with index.html</text>
+<text x="834.0" y="2806.7" font-size="16" fill="#0f172a" text-anchor="start">Data layer — lib/api.ts</text>
+<text x="834.0" y="2829.1" font-size="11.5" fill="#334155" text-anchor="start">const BASE = '/api' — relative, so there is no CORS and no base URL to configure</text>
+<text x="834.0" y="2844.2" font-size="11.5" fill="#334155" text-anchor="start">request(): JSON headers, credentials:'omit', a per-call deadline via AbortSignal</text>
+<text x="834.0" y="2859.4" font-size="11.5" fill="#334155" text-anchor="start">throws ApiError (status + code + envelope) or NetworkError (never reached the API)</text>
+<text x="834.0" y="2874.6" font-size="11.5" fill="#334155" text-anchor="start">api.* — ~60 typed methods: api.projects, api.createTask, api.clocks …</text>
+<text x="1614.0" y="2806.7" font-size="16" fill="#0f172a" text-anchor="start">Query + liveness</text>
+<text x="1614.0" y="2829.1" font-size="11.5" fill="#334155" text-anchor="start">QueryClient: staleTime 15s · refetchOnWindowFocus off · retry once, never on 4xx</text>
+<text x="1614.0" y="2844.2" font-size="11.5" fill="#334155" text-anchor="start">lib/query-state.ts → useQueryState / useMutationFailure: loading | error | empty | data</text>
+<text x="1614.0" y="2859.4" font-size="11.5" fill="#334155" text-anchor="start">lib/live.ts → useLiveUpdates: polls GET /api/changes and invalidates stale keys</text>
+<text x="1614.0" y="2874.6" font-size="11.5" fill="#334155" text-anchor="start">components: ApiFailure, QueryFailure, ErrorBoundary, LivePulse, TaskDrawer</text>
+<text x="40.0" y="2992.7" font-size="16" fill="#0f172a" text-anchor="start">Pages — what each one shows and the endpoints it calls</text>
+<text x="52.0" y="3039.7" font-size="12.5" fill="#0f172a" text-anchor="start">Dashboard</text>
+<text x="362.0" y="3039.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/dashboard · /api/activity</text>
+<text x="832.0" y="3039.7" font-size="12.5" fill="#0f172a" text-anchor="start">Board</text>
+<text x="1142.0" y="3039.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/tasks · /api/meta · POST /api/tasks</text>
+<text x="1612.0" y="3039.7" font-size="12.5" fill="#0f172a" text-anchor="start">Pipeline</text>
+<text x="1922.0" y="3039.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/pipeline · POST/PATCH/DELETE /api/deals</text>
+<text x="52.0" y="3101.7" font-size="12.5" fill="#0f172a" text-anchor="start">Clocks</text>
+<text x="362.0" y="3101.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/clocks · POST /api/clocks/timers/:id/resolve</text>
+<text x="832.0" y="3101.7" font-size="12.5" fill="#0f172a" text-anchor="start">Projects</text>
+<text x="1142.0" y="3101.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/projects · /api/clients · POST /api/projects</text>
+<text x="1612.0" y="3101.7" font-size="12.5" fill="#0f172a" text-anchor="start">ProjectDetail</text>
+<text x="1922.0" y="3101.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/projects/:id · PATCH phase · releases</text>
+<text x="52.0" y="3163.7" font-size="12.5" fill="#0f172a" text-anchor="start">Workload</text>
+<text x="362.0" y="3163.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/planner · GET /api/users</text>
+<text x="832.0" y="3163.7" font-size="12.5" fill="#0f172a" text-anchor="start">QA Centre</text>
+<text x="1142.0" y="3163.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/qa · POST /api/qa · PATCH /api/qa/:id</text>
+<text x="1612.0" y="3163.7" font-size="12.5" fill="#0f172a" text-anchor="start">Releases</text>
+<text x="1922.0" y="3163.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/releases · gate · acknowledge · ship</text>
+<text x="52.0" y="3225.7" font-size="12.5" fill="#0f172a" text-anchor="start">Clients</text>
+<text x="362.0" y="3225.2" font-size="11" fill="#0f172a" text-anchor="start">GET/POST/PATCH/DELETE /api/clients · lifecycle</text>
+<text x="832.0" y="3225.7" font-size="12.5" fill="#0f172a" text-anchor="start">Partners</text>
+<text x="1142.0" y="3225.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/partners · devices · entitlements · usage</text>
+<text x="1612.0" y="3225.7" font-size="12.5" fill="#0f172a" text-anchor="start">Intelligence</text>
+<text x="1922.0" y="3225.2" font-size="11" fill="#0f172a" text-anchor="start">GET /api/insights · /api/changes · /api/audit · /api/search</text>
+<text x="52.0" y="3287.7" font-size="12.5" fill="#0f172a" text-anchor="start">Knowledge</text>
+<text x="362.0" y="3287.2" font-size="11" fill="#0f172a" text-anchor="start">GET/POST/PATCH/DELETE /api/docs</text>
+<text x="54.0" y="3368.7" font-size="16" fill="#0f172a" text-anchor="start">Worked example — /projects, end to end</text>
+<text x="54.0" y="3391.1" font-size="11.5" fill="#334155" text-anchor="start">1 user clicks Projects → &lt;Route path=&quot;/projects&quot;&gt; renders pages/Projects.tsx (lazy chunk)</text>
+<text x="54.0" y="3406.2" font-size="11.5" fill="#334155" text-anchor="start">2 Projects.tsx: useQuery({ queryKey: ['projects'], queryFn: api.projects })</text>
+<text x="54.0" y="3421.4" font-size="11.5" fill="#334155" text-anchor="start">3 api.projects → request('/projects') → fetch('/api/projects') — same origin, no base URL</text>
+<text x="54.0" y="3436.6" font-size="11.5" fill="#334155" text-anchor="start">4 Fastify route GET /api/projects → repositories/query.ts mapProject → ok(rows) → {&quot;data&quot;:[…],&quot;meta&quot;:…}</text>
+<text x="54.0" y="3451.8" font-size="11.5" fill="#334155" text-anchor="start">5 react-query caches under ['projects'], useQueryState picks the branch, the table renders</text>
+<text x="54.0" y="3467.0" font-size="11.5" fill="#334155" text-anchor="start">6 a create mutation invalidates ['projects'] and ['dashboard'] — the two views cannot disagree</text>
+<text x="32.0" y="3767.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">03 · Backend — one Fastify process, four internal layers</text>
+<text x="32.0" y="3793.5" font-size="12.5" fill="#64748b" text-anchor="start">apps/api/src · routing → business logic → data access → PostgreSQL; no service/repository ceremony that the code does not have</text>
+<text x="54.0" y="3863.8" font-size="15" fill="#0f172a" text-anchor="start">1 · Entrypoint</text>
+<text x="54.0" y="3885.8" font-size="11.5" fill="#334155" text-anchor="start">entrypoints/index.ts — listen(PORT)</text>
+<text x="614.0" y="3863.8" font-size="15" fill="#0f172a" text-anchor="start">2 · Application</text>
+<text x="614.0" y="3885.8" font-size="11.5" fill="#334155" text-anchor="start">app.ts · buildApp(): plugins, hooks, errors</text>
+<text x="1174.0" y="3863.8" font-size="15" fill="#0f172a" text-anchor="start">3 · Routes</text>
+<text x="1174.0" y="3885.8" font-size="11.5" fill="#334155" text-anchor="start">routes/index.ts — every handler (~100)</text>
+<text x="1734.0" y="3863.8" font-size="15" fill="#0f172a" text-anchor="start">4 · Services + domain</text>
+<text x="1734.0" y="3885.8" font-size="11.5" fill="#334155" text-anchor="start">services/*.ts · domain/*.ts — the rules</text>
+<text x="54.0" y="4015.8" font-size="15" fill="#0f172a" text-anchor="start">app.ts — what it wires</text>
+<text x="54.0" y="4037.8" font-size="11.5" fill="#334155" text-anchor="start">Fastify({ trustProxy, genReqId, bodyLimit 2 MB })</text>
+<text x="54.0" y="4053.0" font-size="11.5" fill="#334155" text-anchor="start">@fastify/helmet (CSP off, COEP off)</text>
+<text x="54.0" y="4068.1" font-size="11.5" fill="#334155" text-anchor="start">@fastify/cors</text>
+<text x="54.0" y="4083.3" font-size="11.5" fill="#334155" text-anchor="start">content-type parsers: JSON as text, '*' lenient</text>
+<text x="54.0" y="4098.5" font-size="11.5" fill="#334155" text-anchor="start">onRequest: stamp start time, drop empty content-type</text>
+<text x="54.0" y="4113.7" font-size="11.5" fill="#334155" text-anchor="start">onResponse: access log + metrics</text>
+<text x="54.0" y="4128.9" font-size="11.5" fill="#334155" text-anchor="start">onResponse: append change_log on 2xx writes</text>
+<text x="54.0" y="4144.0" font-size="11.5" fill="#334155" text-anchor="start">onRequest: resolve operator identity</text>
+<text x="54.0" y="4159.2" font-size="11.5" fill="#334155" text-anchor="start">setErrorHandler · setNotFoundHandler</text>
+<text x="54.0" y="4174.4" font-size="11.5" fill="#334155" text-anchor="start">@fastify/static — only when a dist dir exists</text>
+<text x="614.0" y="4015.8" font-size="15" fill="#0f172a" text-anchor="start">routes/index.ts — handler shape</text>
+<text x="614.0" y="4037.8" font-size="11.5" fill="#334155" text-anchor="start">app.get('/api/projects', async (req) =&gt; { … })</text>
+<text x="614.0" y="4053.0" font-size="11.5" fill="#334155" text-anchor="start">1 zod schema.safeParse(req.body) → 400 bad_request</text>
+<text x="614.0" y="4068.1" font-size="11.5" fill="#334155" text-anchor="start">2 identity + scope check (auth/operator, auth/scope)</text>
+<text x="614.0" y="4083.3" font-size="11.5" fill="#334155" text-anchor="start">3 call a service or a SQL query</text>
+<text x="614.0" y="4098.5" font-size="11.5" fill="#334155" text-anchor="start">4 return ok(data) | page(items, meta)</text>
+<text x="614.0" y="4113.7" font-size="11.5" fill="#334155" text-anchor="start">Errors are thrown as HttpError (lib/http.ts)</text>
+<text x="614.0" y="4128.9" font-size="11.5" fill="#334155" text-anchor="start">and rendered by the single error handler</text>
+<text x="1174.0" y="4015.8" font-size="15" fill="#0f172a" text-anchor="start">services/ — the business rules</text>
+<text x="1174.0" y="4037.8" font-size="11.5" fill="#334155" text-anchor="start">tasks.ts — createTask, nextKey, acceptance ladder</text>
+<text x="1174.0" y="4053.0" font-size="11.5" fill="#334155" text-anchor="start">clocks.ts — SLA timers: start, pause, resolve, sweep</text>
+<text x="1174.0" y="4068.1" font-size="11.5" fill="#334155" text-anchor="start">lifecycle.ts — 18 stages, guarded transitions</text>
+<text x="1174.0" y="4083.3" font-size="11.5" fill="#334155" text-anchor="start">shipgate.ts — evaluateShipGate, markShipped</text>
+<text x="1174.0" y="4098.5" font-size="11.5" fill="#334155" text-anchor="start">partners.ts · legal.ts · communications.ts</text>
+<text x="1174.0" y="4113.7" font-size="11.5" fill="#334155" text-anchor="start">domain/: turnover.ts (gates + AUTO_RULES)</text>
+<text x="1174.0" y="4128.9" font-size="11.5" fill="#334155" text-anchor="start">planner.ts (capacity + critical path) · risk.ts</text>
+<text x="1734.0" y="4015.8" font-size="15" fill="#0f172a" text-anchor="start">db/ — one interface, two engines</text>
+<text x="1734.0" y="4037.8" font-size="11.5" fill="#334155" text-anchor="start">db/types.ts Db { all, get, run, exec, tx }</text>
+<text x="1734.0" y="4053.0" font-size="11.5" fill="#334155" text-anchor="start">db/postgres.ts pg.Pool (max 10, idle 30s), tx()</text>
+<text x="1734.0" y="4068.1" font-size="11.5" fill="#334155" text-anchor="start">db/sqlite.ts node:sqlite, loaded lazily (dev/tests only)</text>
+<text x="1734.0" y="4083.3" font-size="11.5" fill="#334155" text-anchor="start">db/sql.ts dialect translation: ? → $n, upsert</text>
+<text x="1734.0" y="4098.5" font-size="11.5" fill="#334155" text-anchor="start">db/migrate.ts schema_migrations ledger + checksum</text>
+<text x="1734.0" y="4113.7" font-size="11.5" fill="#334155" text-anchor="start">db/migrations-bundle.ts SQL inlined at build</text>
+<text x="1734.0" y="4128.9" font-size="11.5" fill="#334155" text-anchor="start">17 migrations · 81 tables</text>
+<text x="54.0" y="4275.8" font-size="15" fill="#0f172a" text-anchor="start">Route groups in routes/index.ts (all under /api)</text>
+<text x="54.0" y="4297.8" font-size="11.5" fill="#334155" text-anchor="start">health, live, ready, metrics, meta, users — ops surface</text>
+<text x="54.0" y="4313.0" font-size="11.5" fill="#334155" text-anchor="start">tasks, checklist, comments, turnover, acceptance — work</text>
+<text x="54.0" y="4328.1" font-size="11.5" fill="#334155" text-anchor="start">planner, clocks, sweep, pause/resume — time</text>
+<text x="54.0" y="4343.3" font-size="11.5" fill="#334155" text-anchor="start">projects, phases, pipeline, deals — delivery</text>
+<text x="54.0" y="4358.5" font-size="11.5" fill="#334155" text-anchor="start">clients, partners, devices, usage — commercial</text>
+<text x="54.0" y="4373.7" font-size="11.5" fill="#334155" text-anchor="start">qa, releases, ship gate, acknowledgements — quality</text>
+<text x="54.0" y="4388.9" font-size="11.5" fill="#334155" text-anchor="start">dashboard, activity, notifications, insights — read models</text>
+<text x="54.0" y="4404.0" font-size="11.5" fill="#334155" text-anchor="start">changes, audit, search, suggest — history &amp; lookup</text>
+<text x="54.0" y="4419.2" font-size="11.5" fill="#334155" text-anchor="start">lifecycle, comms, legal, docs, change-requests — governance</text>
+<text x="1194.0" y="4275.8" font-size="15" fill="#0f172a" text-anchor="start">Representative endpoints (exact paths)</text>
+<text x="1194.0" y="4297.8" font-size="11.5" fill="#334155" text-anchor="start">POST /api/tasks create a task (zod body, key generated)</text>
+<text x="1194.0" y="4313.0" font-size="11.5" fill="#334155" text-anchor="start">PATCH /api/tasks/:id update, after a scope check</text>
+<text x="1194.0" y="4328.1" font-size="11.5" fill="#334155" text-anchor="start">POST /api/tasks/:id/acceptance one step of the acceptance ladder</text>
+<text x="1194.0" y="4343.3" font-size="11.5" fill="#334155" text-anchor="start">GET /api/clocks timers with derived health</text>
+<text x="1194.0" y="4358.5" font-size="11.5" fill="#334155" text-anchor="start">POST /api/clocks/sweep manual sweep (same code as cron)</text>
+<text x="1194.0" y="4373.7" font-size="11.5" fill="#334155" text-anchor="start">GET /api/pipeline stages + deals + weighted value</text>
+<text x="1194.0" y="4388.9" font-size="11.5" fill="#334155" text-anchor="start">POST /api/releases new release; PATCH moves its state</text>
+<text x="1194.0" y="4404.0" font-size="11.5" fill="#334155" text-anchor="start">GET /api/search?q= scoped search across entities</text>
+<text x="1194.0" y="4419.2" font-size="11.5" fill="#334155" text-anchor="start">GET /api/metrics Prometheus exposition</text>
+<text x="54.0" y="4510.7" font-size="16" fill="#0f172a" text-anchor="start">What is genuinely layered, and what is not</text>
+<text x="54.0" y="4533.1" font-size="11.5" fill="#334155" text-anchor="start">Layered: HTTP handlers (routes/index.ts) → business rules (services/, domain/) → data access (db/ + raw SQL in handlers).</text>
+<text x="54.0" y="4548.2" font-size="11.5" fill="#334155" text-anchor="start">Not layered: there is no ORM, no repository class per entity, and no dependency-injection container. Handlers call SQL directly for simple reads;</text>
+<text x="54.0" y="4563.4" font-size="11.5" fill="#334155" text-anchor="start">services own multi-step writes and invariant checks. repositories/query.ts is a mapper module (TASK_SELECT, mapProject, mapClient…), not a repository layer.</text>
+<text x="54.0" y="4578.6" font-size="11.5" fill="#334155" text-anchor="start">Consequence: fewer indirections to read, and SQL is visible where it runs — at the cost of some duplication in SELECT lists.</text>
+<text x="54.0" y="4662.7" font-size="16" fill="#0f172a" text-anchor="start">Request lifecycle inside the process</text>
+<text x="54.0" y="4685.1" font-size="11.5" fill="#334155" text-anchor="start">socket → Fastify router → onRequest hooks (start time, identity) → handler → validation → service/SQL → response serialisation</text>
+<text x="54.0" y="4700.2" font-size="11.5" fill="#334155" text-anchor="start">→ onResponse hooks (log line, RED metrics, change_log row) → socket. An error at any point unwinds to setErrorHandler,</text>
+<text x="54.0" y="4715.4" font-size="11.5" fill="#334155" text-anchor="start">which renders the same JSON envelope for validation failures, not-found, conflicts and unexpected 500s.</text>
+<text x="32.0" y="4997.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">04 · PostgreSQL 16 — schema, keys and relationships</text>
+<text x="32.0" y="5023.5" font-size="12.5" fill="#64748b" text-anchor="start">17 migrations · 81 tables · core entities drawn with real columns; every FK below exists in db/migrations/pg/*.sql</text>
+<text x="74.0" y="5087.8" font-size="15" fill="#0f172a" text-anchor="start">clients</text>
+<text x="74.0" y="5109.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · slug TEXT UNIQUE · name TEXT NOT NULL</text>
+<text x="74.0" y="5123.8" font-size="11" fill="#334155" text-anchor="start">tier CHECK (strategic|enterprise|growth|starter)</text>
+<text x="74.0" y="5138.4" font-size="11" fill="#334155" text-anchor="start">health CHECK (healthy|watch|at_risk|churn)</text>
+<text x="74.0" y="5152.9" font-size="11" fill="#334155" text-anchor="start">mrr_cents INT · accent_color · created_at / updated_at</text>
+<text x="74.0" y="5267.8" font-size="15" fill="#0f172a" text-anchor="start">projects</text>
+<text x="74.0" y="5289.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · key TEXT UNIQUE (e.g. NRTH)</text>
+<text x="74.0" y="5303.8" font-size="11" fill="#334155" text-anchor="start">client_id → clients(id) ON DELETE RESTRICT N:1</text>
+<text x="74.0" y="5318.4" font-size="11" fill="#334155" text-anchor="start">deal_id → deals(id) SET NULL · owner_id → users(id)</text>
+<text x="74.0" y="5332.9" font-size="11" fill="#334155" text-anchor="start">status CHECK (discovery|active|review|blocked|launched|archived)</text>
+<text x="74.0" y="5447.8" font-size="15" fill="#0f172a" text-anchor="start">tasks</text>
+<text x="74.0" y="5469.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · key TEXT UNIQUE (RLY-142)</text>
+<text x="74.0" y="5483.8" font-size="11" fill="#334155" text-anchor="start">project_id → projects CASCADE · board_id → boards CASCADE</text>
+<text x="74.0" y="5498.4" font-size="11" fill="#334155" text-anchor="start">column_id → columns · parent_id → tasks (self) · assignee_id → users</text>
+<text x="74.0" y="5512.9" font-size="11" fill="#334155" text-anchor="start">status · sla_due_at · turnover_state · completed_at</text>
+<text x="74.0" y="5627.8" font-size="15" fill="#0f172a" text-anchor="start">releases</text>
+<text x="74.0" y="5649.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · project_id → projects(id) CASCADE N:1</text>
+<text x="74.0" y="5663.8" font-size="11" fill="#334155" text-anchor="start">status CHECK (planning|in_qa|demo_ready|demo_done|</text>
+<text x="74.0" y="5678.4" font-size="11" fill="#334155" text-anchor="start">approved|shipped|rolled_back)</text>
+<text x="74.0" y="5692.9" font-size="11" fill="#334155" text-anchor="start">demo_at · demo_approved_at · shipped_at · rollback_plan</text>
+<text x="74.0" y="5807.8" font-size="15" fill="#0f172a" text-anchor="start">qa_reports</text>
+<text x="74.0" y="5829.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · project_id → projects CASCADE N:1</text>
+<text x="74.0" y="5843.8" font-size="11" fill="#334155" text-anchor="start">task_id → tasks SET NULL (nullable) N:1</text>
+<text x="74.0" y="5858.4" font-size="11" fill="#334155" text-anchor="start">release_id TEXT — deliberately no FK (reports outlive releases)</text>
+<text x="74.0" y="5872.9" font-size="11" fill="#334155" text-anchor="start">kind · severity p0..p4 · status open..verified</text>
+<text x="74.0" y="5987.8" font-size="15" fill="#0f172a" text-anchor="start">acceptance_records</text>
+<text x="74.0" y="6009.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · task_id → tasks CASCADE</text>
+<text x="74.0" y="6023.8" font-size="11" fill="#334155" text-anchor="start">step CHECK (dev_complete|qa_approved|lead_approved|client_accepted)</text>
+<text x="74.0" y="6038.4" font-size="11" fill="#334155" text-anchor="start">state (pending|passed|rejected|skipped) · actor_id → users</text>
+<text x="74.0" y="6052.9" font-size="11" fill="#334155" text-anchor="start">UNIQUE (task_id, step) — one row per rung per task</text>
+<text x="74.0" y="6167.8" font-size="15" fill="#0f172a" text-anchor="start">project_phases</text>
+<text x="74.0" y="6189.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · project_id → projects CASCADE</text>
+<text x="74.0" y="6203.8" font-size="11" fill="#334155" text-anchor="start">phase_id → phases(id) · UNIQUE (project_id, phase_id)</text>
+<text x="74.0" y="6218.4" font-size="11" fill="#334155" text-anchor="start">status (locked|active|blocked|done) · progress 0..100</text>
+<text x="74.0" y="6232.9" font-size="11" fill="#334155" text-anchor="start">signoff_by → users · turnover_passed SMALLINT</text>
+<text x="74.0" y="6347.8" font-size="15" fill="#0f172a" text-anchor="start">milestones</text>
+<text x="74.0" y="6369.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · project_id → projects CASCADE</text>
+<text x="74.0" y="6383.8" font-size="11" fill="#334155" text-anchor="start">project_phase_id → project_phases CASCADE (nullable)</text>
+<text x="74.0" y="6398.4" font-size="11" fill="#334155" text-anchor="start">status (pending|met|missed|cancelled) · due_at</text>
+<text x="74.0" y="6412.9" font-size="11" fill="#334155" text-anchor="start">position INT — ordering only, not a foreign key</text>
+<text x="1314.0" y="5087.8" font-size="15" fill="#0f172a" text-anchor="start">users</text>
+<text x="1314.0" y="5109.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · email TEXT UNIQUE · full_name</text>
+<text x="1314.0" y="5123.8" font-size="11" fill="#334155" text-anchor="start">role CHECK (admin|lead|member|client|bot)</text>
+<text x="1314.0" y="5138.4" font-size="11" fill="#334155" text-anchor="start">capacity_hours_week · bill_rate_cents · is_active</text>
+<text x="1314.0" y="5152.9" font-size="11" fill="#334155" text-anchor="start">every created_by / actor_id column points here</text>
+<text x="1314.0" y="5267.8" font-size="15" fill="#0f172a" text-anchor="start">deals</text>
+<text x="1314.0" y="5289.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · client_id → clients RESTRICT N:1</text>
+<text x="1314.0" y="5303.8" font-size="11" fill="#334155" text-anchor="start">stage_id → pipeline_stages(id) NOT NULL N:1</text>
+<text x="1314.0" y="5318.4" font-size="11" fill="#334155" text-anchor="start">status (open|won|lost|paused) · value_cents · probability</text>
+<text x="1314.0" y="5332.9" font-size="11" fill="#334155" text-anchor="start">owner_id → users · expected_close_at · won_at / lost_at</text>
+<text x="1314.0" y="5447.8" font-size="15" fill="#0f172a" text-anchor="start">pipeline_stages</text>
+<text x="1314.0" y="5469.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · key TEXT UNIQUE (inbound, triage, tech_consult…)</text>
+<text x="1314.0" y="5483.8" font-size="11" fill="#334155" text-anchor="start">phase · position · entry_criteria / exit_criteria</text>
+<text x="1314.0" y="5498.4" font-size="11" fill="#334155" text-anchor="start">default_sla_days · default_value_cents · color · icon</text>
+<text x="1314.0" y="5512.9" font-size="11" fill="#334155" text-anchor="start">seeded by db/scaffolding.ts (12 stages)</text>
+<text x="1314.0" y="5627.8" font-size="15" fill="#0f172a" text-anchor="start">partners</text>
+<text x="1314.0" y="5649.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · client_id → clients CASCADE N:1</text>
+<text x="1314.0" y="5663.8" font-size="11" fill="#334155" text-anchor="start">slug TEXT UNIQUE · plan (starter|growth|enterprise)</text>
+<text x="1314.0" y="5678.4" font-size="11" fill="#334155" text-anchor="start">device_limit · api_quota_month · seat_limit</text>
+<text x="1314.0" y="5692.9" font-size="11" fill="#334155" text-anchor="start">status (active|trial|suspended)</text>
+<text x="1314.0" y="5807.8" font-size="15" fill="#0f172a" text-anchor="start">turnover_gates</text>
+<text x="1314.0" y="5829.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · key TEXT UNIQUE · name</text>
+<text x="1314.0" y="5843.8" font-size="11" fill="#334155" text-anchor="start">scope CHECK (task|phase|project)</text>
+<text x="1314.0" y="5858.4" font-size="11" fill="#334155" text-anchor="start">required SMALLINT · owner_role · position</text>
+<text x="1314.0" y="5872.9" font-size="11" fill="#334155" text-anchor="start">auto_rule TEXT → domain/turnover.ts AUTO_RULES (8 rules)</text>
+<text x="1314.0" y="5987.8" font-size="15" fill="#0f172a" text-anchor="start">turnover_checks</text>
+<text x="1314.0" y="6009.3" font-size="11" fill="#334155" text-anchor="start">id TEXT PK · gate_id → turnover_gates CASCADE N:1</text>
+<text x="1314.0" y="6023.8" font-size="11" fill="#334155" text-anchor="start">task_id → tasks CASCADE · project_phase_id → project_phases</text>
+<text x="1314.0" y="6038.4" font-size="11" fill="#334155" text-anchor="start">CHECK (task_id IS NOT NULL OR project_phase_id IS NOT NULL)</text>
+<text x="1314.0" y="6052.9" font-size="11" fill="#334155" text-anchor="start">status (pending|pass|fail|waived) · evidence · checked_by</text>
+<text x="1314.0" y="6167.8" font-size="15" fill="#0f172a" text-anchor="start">sla_clocks + sla_timers</text>
+<text x="1314.0" y="6189.3" font-size="11" fill="#334155" text-anchor="start">clocks: id PK · key UNIQUE · scope · anchor_event</text>
+<text x="1314.0" y="6203.8" font-size="11" fill="#334155" text-anchor="start">target_hours · warn_hours · stretch_hours · enforceable</text>
+<text x="1314.0" y="6218.4" font-size="11" fill="#334155" text-anchor="start">timers: id PK · clock_key → sla_clocks(key)</text>
+<text x="1314.0" y="6232.9" font-size="11" fill="#334155" text-anchor="start">entity_type + entity_id — polymorphic, NO foreign key</text>
+<text x="1314.0" y="6347.8" font-size="15" fill="#0f172a" text-anchor="start">audit_log + change_log</text>
+<text x="1314.0" y="6369.3" font-size="11" fill="#334155" text-anchor="start">audit_log: id BIGINT identity · actor_id · action</text>
+<text x="1314.0" y="6383.8" font-size="11" fill="#334155" text-anchor="start">entity_type / entity_id · before_json / after_json</text>
+<text x="1314.0" y="6398.4" font-size="11" fill="#334155" text-anchor="start">change_log: id BIGINT identity · method · path · created_at</text>
+<text x="1314.0" y="6412.9" font-size="11" fill="#334155" text-anchor="start">both append-only; neither has a foreign key (survives deletes)</text>
+<rect x="541" y="5196" width="286" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="544.0" y="5208.1" font-size="11" fill="#b45309" text-anchor="start">1 client → N projects</text>
+<rect x="541" y="5376" width="326" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="544.0" y="5388.1" font-size="11" fill="#b45309" text-anchor="start">1 project → N tasks (project_id)</text>
+<rect x="1467" y="5376" width="286" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="1470.0" y="5388.1" font-size="11" fill="#b45309" text-anchor="start">1 stage → N deals</text>
+<rect x="541" y="5556" width="306" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="544.0" y="5568.1" font-size="11" fill="#b45309" text-anchor="start">1 project → N releases</text>
+<rect x="1467" y="5916" width="286" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="1470.0" y="5928.1" font-size="11" fill="#b45309" text-anchor="start">1 gate → N checks</text>
+<rect x="1417" y="6096" width="346" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="1420.0" y="6108.1" font-size="11" fill="#b45309" text-anchor="start">1 clock → N timers (clock_key)</text>
+<rect x="1065" y="5708" width="216" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="1068.0" y="5720.1" font-size="11" fill="#0f766e" text-anchor="start">turnover_checks N:1 tasks</text>
+<rect x="1143" y="5144" width="156" height="31.5" fill="#ffffff" stroke="none"/>
+<text x="1146.0" y="5156.1" font-size="11" fill="#0f766e" text-anchor="start">tasks N:1 users</text>
+<text x="1146.0" y="5169.9" font-size="11" fill="#0f766e" text-anchor="start">(assignee)</text>
+<rect x="1007" y="5274" width="206" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="1010.0" y="5286.1" font-size="11" fill="#0f766e" text-anchor="start">projects N:1 deals (deal_id)</text>
+<text x="74.0" y="6537.8" font-size="15" fill="#0f172a" text-anchor="start">Notation and the rest of the schema</text>
+<text x="74.0" y="6559.8" font-size="11.5" fill="#334155" text-anchor="start">FK → table(column) with its ON DELETE rule · UNIQUE constraints shown where they carry business meaning · polymorphic references (sla_timers.entity_id, qa_reports.release_id) are stated as such because no foreign key enforces them.</text>
+<text x="74.0" y="6575.0" font-size="11.5" fill="#334155" text-anchor="start">The remaining tables — board columns, labels, task_comments, checklist items, handoffs, time_entries, teams, comm_* , legal_* , lifecycle_* , insight_dismissals, rate_limit_counters — follow the same shape and are enumerated in the traceability file.</text>
+<text x="32.0" y="6897.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">05 · Request lifecycle — two end-to-end sequences, with the file at every step</text>
+<text x="32.0" y="6923.5" font-size="12.5" fill="#64748b" text-anchor="start">read path: GET /api/projects · write path: POST /api/tasks</text>
+<text x="40.0" y="6976.6" font-size="18" fill="#0f172a" text-anchor="start">A · Reading the project list</text>
+<text x="52.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">1 · Browser</text>
+<text x="52.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">GET /projects → SPA</text>
+<text x="52.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">route '/projects'</text>
+<text x="52.0" y="7225.9" font-size="10" fill="#0f172a" text-anchor="start">apps/web/src/App.tsx</text>
+<text x="242.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">2 · Page</text>
+<text x="242.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">pages/Projects.tsx</text>
+<text x="242.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">mounts</text>
+<text x="242.0" y="7225.9" font-size="10" fill="#0f172a" text-anchor="start">useQuery({queryKey:['projects']})</text>
+<text x="432.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">3 · API client</text>
+<text x="432.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">api.projects →</text>
+<text x="432.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">request('/projects')</text>
+<text x="432.0" y="7225.9" font-size="10" fill="#0f172a" text-anchor="start">lib/api.ts · BASE='/api'</text>
+<text x="622.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">4 · Transport</text>
+<text x="622.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">fetch('/api/projects') ·</text>
+<text x="622.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">credentials omit</text>
+<text x="622.0" y="7219.7" font-size="10" fill="#0f172a" text-anchor="start">a deadline via</text>
+<text x="622.0" y="7232.2" font-size="10" fill="#0f172a" text-anchor="start">AbortSignal</text>
+<text x="812.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">5 · Fastify</text>
+<text x="812.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">router match → onRequest</text>
+<text x="812.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">hooks</text>
+<text x="812.0" y="7219.7" font-size="10" fill="#0f172a" text-anchor="start">app.ts (identity, start</text>
+<text x="812.0" y="7232.2" font-size="10" fill="#0f172a" text-anchor="start">time)</text>
+<text x="1002.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">6 · Handler</text>
+<text x="1002.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">GET /api/projects runs</text>
+<text x="1002.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">one SELECT</text>
+<text x="1002.0" y="7225.9" font-size="10" fill="#0f172a" text-anchor="start">routes/index.ts:~945</text>
+<text x="1192.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">7 · SQL</text>
+<text x="1192.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">projects ⋈ clients ⋈</text>
+<text x="1192.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">users + 4 subqueries</text>
+<text x="1192.0" y="7219.7" font-size="10" fill="#0f172a" text-anchor="start">parameter order: none</text>
+<text x="1192.0" y="7232.2" font-size="10" fill="#0f172a" text-anchor="start">(read)</text>
+<text x="1382.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">8 · Postgres</text>
+<text x="1382.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">planner → index scan on</text>
+<text x="1382.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">projects</text>
+<text x="1382.0" y="7219.7" font-size="10" fill="#0f172a" text-anchor="start">returns rows over the</text>
+<text x="1382.0" y="7232.2" font-size="10" fill="#0f172a" text-anchor="start">pool</text>
+<text x="1572.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">9 · Mapper</text>
+<text x="1572.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">mapProject(row) →</text>
+<text x="1572.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">camelCase</text>
+<text x="1572.0" y="7225.9" font-size="10" fill="#0f172a" text-anchor="start">repositories/query.ts</text>
+<text x="1762.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">10 · Response</text>
+<text x="1762.0" y="7147.1" font-size="10.5" fill="#0f172a" text-anchor="start">ok(rows) → {data:[…]}</text>
+<text x="1762.0" y="7225.9" font-size="10" fill="#0f172a" text-anchor="start">lib/http.ts · 200 JSON</text>
+<text x="1952.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">11 · Cache</text>
+<text x="1952.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">stored under</text>
+<text x="1952.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">['projects'] for 15s</text>
+<text x="1952.0" y="7225.9" font-size="10" fill="#0f172a" text-anchor="start">TanStack Query</text>
+<text x="2142.0" y="7051.5" font-size="12" fill="#0f172a" text-anchor="start">12 · Render</text>
+<text x="2142.0" y="7140.5" font-size="10.5" fill="#0f172a" text-anchor="start">useQueryState → table</text>
+<text x="2142.0" y="7153.7" font-size="10.5" fill="#0f172a" text-anchor="start">rows</text>
+<text x="2142.0" y="7219.7" font-size="10" fill="#0f172a" text-anchor="start">no loading flash on</text>
+<text x="2142.0" y="7232.2" font-size="10" fill="#0f172a" text-anchor="start">revisit</text>
+<text x="54.0" y="7297.8" font-size="15" fill="#0f172a" text-anchor="start">What the frontend receives</text>
+<text x="54.0" y="7319.8" font-size="11.5" fill="#334155" text-anchor="start">HTTP/1.1 200 · content-type: application/json · cache-control: no-store (vercel.json header rule for /api/*)</text>
+<text x="54.0" y="7335.0" font-size="11.5" fill="#334155" text-anchor="start">{&quot;data&quot;:[{&quot;id&quot;:&quot;pr_…&quot;,&quot;key&quot;:&quot;ORIO&quot;,&quot;name&quot;:&quot;Orion Migration&quot;,&quot;clientName&quot;:&quot;Aperture Labs&quot;,&quot;openCount&quot;:12,…}],&quot;meta&quot;:{…}}</text>
+<text x="40.0" y="7436.6" font-size="18" fill="#0f172a" text-anchor="start">B · Creating a task</text>
+<text x="52.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">1 · Action</text>
+<text x="52.0" y="7600.5" font-size="10.5" fill="#0f172a" text-anchor="start">TaskDrawer: title,</text>
+<text x="52.0" y="7613.7" font-size="10.5" fill="#0f172a" text-anchor="start">board, column</text>
+<text x="52.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">components/TaskDrawer.tsx</text>
+<text x="242.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">2 · Mutation</text>
+<text x="242.0" y="7607.1" font-size="10.5" fill="#0f172a" text-anchor="start">api.createTask(payload)</text>
+<text x="242.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">lib/api.ts</text>
+<text x="432.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">3 · Transport</text>
+<text x="432.0" y="7600.5" font-size="10.5" fill="#0f172a" text-anchor="start">POST /api/tasks · JSON</text>
+<text x="432.0" y="7613.7" font-size="10.5" fill="#0f172a" text-anchor="start">body</text>
+<text x="432.0" y="7679.7" font-size="10" fill="#0f172a" text-anchor="start">content-type:</text>
+<text x="432.0" y="7692.2" font-size="10" fill="#0f172a" text-anchor="start">application/json</text>
+<text x="622.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">4 · Validation</text>
+<text x="622.0" y="7600.5" font-size="10.5" fill="#0f172a" text-anchor="start">zod</text>
+<text x="622.0" y="7613.7" font-size="10.5" fill="#0f172a" text-anchor="start">createSchema.safeParse</text>
+<text x="622.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">400 + issues on failure</text>
+<text x="812.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">5 · Handler</text>
+<text x="812.0" y="7600.5" font-size="10.5" fill="#0f172a" text-anchor="start">createTask(db, body,</text>
+<text x="812.0" y="7613.7" font-size="10.5" fill="#0f172a" text-anchor="start">actor)</text>
+<text x="812.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">routes/index.ts:~412</text>
+<text x="1002.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">6 · Rules</text>
+<text x="1002.0" y="7607.1" font-size="10.5" fill="#0f172a" text-anchor="start">title ≥ 4 · board exists</text>
+<text x="1002.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">services/tasks.ts:98</text>
+<text x="1192.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">7 · Column</text>
+<text x="1192.0" y="7594.0" font-size="10.5" fill="#0f172a" text-anchor="start">SELECT id FROM columns</text>
+<text x="1192.0" y="7607.1" font-size="10.5" fill="#0f172a" text-anchor="start">WHERE board_id=? AND</text>
+<text x="1192.0" y="7620.2" font-size="10.5" fill="#0f172a" text-anchor="start">key=?</text>
+<text x="1192.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">never derived from an id</text>
+<text x="1382.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">8 · Key</text>
+<text x="1382.0" y="7600.5" font-size="10.5" fill="#0f172a" text-anchor="start">nextKey() → highest</text>
+<text x="1382.0" y="7613.7" font-size="10.5" fill="#0f172a" text-anchor="start">suffix + 1</text>
+<text x="1382.0" y="7679.7" font-size="10" fill="#0f172a" text-anchor="start">project key prefix, e.g.</text>
+<text x="1382.0" y="7692.2" font-size="10" fill="#0f172a" text-anchor="start">ORIO-113</text>
+<text x="1572.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">9 · Insert</text>
+<text x="1572.0" y="7600.5" font-size="10.5" fill="#0f172a" text-anchor="start">INSERT INTO tasks … +</text>
+<text x="1572.0" y="7613.7" font-size="10.5" fill="#0f172a" text-anchor="start">checklist + gates</text>
+<text x="1572.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">db.run / tx()</text>
+<text x="1762.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">10 · Response</text>
+<text x="1762.0" y="7607.1" font-size="10.5" fill="#0f172a" text-anchor="start">201 · ok(taskDetail(id))</text>
+<text x="1762.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">full task, joined</text>
+<text x="1952.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">11 · Cache</text>
+<text x="1952.0" y="7600.5" font-size="10.5" fill="#0f172a" text-anchor="start">invalidate ['tasks'] and</text>
+<text x="1952.0" y="7613.7" font-size="10.5" fill="#0f172a" text-anchor="start">['dashboard']</text>
+<text x="1952.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">useMutation onSuccess</text>
+<text x="2142.0" y="7511.5" font-size="12" fill="#0f172a" text-anchor="start">12 · Render</text>
+<text x="2142.0" y="7600.5" font-size="10.5" fill="#0f172a" text-anchor="start">new card appears in its</text>
+<text x="2142.0" y="7613.7" font-size="10.5" fill="#0f172a" text-anchor="start">column</text>
+<text x="2142.0" y="7685.9" font-size="10" fill="#0f172a" text-anchor="start">Board.tsx</text>
+<text x="54.0" y="7757.8" font-size="15" fill="#0f172a" text-anchor="start">Success</text>
+<text x="54.0" y="7779.8" font-size="11.5" fill="#334155" text-anchor="start">201 Created · {&quot;data&quot;:{&quot;id&quot;:&quot;tk_…&quot;,&quot;key&quot;:&quot;ORIO-113&quot;,&quot;status&quot;:&quot;backlog&quot;,…}}</text>
+<text x="54.0" y="7795.0" font-size="11.5" fill="#334155" text-anchor="start">onResponse hook appends one change_log row, so other tabs refresh.</text>
+<text x="1214.0" y="7757.8" font-size="15" fill="#7f1d1d" text-anchor="start">Failure modes that actually exist</text>
+<text x="1214.0" y="7779.8" font-size="11.5" fill="#334155" text-anchor="start">400 bad_request — zod issues, or title shorter than 4 characters</text>
+<text x="1214.0" y="7795.0" font-size="11.5" fill="#334155" text-anchor="start">400 — board has no column with that key · 404 — board not found</text>
+<text x="1214.0" y="7810.1" font-size="11.5" fill="#334155" text-anchor="start">409 — key collision (UNIQUE) · 500 — anything uncaught, rendered as the same envelope</text>
+<text x="32.0" y="8247.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">06 · Delivery workflow — what the code enforces, not what a brochure claims</text>
+<text x="32.0" y="8273.5" font-size="12.5" fill="#64748b" text-anchor="start">domain/turnover.ts · services/lifecycle.ts · services/tasks.ts · services/shipgate.ts · services/clocks.ts</text>
+<text x="40.0" y="8321.8" font-size="15" fill="#0f172a" text-anchor="start">Sales pipeline — 12 stages seeded into pipeline_stages (db/scaffolding.ts)</text>
+<text x="210.0" y="8367.5" font-size="12" fill="#0f172a" text-anchor="middle">1. inbound</text>
+<text x="590.0" y="8367.5" font-size="12" fill="#0f172a" text-anchor="middle">2. triage</text>
+<text x="970.0" y="8367.5" font-size="12" fill="#0f172a" text-anchor="middle">3. tech_consult</text>
+<text x="210.0" y="8421.5" font-size="12" fill="#0f172a" text-anchor="middle">4. scope</text>
+<text x="590.0" y="8421.5" font-size="12" fill="#0f172a" text-anchor="middle">5. proposal</text>
+<text x="970.0" y="8421.5" font-size="12" fill="#0f172a" text-anchor="middle">6. legal</text>
+<text x="210.0" y="8475.5" font-size="12" fill="#0f172a" text-anchor="middle">7. kickoff</text>
+<text x="590.0" y="8475.5" font-size="12" fill="#0f172a" text-anchor="middle">8. in_delivery</text>
+<text x="970.0" y="8475.5" font-size="12" fill="#0f172a" text-anchor="middle">9. handover</text>
+<text x="210.0" y="8529.5" font-size="12" fill="#0f172a" text-anchor="middle">10. retainer</text>
+<text x="590.0" y="8529.5" font-size="12" fill="#0f172a" text-anchor="middle">11. expansion</text>
+<text x="970.0" y="8529.5" font-size="12" fill="#0f172a" text-anchor="middle">12. closed</text>
+<text x="54.0" y="8594.4" font-size="13.5" fill="#0f172a" text-anchor="start">Enforcement, stated precisely</text>
+<text x="54.0" y="8615.9" font-size="11.5" fill="#334155" text-anchor="start">A deal holds stage_id (FK, NOT NULL) and moves by PATCH /api/deals/:id. The stage list is data; no server-side guard restricts which stage follows which.</text>
+<text x="40.0" y="8693.8" font-size="15" fill="#0f172a" text-anchor="start">Client lifecycle — 18 stages with guarded transitions (services/lifecycle.ts)</text>
+<text x="210.0" y="8736.2" font-size="11" fill="#0f172a" text-anchor="middle">lead_capture</text>
+<text x="590.0" y="8736.2" font-size="11" fill="#0f172a" text-anchor="middle">triage_qualify</text>
+<text x="970.0" y="8736.2" font-size="11" fill="#0f172a" text-anchor="middle">initial_consultation</text>
+<text x="210.0" y="8782.2" font-size="11" fill="#0f172a" text-anchor="middle">technical_consultation</text>
+<text x="590.0" y="8782.2" font-size="11" fill="#0f172a" text-anchor="middle">product_specification</text>
+<text x="970.0" y="8782.2" font-size="11" fill="#0f172a" text-anchor="middle">implementation_plan</text>
+<text x="210.0" y="8828.2" font-size="11" fill="#0f172a" text-anchor="middle">dev_meeting</text>
+<text x="590.0" y="8828.2" font-size="11" fill="#0f172a" text-anchor="middle">client_review</text>
+<text x="970.0" y="8828.2" font-size="11" fill="#0f172a" text-anchor="middle">commercial_agreement</text>
+<text x="210.0" y="8874.2" font-size="11" fill="#0f172a" text-anchor="middle">kickoff</text>
+<text x="590.0" y="8874.2" font-size="11" fill="#0f172a" text-anchor="middle">architecture_design</text>
+<text x="970.0" y="8874.2" font-size="11" fill="#0f172a" text-anchor="middle">development</text>
+<text x="210.0" y="8920.2" font-size="11" fill="#0f172a" text-anchor="middle">qa_verification</text>
+<text x="590.0" y="8920.2" font-size="11" fill="#0f172a" text-anchor="middle">milestone_turnover</text>
+<text x="970.0" y="8920.2" font-size="11" fill="#0f172a" text-anchor="middle">client_acceptance</text>
+<text x="210.0" y="8966.2" font-size="11" fill="#0f172a" text-anchor="middle">release_ship</text>
+<text x="590.0" y="8966.2" font-size="11" fill="#0f172a" text-anchor="middle">hypercare</text>
+<text x="970.0" y="8966.2" font-size="11" fill="#0f172a" text-anchor="middle">maintenance_ota</text>
+<text x="54.0" y="9032.4" font-size="13.5" fill="#0f172a" text-anchor="start">Transition table</text>
+<text x="54.0" y="9053.9" font-size="11.5" fill="#334155" text-anchor="start">not_started → in_progress → (awaiting_approval | blocked) · blocked → in_progress</text>
+<text x="54.0" y="9069.0" font-size="11.5" fill="#334155" text-anchor="start">anything absent from the table is refused · unmet prerequisites block the move</text>
+<text x="54.0" y="9084.2" font-size="11.5" fill="#334155" text-anchor="start">lifecycle_evidence rows are required before a guarded stage advances</text>
+<text x="1214.0" y="8335.8" font-size="15" fill="#0f172a" text-anchor="start">Acceptance ladder (services/tasks.ts)</text>
+<text x="1214.0" y="8357.8" font-size="11.5" fill="#334155" text-anchor="start">dev_complete → qa_approved → lead_approved → client_accepted</text>
+<text x="1214.0" y="8373.0" font-size="11.5" fill="#334155" text-anchor="start">one acceptance_records row per task per step · UNIQUE (task_id, step)</text>
+<text x="1214.0" y="8388.1" font-size="11.5" fill="#334155" text-anchor="start">a step cannot be skipped: the service checks the ladder index before writing</text>
+<text x="1214.0" y="8403.3" font-size="11.5" fill="#334155" text-anchor="start">each step stores actor_id, evidence text and decided_at</text>
+<text x="1214.0" y="8549.8" font-size="15" fill="#0f172a" text-anchor="start">Turnover gates (domain/turnover.ts)</text>
+<text x="1214.0" y="8571.8" font-size="11.5" fill="#334155" text-anchor="start">8 machine rules: has_description · has_assignee · estimate_set · review_approved</text>
+<text x="1214.0" y="8587.0" font-size="11.5" fill="#334155" text-anchor="start">tests_recorded · time_logged · client_signoff · handoff_link</text>
+<text x="1214.0" y="8602.1" font-size="11.5" fill="#334155" text-anchor="start">gates are rows (turnover_gates.scope = task | phase | project)</text>
+<text x="1214.0" y="8617.3" font-size="11.5" fill="#334155" text-anchor="start">checks are rows (turnover_checks.status = pending | pass | fail | waived)</text>
+<text x="1214.0" y="8632.5" font-size="11.5" fill="#334155" text-anchor="start">a task's turnover_state: draft → in_review → passed | failed | waived</text>
+<text x="1214.0" y="8783.8" font-size="15" fill="#0f172a" text-anchor="start">Ship gate and release states (services/shipgate.ts)</text>
+<text x="1214.0" y="8805.8" font-size="11.5" fill="#334155" text-anchor="start">planning → in_qa → demo_ready → demo_done → approved → shipped | rolled_back</text>
+<text x="1214.0" y="8821.0" font-size="11.5" fill="#334155" text-anchor="start">evaluateShipGate() refuses to ship while a required check is open</text>
+<text x="1214.0" y="8836.1" font-size="11.5" fill="#334155" text-anchor="start">markShipped() writes shipped_at and the ship_acknowledgements rows</text>
+<text x="1214.0" y="8957.8" font-size="15" fill="#0f172a" text-anchor="start">SLA clocks (services/clocks.ts, domain/risk.ts)</text>
+<text x="1214.0" y="8979.8" font-size="11.5" fill="#334155" text-anchor="start">a policy (sla_clocks) names the anchor event, target, warn and stretch hours</text>
+<text x="1214.0" y="8995.0" font-size="11.5" fill="#334155" text-anchor="start">starting work creates an sla_timers row: due_at, warn_at, outcome='running'</text>
+<text x="1214.0" y="9010.1" font-size="11.5" fill="#334155" text-anchor="start">sweepTimers() marks overdue timers 'missed' · pause/resume/resolve are endpoints</text>
+<text x="1214.0" y="9131.8" font-size="15" fill="#0f172a" text-anchor="start">What the UI shows versus what the server enforces</text>
+<text x="1214.0" y="9153.8" font-size="11.5" fill="#334155" text-anchor="start">Enforced: lifecycle transitions, acceptance ladder, turnover checks, ship gate,</text>
+<text x="1214.0" y="9169.0" font-size="11.5" fill="#334155" text-anchor="start">SLA outcomes, unique keys, foreign keys, CHECK constraints.</text>
+<text x="1214.0" y="9184.1" font-size="11.5" fill="#334155" text-anchor="start">Display only: pipeline ordering, colours, progress bars, KPI tiles.</text>
+<text x="54.0" y="9164.9" font-size="14" fill="#0f172a" text-anchor="start">Where the workflow state actually lives</text>
+<text x="54.0" y="9186.5" font-size="11.5" fill="#334155" text-anchor="start">pipeline_stages + deals.stage_id · lifecycle_instances / lifecycle_stages / lifecycle_evidence</text>
+<text x="54.0" y="9201.7" font-size="11.5" fill="#334155" text-anchor="start">project_phases.status + turnover_passed · tasks.turnover_state · releases.status</text>
+<text x="54.0" y="9216.9" font-size="11.5" fill="#334155" text-anchor="start">Everything is a row: a transition is an UPDATE, and history is the audit trail.</text>
+<text x="32.0" y="9577.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">07 · Background jobs — three triggers, one sweep, no queue</text>
+<text x="32.0" y="9603.5" font-size="12.5" fill="#64748b" text-anchor="start">apps/api/src/index.ts · entrypoints/vercel.ts · routes/index.ts (cron) · services/clocks.ts</text>
+<text x="54.0" y="9677.8" font-size="15" fill="#0f172a" text-anchor="start">Vercel Cron — once a day</text>
+<text x="54.0" y="9699.8" font-size="11.5" fill="#334155" text-anchor="start">vercel.json: { path: '/api/cron/sweep', schedule: '0 3 * * *' }</text>
+<text x="54.0" y="9715.0" font-size="11.5" fill="#334155" text-anchor="start">GET, bearer token compared with timingSafeEqual</text>
+<text x="54.0" y="9730.1" font-size="11.5" fill="#334155" text-anchor="start">503 if CRON_SECRET is unset — it is never silently disabled</text>
+<text x="814.0" y="9677.8" font-size="15" fill="#0f172a" text-anchor="start">Container / npm start — every 60s</text>
+<text x="814.0" y="9699.8" font-size="11.5" fill="#334155" text-anchor="start">index.ts: setInterval(SWEEP_INTERVAL_MS, 60_000)</text>
+<text x="814.0" y="9715.0" font-size="11.5" fill="#334155" text-anchor="start">same sweepTimers(db) call · unref'd timer</text>
+<text x="814.0" y="9730.1" font-size="11.5" fill="#334155" text-anchor="start">not started by the serverless handler</text>
+<text x="1574.0" y="9677.8" font-size="15" fill="#0f172a" text-anchor="start">Request-path sweep — throttled inline</text>
+<text x="1574.0" y="9699.8" font-size="11.5" fill="#334155" text-anchor="start">entrypoints/vercel.ts: maybeSweep() on entry</text>
+<text x="1574.0" y="9715.0" font-size="11.5" fill="#334155" text-anchor="start">at most once per SWEEP_THROTTLE_MS (60s)</text>
+<text x="1574.0" y="9730.1" font-size="11.5" fill="#334155" text-anchor="start">so a daily cron is not the only chance</text>
+<text x="714.0" y="9925.6" font-size="17" fill="#0f172a" text-anchor="start">sweepTimers(db)</text>
+<text x="714.0" y="9948.3" font-size="11.5" fill="#334155" text-anchor="start">SELECT timers WHERE outcome='running' AND due_at &lt;= now</text>
+<text x="714.0" y="9963.5" font-size="11.5" fill="#334155" text-anchor="start">→ UPDATE … SET outcome='missed', missed_at=…</text>
+<text x="714.0" y="9978.7" font-size="11.5" fill="#334155" text-anchor="start">idempotent: only already-due running rows move</text>
+<text x="396.0" y="9808.1" font-size="11" fill="#6d28d9" text-anchor="start">HTTP · bearer CRON_SECRET</text>
+<text x="1160.0" y="9846.1" font-size="11" fill="#15803d" text-anchor="start">direct call</text>
+<text x="1600.0" y="9808.1" font-size="11" fill="#15803d" text-anchor="start">direct call</text>
+<text x="54.0" y="10123.8" font-size="15" fill="#0f172a" text-anchor="start">Reads and writes</text>
+<text x="54.0" y="10145.8" font-size="11.5" fill="#334155" text-anchor="start">reads sla_timers (running, due) · sla_clocks (policy)</text>
+<text x="54.0" y="10161.0" font-size="11.5" fill="#334155" text-anchor="start">writes sla_timers.outcome / missed_at · clock_events (history)</text>
+<text x="54.0" y="10176.1" font-size="11.5" fill="#334155" text-anchor="start">also metrics: recordSweep / setSweepRunning (lib/metrics.ts)</text>
+<text x="54.0" y="10191.3" font-size="11.5" fill="#334155" text-anchor="start">failure: the cron endpoint reports the error; the inline sweep swallows it so a</text>
+<text x="54.0" y="10206.5" font-size="11.5" fill="#334155" text-anchor="start">user request is never failed by bookkeeping — the cron remains the alerter</text>
+<text x="1214.0" y="10123.8" font-size="15" fill="#0f172a" text-anchor="start">Other time-shaped work, and what does not exist</text>
+<text x="1214.0" y="10145.8" font-size="11.5" fill="#334155" text-anchor="start">change_log: one row per successful write, appended by an onResponse hook (not a job)</text>
+<text x="1214.0" y="10161.0" font-size="11.5" fill="#334155" text-anchor="start">legal: renewal_notice_days stored, no reminder sender exists</text>
+<text x="1214.0" y="10176.1" font-size="11.5" fill="#334155" text-anchor="start">comms: follow-ups are rows with due dates; nothing dispatches them</text>
+<text x="1214.0" y="10191.3" font-size="11.5" fill="#334155" text-anchor="start">There is no queue, no worker, no scheduler table and no retry queue. A job that must be durable would have to be built, not configured.</text>
+<text x="54.0" y="10347.8" font-size="15" fill="#0f172a" text-anchor="start">Why this shape</text>
+<text x="54.0" y="10369.8" font-size="11.5" fill="#334155" text-anchor="start">The only time-based invariant the product needs is &quot;a clock that passed its due date is marked missed&quot;. It is one UPDATE, so it runs wherever the process happens to be awake — cron, interval, or a request — rather than requiring a worker tier.</text>
+<text x="32.0" y="10667.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">08 · Security — the exact current implementation, including what is missing</text>
+<text x="32.0" y="10693.5" font-size="12.5" fill="#64748b" text-anchor="start">auth/ · lib/rate-limit.ts · app.ts hooks · db constraints · vercel.json headers</text>
+<text x="54.0" y="10760.7" font-size="16" fill="#0f172a" text-anchor="start">Controls that are active</text>
+<text x="54.0" y="10783.1" font-size="11.5" fill="#334155" text-anchor="start">@fastify/helmet (CSP disabled, COEP disabled)</text>
+<text x="54.0" y="10798.2" font-size="11.5" fill="#334155" text-anchor="start">@fastify/cors — CORS_ORIGIN, default '*', no credentials</text>
+<text x="54.0" y="10813.4" font-size="11.5" fill="#334155" text-anchor="start">rate limits: 1200/min global · 30/min auth · 240/min write (per IP)</text>
+<text x="54.0" y="10828.6" font-size="11.5" fill="#334155" text-anchor="start">body limit 2 MB · JSON parsed as text then validated</text>
+<text x="54.0" y="10843.8" font-size="11.5" fill="#334155" text-anchor="start">every query parameterised; the dialect layer rewrites ? → $n</text>
+<text x="54.0" y="10859.0" font-size="11.5" fill="#334155" text-anchor="start">FOREIGN KEY / CHECK / UNIQUE constraints carry the invariants</text>
+<text x="54.0" y="10874.1" font-size="11.5" fill="#334155" text-anchor="start">cron secret compared with timingSafeEqual · no-store on /api/*</text>
+<text x="814.0" y="10760.7" font-size="16" fill="#7f1d1d" text-anchor="start">Absent — deliberately, today</text>
+<text x="814.0" y="10783.1" font-size="11.5" fill="#334155" text-anchor="start">no authentication: no sign-in, no password, no session, no cookie</text>
+<text x="814.0" y="10798.2" font-size="11.5" fill="#334155" text-anchor="start">no CSRF token (nothing to protect: credentials are omitted)</text>
+<text x="814.0" y="10813.4" font-size="11.5" fill="#334155" text-anchor="start">no RBAC in force — the operator resolves as role 'admin'</text>
+<text x="814.0" y="10828.6" font-size="11.5" fill="#334155" text-anchor="start">no per-user quota: limits are per IP, and trust proxy is on</text>
+<text x="814.0" y="10843.8" font-size="11.5" fill="#334155" text-anchor="start">no encryption at rest in the app; that is the database's job</text>
+<text x="814.0" y="10859.0" font-size="11.5" fill="#334155" text-anchor="start">no signed URLs: there is no object storage in this system</text>
+<text x="1574.0" y="10760.7" font-size="16" fill="#7f1d1d" text-anchor="start">What that means in practice</text>
+<text x="1574.0" y="10783.1" font-size="11.5" fill="#334155" text-anchor="start">Anyone who can reach the URL can read and write every record.</text>
+<text x="1574.0" y="10798.2" font-size="11.5" fill="#334155" text-anchor="start">The only gate is Vercel Deployment Protection in front of the</text>
+<text x="1574.0" y="10813.4" font-size="11.5" fill="#334155" text-anchor="start">deployment — a platform setting, not application code.</text>
+<text x="1574.0" y="10828.6" font-size="11.5" fill="#334155" text-anchor="start">Every mutation is attributable to one operator row (usr_owner),</text>
+<text x="1574.0" y="10843.8" font-size="11.5" fill="#334155" text-anchor="start">so the audit trail answers 'what changed', not 'who changed it'.</text>
+<text x="1574.0" y="10859.0" font-size="11.5" fill="#334155" text-anchor="start">This is a stated product decision, not an oversight: /api/auth/login</text>
+<text x="1574.0" y="10874.1" font-size="11.5" fill="#334155" text-anchor="start">answers 410 Gone with the reason.</text>
+<text x="40.0" y="11019.8" font-size="15" fill="#0f172a" text-anchor="start">Identity resolution — attribution without authentication</text>
+<text x="190.0" y="11084.8" font-size="13" fill="#0f172a" text-anchor="middle">HTTP request</text>
+<text x="560.0" y="11068.6" font-size="13" fill="#0f172a" text-anchor="middle">onRequest hook</text>
+<text x="560.0" y="11084.8" font-size="13" fill="#0f172a" text-anchor="middle"></text>
+<text x="560.0" y="11101.1" font-size="13" fill="#0f172a" text-anchor="middle">app.ts:493</text>
+<text x="990.0" y="11068.6" font-size="13" fill="#0f172a" text-anchor="middle">resolveOperator(db)</text>
+<text x="990.0" y="11084.8" font-size="13" fill="#0f172a" text-anchor="middle"></text>
+<text x="990.0" y="11101.1" font-size="13" fill="#0f172a" text-anchor="middle">auth/operator-middleware.ts:68 · cached per instance</text>
+<text x="1440.0" y="11068.6" font-size="13" fill="#0f172a" text-anchor="middle">users row</text>
+<text x="1440.0" y="11084.8" font-size="13" fill="#0f172a" text-anchor="middle"></text>
+<text x="1440.0" y="11101.1" font-size="13" fill="#0f172a" text-anchor="middle">usr_owner, created on first boot</text>
+<text x="2020.0" y="11068.6" font-size="13" fill="#0f172a" text-anchor="middle">req.identity → actor_id on every write</text>
+<text x="2020.0" y="11084.8" font-size="13" fill="#0f172a" text-anchor="middle"></text>
+<text x="2020.0" y="11101.1" font-size="13" fill="#0f172a" text-anchor="middle">role 'admin' · unrestricted read scope</text>
+<rect x="1257" y="11057.0" width="306" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="1260.0" y="11069.1" font-size="11" fill="#334155" text-anchor="start">SELECT</text>
+<rect x="1687" y="11057.0" width="306" height="17.75" fill="#ffffff" stroke="none"/>
+<text x="1690.0" y="11069.1" font-size="11" fill="#334155" text-anchor="start">Identity</text>
+<text x="54.0" y="11193.8" font-size="15" fill="#0f172a" text-anchor="start">Rate limiting (lib/rate-limit.ts)</text>
+<text x="54.0" y="11215.8" font-size="11.5" fill="#334155" text-anchor="start">a fixed-window limiter over an in-process Map</text>
+<text x="54.0" y="11231.0" font-size="11.5" fill="#334155" text-anchor="start">three budgets: global / auth / write, keyed by IP</text>
+<text x="54.0" y="11246.1" font-size="11.5" fill="#334155" text-anchor="start">when the database is shared the counter store can be</text>
+<text x="54.0" y="11261.3" font-size="11.5" fill="#334155" text-anchor="start">rate_limit_counters (migration 0015) instead of memory</text>
+<text x="54.0" y="11276.5" font-size="11.5" fill="#334155" text-anchor="start">429 with retry-after; the frontend renders it as an ApiError</text>
+<text x="814.0" y="11193.8" font-size="15" fill="#0f172a" text-anchor="start">SQL safety</text>
+<text x="814.0" y="11215.8" font-size="11.5" fill="#334155" text-anchor="start">every statement is parameterised — no string interpolation of input</text>
+<text x="814.0" y="11231.0" font-size="11.5" fill="#334155" text-anchor="start">db/sql.ts translates placeholders per dialect (? → $1..$n)</text>
+<text x="814.0" y="11246.1" font-size="11.5" fill="#334155" text-anchor="start">the portability guard checks statements on both engines in CI</text>
+<text x="814.0" y="11261.3" font-size="11.5" fill="#334155" text-anchor="start">identifiers are never taken from a request</text>
+<text x="814.0" y="11276.5" font-size="11.5" fill="#334155" text-anchor="start">ORDER BY / LIMIT fragments come from allow-lists in the handlers</text>
+<text x="1574.0" y="11193.8" font-size="15" fill="#0f172a" text-anchor="start">Secrets and configuration</text>
+<text x="1574.0" y="11215.8" font-size="11.5" fill="#334155" text-anchor="start">read from process.env at access time (config is a Proxy)</text>
+<text x="1574.0" y="11231.0" font-size="11.5" fill="#334155" text-anchor="start">DATABASE_URL · CRON_SECRET · optional provider tokens</text>
+<text x="1574.0" y="11246.1" font-size="11.5" fill="#334155" text-anchor="start">no secret is logged: the access log records route, status, ms, actor</text>
+<text x="1574.0" y="11261.3" font-size="11.5" fill="#334155" text-anchor="start">no secret is committed; .env files are gitignored and CI secret-scans</text>
+<text x="54.0" y="11434.7" font-size="16" fill="#0f172a" text-anchor="start">Audit trail — two files, two purposes</text>
+<text x="54.0" y="11457.1" font-size="11.5" fill="#334155" text-anchor="start">audit_log (0003_intel.sql): entity_type, entity_id, action, before_json, after_json, actor_id, request_id — rich history, written by the handlers that need it.</text>
+<text x="54.0" y="11472.2" font-size="11.5" fill="#334155" text-anchor="start">change_log (0017_change_log.sql): method, path, entity_type, entity_id — one row for every successful mutation, appended by an onResponse hook, so the live-update feed cannot go blind.</text>
+<text x="54.0" y="11487.4" font-size="11.5" fill="#334155" text-anchor="start">Both are append-only and have no foreign keys, so a deleted entity keeps its history. Neither stores request bodies or credentials.</text>
+<text x="32.0" y="11777.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">09 · Failure — what actually happens at each break point</text>
+<text x="32.0" y="11803.5" font-size="12.5" fill="#64748b" text-anchor="start">lib/misconfigured.ts · app.ts setErrorHandler / setNotFoundHandler · db/index.ts · entrypoints/vercel.ts</text>
+<text x="54.0" y="11869.8" font-size="15" fill="#7f1d1d" text-anchor="start">The API cannot start</text>
+<text x="54.0" y="11891.8" font-size="11.5" fill="#334155" text-anchor="start">no DATABASE_URL → getDb() throws instead of creating a file in /tmp</text>
+<text x="54.0" y="11907.0" font-size="11.5" fill="#334155" text-anchor="start">recordBootFailure(stage, err) stores the reason on the instance</text>
+<text x="54.0" y="11922.1" font-size="11.5" fill="#334155" text-anchor="start">every response is 503: JSON for /api/*, a setup page for a browser</text>
+<text x="54.0" y="11937.3" font-size="11.5" fill="#334155" text-anchor="start">the page names the missing variable and the remedy — nothing else</text>
+<text x="814.0" y="11869.8" font-size="15" fill="#0f172a" text-anchor="start">A request is invalid</text>
+<text x="814.0" y="11891.8" font-size="11.5" fill="#334155" text-anchor="start">zod safeParse → 400 bad_request with the issue list</text>
+<text x="814.0" y="11907.0" font-size="11.5" fill="#334155" text-anchor="start">requireString / optionalNumber → 400 with the field</text>
+<text x="814.0" y="11922.1" font-size="11.5" fill="#334155" text-anchor="start">a constraint violation maps to 409 conflict</text>
+<text x="814.0" y="11937.3" font-size="11.5" fill="#334155" text-anchor="start">unknown route: 404 not_found for /api/*, index.html otherwise</text>
+<text x="1574.0" y="11869.8" font-size="15" fill="#7f1d1d" text-anchor="start">The database is unavailable</text>
+<text x="1574.0" y="11891.8" font-size="11.5" fill="#334155" text-anchor="start">the pool rejects; the request fails at the query</text>
+<text x="1574.0" y="11907.0" font-size="11.5" fill="#334155" text-anchor="start">setErrorHandler renders 500 with the same envelope</text>
+<text x="1574.0" y="11922.1" font-size="11.5" fill="#334155" text-anchor="start">the detail is hidden unless INTERNAL_ERROR_DETAIL=1</text>
+<text x="1574.0" y="11937.3" font-size="11.5" fill="#334155" text-anchor="start">with a shared store the limiter survives; membership is not cached</text>
+<text x="54.0" y="12087.8" font-size="15" fill="#7f1d1d" text-anchor="start">A dependency cannot be loaded</text>
+<text x="54.0" y="12109.8" font-size="11.5" fill="#334155" text-anchor="start">the July outage: @fastify/static imported at module scope pulled</text>
+<text x="54.0" y="12125.0" font-size="11.5" fill="#334155" text-anchor="start">an ESM-only transitive into a CommonJS require → ERR_REQUIRE_ESM</text>
+<text x="54.0" y="12140.1" font-size="11.5" fill="#334155" text-anchor="start">while the module was loading, before any route existed</text>
+<text x="54.0" y="12155.3" font-size="11.5" fill="#334155" text-anchor="start">now: the import is inside the branch that needs it, and a failure</text>
+<text x="54.0" y="12170.5" font-size="11.5" fill="#334155" text-anchor="start">is thrown with the directory named · node:sqlite likewise lazy</text>
+<text x="54.0" y="12185.7" font-size="11.5" fill="#334155" text-anchor="start">test: apps/api/test/module-format.test.mjs (4 cases, real packages)</text>
+<text x="814.0" y="12087.8" font-size="15" fill="#0f172a" text-anchor="start">A scheduled job fails</text>
+<text x="814.0" y="12109.8" font-size="11.5" fill="#334155" text-anchor="start">cron: the error surfaces as a 5xx from the endpoint, with a log line</text>
+<text x="814.0" y="12125.0" font-size="11.5" fill="#334155" text-anchor="start">inline sweep: swallowed on purpose — a user request must not fail</text>
+<text x="814.0" y="12140.1" font-size="11.5" fill="#334155" text-anchor="start">idempotent by construction: only running, already-due rows move</text>
+<text x="814.0" y="12155.3" font-size="11.5" fill="#334155" text-anchor="start">no retry queue exists, so the next trigger is the retry</text>
+<text x="1574.0" y="12087.8" font-size="15" fill="#0f172a" text-anchor="start">The frontend request fails</text>
+<text x="1574.0" y="12109.8" font-size="11.5" fill="#334155" text-anchor="start">ApiError: the API answered with a code and a message</text>
+<text x="1574.0" y="12125.0" font-size="11.5" fill="#334155" text-anchor="start">NetworkError: the request never completed (offline, blocked, CORS)</text>
+<text x="1574.0" y="12140.1" font-size="11.5" fill="#334155" text-anchor="start">a deadline aborts slow calls via AbortSignal</text>
+<text x="1574.0" y="12155.3" font-size="11.5" fill="#334155" text-anchor="start">ApiFailure / QueryFailure render the reason and a retry</text>
+<text x="1574.0" y="12170.5" font-size="11.5" fill="#334155" text-anchor="start">ErrorBoundary catches a render crash; the retry is per-route</text>
+<text x="40.0" y="12299.8" font-size="15" fill="#0f172a" text-anchor="start">Health, readiness and observability</text>
+<text x="320.0" y="12359.6" font-size="13" fill="#0f172a" text-anchor="middle">GET /api/live</text>
+<text x="320.0" y="12375.8" font-size="13" fill="#0f172a" text-anchor="middle"></text>
+<text x="320.0" y="12392.1" font-size="13" fill="#0f172a" text-anchor="middle">process is up, uptime in seconds</text>
+<text x="910.0" y="12359.6" font-size="13" fill="#0f172a" text-anchor="middle">GET /api/ready</text>
+<text x="910.0" y="12375.8" font-size="13" fill="#0f172a" text-anchor="middle"></text>
+<text x="910.0" y="12392.1" font-size="13" fill="#0f172a" text-anchor="middle">database reachable · engine name</text>
+<text x="1500.0" y="12359.6" font-size="13" fill="#0f172a" text-anchor="middle">GET /api/health</text>
+<text x="1500.0" y="12375.8" font-size="13" fill="#0f172a" text-anchor="middle"></text>
+<text x="1500.0" y="12392.1" font-size="13" fill="#0f172a" text-anchor="middle">authMode 'none' · storage 'postgres'</text>
+<text x="2085.0" y="12359.6" font-size="13" fill="#0f172a" text-anchor="middle">GET /api/metrics</text>
+<text x="2085.0" y="12375.8" font-size="13" fill="#0f172a" text-anchor="middle"></text>
+<text x="2085.0" y="12392.1" font-size="13" fill="#0f172a" text-anchor="middle">Prometheus text · RED + business gauges</text>
+<text x="54.0" y="12487.8" font-size="15" fill="#0f172a" text-anchor="start">Persistence mechanics</text>
+<text x="54.0" y="12509.8" font-size="11.5" fill="#334155" text-anchor="start">pool: pg.Pool max 10, idleTimeout 30s, connectionTimeout — sized for many</text>
+<text x="54.0" y="12525.0" font-size="11.5" fill="#334155" text-anchor="start">instances against one managed database</text>
+<text x="54.0" y="12540.1" font-size="11.5" fill="#334155" text-anchor="start">tx(fn): one client held for the duration, rolled back on throw</text>
+<text x="54.0" y="12555.3" font-size="11.5" fill="#334155" text-anchor="start">migrations: schema_migrations ledger with a checksum per file, applied on</text>
+<text x="54.0" y="12570.5" font-size="11.5" fill="#334155" text-anchor="start">boot unless SKIP_MIGRATE=1 · 17 files, bundled as text at build time</text>
+<text x="1214.0" y="12487.8" font-size="15" fill="#0f172a" text-anchor="start">Backups and recovery</text>
+<text x="1214.0" y="12509.8" font-size="11.5" fill="#334155" text-anchor="start">scripts/backup.mjs: consistent snapshot + integrity check</text>
+<text x="1214.0" y="12525.0" font-size="11.5" fill="#334155" text-anchor="start">npm run backup:verify: a restore drill comparing 81 tables and every row</text>
+<text x="1214.0" y="12540.1" font-size="11.5" fill="#334155" text-anchor="start">CI runs the drill on each push; the last run compared 2330 rows</text>
+<text x="1214.0" y="12555.3" font-size="11.5" fill="#334155" text-anchor="start">no point-in-time recovery is configured inside the app — that is the</text>
+<text x="1214.0" y="12570.5" font-size="11.5" fill="#334155" text-anchor="start">provider's PITR, documented in docs/BACKUP-RECOVERY.md</text>
+<text x="54.0" y="12691.8" font-size="15" fill="#0f172a" text-anchor="start">Retries: stated honestly</text>
+<text x="54.0" y="12713.8" font-size="11.5" fill="#334155" text-anchor="start">The server retries nothing. The client retries once, and only for 5xx or transport failures (a 4xx is a bug, and retrying it hides the bug). There is no circuit breaker and no bulkhead.</text>
+<text x="32.0" y="12977.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">10 · How the repository proves itself</text>
+<text x="32.0" y="13003.5" font-size="12.5" fill="#64748b" text-anchor="start">npm run verify · apps/api/test (24 files) · scripts/ · .github/workflows/ci.yml</text>
+<text x="40.0" y="13051.8" font-size="15" fill="#0f172a" text-anchor="start">npm run verify — the local gate, in order</text>
+<text x="255.0" y="13109.7" font-size="12.5" fill="#0f172a" text-anchor="middle">guard</text>
+<text x="725.0" y="13109.7" font-size="12.5" fill="#0f172a" text-anchor="middle">typecheck</text>
+<text x="1195.0" y="13101.9" font-size="12.5" fill="#0f172a" text-anchor="middle">test</text>
+<text x="1195.0" y="13117.5" font-size="12.5" fill="#0f172a" text-anchor="middle">283</text>
+<text x="1665.0" y="13101.9" font-size="12.5" fill="#0f172a" text-anchor="middle">test:pg</text>
+<text x="1665.0" y="13117.5" font-size="12.5" fill="#0f172a" text-anchor="middle">19</text>
+<text x="2135.0" y="13109.7" font-size="12.5" fill="#0f172a" text-anchor="middle">build:service</text>
+<text x="255.0" y="13205.7" font-size="12.5" fill="#0f172a" text-anchor="middle">verify:routing</text>
+<text x="725.0" y="13205.7" font-size="12.5" fill="#0f172a" text-anchor="middle">smoke:web</text>
+<text x="1195.0" y="13205.7" font-size="12.5" fill="#0f172a" text-anchor="middle">verify:boot</text>
+<text x="1665.0" y="13205.7" font-size="12.5" fill="#0f172a" text-anchor="middle">persistence</text>
+<text x="2135.0" y="13205.7" font-size="12.5" fill="#0f172a" text-anchor="middle">backup:verify</text>
+<text x="54.0" y="13305.8" font-size="15" fill="#0f172a" text-anchor="start">API tests — node:test, real database</text>
+<text x="54.0" y="13327.8" font-size="11.5" fill="#334155" text-anchor="start">crud · editing · http · domain — behaviour through the API</text>
+<text x="54.0" y="13343.0" font-size="11.5" fill="#334155" text-anchor="start">clock-scope · clocks-pause · shipgate · lifecycle — the rules</text>
+<text x="54.0" y="13358.1" font-size="11.5" fill="#334155" text-anchor="start">partners · comms-legal · search-scope · insight-dismissal</text>
+<text x="54.0" y="13373.3" font-size="11.5" fill="#334155" text-anchor="start">resilience — pool exhaustion, failing statements, timeouts</text>
+<text x="54.0" y="13388.5" font-size="11.5" fill="#334155" text-anchor="start">auth — identity resolution and the retired endpoints</text>
+<text x="54.0" y="13403.7" font-size="11.5" fill="#334155" text-anchor="start">vercel · platform-launcher · service-entry — the deployment shapes</text>
+<text x="54.0" y="13418.9" font-size="11.5" fill="#334155" text-anchor="start">module-format — a dependency cannot break module loading</text>
+<text x="54.0" y="13434.0" font-size="11.5" fill="#334155" text-anchor="start">deployment-layout — dist-only boot, SPA served, deep links</text>
+<text x="814.0" y="13305.8" font-size="15" fill="#0f172a" text-anchor="start">PostgreSQL-specific tests</text>
+<text x="814.0" y="13327.8" font-size="11.5" fill="#334155" text-anchor="start">scripts/test-pg.mjs boots a real PostgreSQL 16 (embedded-postgres)</text>
+<text x="814.0" y="13343.0" font-size="11.5" fill="#334155" text-anchor="start">applies all 17 migrations to an empty cluster</text>
+<text x="814.0" y="13358.1" font-size="11.5" fill="#334155" text-anchor="start">seeds, then drives governance / auth / resilience / HTTP</text>
+<text x="814.0" y="13373.3" font-size="11.5" fill="#334155" text-anchor="start">19 tests in the current run · 2 skipped in SQLite mode by design</text>
+<text x="814.0" y="13388.5" font-size="11.5" fill="#334155" text-anchor="start">the same suite proves the SQL portability guard is not theoretical</text>
+<text x="1574.0" y="13305.8" font-size="15" fill="#0f172a" text-anchor="start">Beyond the unit layer</text>
+<text x="1574.0" y="13327.8" font-size="11.5" fill="#334155" text-anchor="start">scripts/smoke-web.mjs — server-renders every screen against real data,</text>
+<text x="1574.0" y="13343.0" font-size="11.5" fill="#334155" text-anchor="start">and asserts every failure state names the real cause</text>
+<text x="1574.0" y="13358.1" font-size="11.5" fill="#334155" text-anchor="start">scripts/verify-web-routing.mjs — deep links, assets, JSON 404 for /api</text>
+<text x="1574.0" y="13373.3" font-size="11.5" fill="#334155" text-anchor="start">scripts/production-boot.mjs — boots dist with no auth env at all</text>
+<text x="1574.0" y="13388.5" font-size="11.5" fill="#334155" text-anchor="start">scripts/persistence-restart.mjs — write, restart, read back</text>
+<text x="1574.0" y="13403.7" font-size="11.5" fill="#334155" text-anchor="start">CI only: headless Chromium e2e, Docker build, Docker + PostgreSQL start</text>
+<text x="54.0" y="13535.8" font-size="15" fill="#0f172a" text-anchor="start">GitHub Actions — three workflows worth knowing</text>
+<text x="54.0" y="13557.8" font-size="11.5" fill="#334155" text-anchor="start">ci.yml · verify — lockfile integrity (root and web), dependency audit,</text>
+<text x="54.0" y="13573.0" font-size="11.5" fill="#334155" text-anchor="start">secret scan, architecture guards, strict typecheck, SQLite migrations from</text>
+<text x="54.0" y="13588.1" font-size="11.5" fill="#334155" text-anchor="start">empty, 283 tests, PostgreSQL 16 conformance, backup drill, edge-case registry,</text>
+<text x="54.0" y="13603.3" font-size="11.5" fill="#334155" text-anchor="start">web build, screen smoke, Chromium e2e, production boot, Docker build and run</text>
+<text x="54.0" y="13618.5" font-size="11.5" fill="#334155" text-anchor="start">ci.yml · single-service-build — production-mode install, then the service's own</text>
+<text x="54.0" y="13633.7" font-size="11.5" fill="#334155" text-anchor="start">build command, asserting the entrypoints and SPA artefacts exist</text>
+<text x="54.0" y="13648.9" font-size="11.5" fill="#334155" text-anchor="start">ci.yml · node-24 compatibility · traceability · backup.yml (scheduled drill)</text>
+<text x="1214.0" y="13535.8" font-size="15" fill="#0f172a" text-anchor="start">A green build is not a deployment</text>
+<text x="1214.0" y="13557.8" font-size="11.5" fill="#334155" text-anchor="start">CI proves the code compiles, migrates, serves and persists.</text>
+<text x="1214.0" y="13573.0" font-size="11.5" fill="#334155" text-anchor="start">It does not prove the platform can start the process, that the platform's</text>
+<text x="1214.0" y="13588.1" font-size="11.5" fill="#334155" text-anchor="start">node runtime matches the one under test, or that environment variables exist.</text>
+<text x="1214.0" y="13603.3" font-size="11.5" fill="#334155" text-anchor="start">The deployment-specific checks are: single-service-build (install + build</text>
+<text x="1214.0" y="13618.5" font-size="11.5" fill="#334155" text-anchor="start">exactly as the platform does it) and service-entry / platform-launcher tests</text>
+<text x="1214.0" y="13633.7" font-size="11.5" fill="#334155" text-anchor="start">(spawn the built entry and drive it over a socket).</text>
+<text x="1214.0" y="13648.9" font-size="11.5" fill="#334155" text-anchor="start">What remains unproven is the platform itself — see frame 13.</text>
+<text x="54.0" y="13735.8" font-size="15" fill="#7f1d1d" text-anchor="start">The regression that motivated half of this file</text>
+<text x="54.0" y="13757.8" font-size="11.5" fill="#334155" text-anchor="start">The Vercel outage was invisible locally: this workstation's Node can require() an ES module, the platform's could not. Every module-format assertion therefore runs a child process with --no-experimental-require-module, against the real installed packages — a guard shaped exactly like the failure.</text>
+<text x="32.0" y="14047.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">11 · Technology — what is used, where, and what removing it would cost</text>
+<text x="32.0" y="14073.5" font-size="12.5" fill="#64748b" text-anchor="start">declared dependencies only; nothing below is aspirational</text>
+<text x="54.0" y="14139.6" font-size="17" fill="#0f172a" text-anchor="start">Frontend</text>
+<text x="54.0" y="14162.3" font-size="11.5" fill="#334155" text-anchor="start">React 19 — the view layer; every screen is a component tree</text>
+<text x="54.0" y="14177.5" font-size="11.5" fill="#334155" text-anchor="start">Vite 7 — bundler and dev server; produces apps/web/dist</text>
+<text x="54.0" y="14192.7" font-size="11.5" fill="#334155" text-anchor="start">react-router 7 — client routing; deep links rely on the API's fallback</text>
+<text x="54.0" y="14207.9" font-size="11.5" fill="#334155" text-anchor="start">TanStack Query 5 — server-state cache, retries, invalidation</text>
+<text x="54.0" y="14223.1" font-size="11.5" fill="#334155" text-anchor="start">recharts — charts on the dashboard and intelligence screens</text>
+<text x="54.0" y="14238.2" font-size="11.5" fill="#334155" text-anchor="start">lucide-react — icon set (a closed union, so icons cannot be strings)</text>
+<text x="54.0" y="14253.4" font-size="11.5" fill="#334155" text-anchor="start"></text>
+<text x="54.0" y="14268.6" font-size="11.5" fill="#334155" text-anchor="start">Remove Query and every screen hand-rolls loading, cache and retry.</text>
+<text x="634.0" y="14139.6" font-size="17" fill="#0f172a" text-anchor="start">Backend</text>
+<text x="634.0" y="14162.3" font-size="11.5" fill="#334155" text-anchor="start">Node 22.18+ / 24 — runtime; the entry is TypeScript with .ts specifiers</text>
+<text x="634.0" y="14177.5" font-size="11.5" fill="#334155" text-anchor="start">TypeScript 5 — types only; tsc emits dist, no bundler in the API</text>
+<text x="634.0" y="14192.7" font-size="11.5" fill="#334155" text-anchor="start">Fastify 5 — HTTP server, hooks, schema-free routing, per-route handlers</text>
+<text x="634.0" y="14207.9" font-size="11.5" fill="#334155" text-anchor="start">@fastify/helmet · @fastify/cors — headers and CORS policy</text>
+<text x="634.0" y="14223.1" font-size="11.5" fill="#334155" text-anchor="start">@fastify/static — serves apps/web/dist when it exists (pinned 10.1.3)</text>
+<text x="634.0" y="14238.2" font-size="11.5" fill="#334155" text-anchor="start">zod 4 — request body validation in routes</text>
+<text x="634.0" y="14253.4" font-size="11.5" fill="#334155" text-anchor="start">pg 8 — the PostgreSQL driver and pool</text>
+<text x="634.0" y="14268.6" font-size="11.5" fill="#334155" text-anchor="start"></text>
+<text x="634.0" y="14283.8" font-size="11.5" fill="#334155" text-anchor="start">Remove Fastify and every hook, error shape and lifecycle is rebuilt.</text>
+<text x="1214.0" y="14139.6" font-size="17" fill="#0f172a" text-anchor="start">Data</text>
+<text x="1214.0" y="14162.3" font-size="11.5" fill="#334155" text-anchor="start">PostgreSQL 16 — the only store in a deployment</text>
+<text x="1214.0" y="14177.5" font-size="11.5" fill="#334155" text-anchor="start">SQL migrations — 17 ordered files, checksummed ledger</text>
+<text x="1214.0" y="14192.7" font-size="11.5" fill="#334155" text-anchor="start">node:sqlite — development and unit tests only, loaded lazily</text>
+<text x="1214.0" y="14207.9" font-size="11.5" fill="#334155" text-anchor="start">node:test — the test runner; no Jest, no Vitest</text>
+<text x="1214.0" y="14223.1" font-size="11.5" fill="#334155" text-anchor="start">embedded-postgres — a real PG 16 binary for tests and CI</text>
+<text x="1214.0" y="14238.2" font-size="11.5" fill="#334155" text-anchor="start"></text>
+<text x="1214.0" y="14253.4" font-size="11.5" fill="#334155" text-anchor="start">Remove PostgreSQL and the product loses concurrent writes,</text>
+<text x="1214.0" y="14268.6" font-size="11.5" fill="#334155" text-anchor="start">transactions, constraints and every governance query at once.</text>
+<text x="1794.0" y="14139.6" font-size="17" fill="#0f172a" text-anchor="start">Platform and operations</text>
+<text x="1794.0" y="14162.3" font-size="11.5" fill="#334155" text-anchor="start">Vercel — hosts the single service; services mode + cron</text>
+<text x="1794.0" y="14177.5" font-size="11.5" fill="#334155" text-anchor="start">GitHub Actions — the gate: tests, PostgreSQL, docker, e2e</text>
+<text x="1794.0" y="14192.7" font-size="11.5" fill="#334155" text-anchor="start">Docker / Compose — the alternative container path, built on CI</text>
+<text x="1794.0" y="14207.9" font-size="11.5" fill="#334155" text-anchor="start">Prometheus text exposition — /api/metrics, no agent shipped</text>
+<text x="1794.0" y="14223.1" font-size="11.5" fill="#334155" text-anchor="start"></text>
+<text x="1794.0" y="14238.2" font-size="11.5" fill="#334155" text-anchor="start">Remove Vercel and the app still runs as a container or with</text>
+<text x="1794.0" y="14253.4" font-size="11.5" fill="#334155" text-anchor="start">npm start: entrypoints/index.ts owns a socket in both cases.</text>
+<text x="54.0" y="14400.7" font-size="16" fill="#0f172a" text-anchor="start">Deliberately not used</text>
+<text x="54.0" y="14423.1" font-size="11.5" fill="#334155" text-anchor="start">No ORM: SQL is written and read directly, so the queries are reviewable and the</text>
+<text x="54.0" y="14438.2" font-size="11.5" fill="#334155" text-anchor="start">migration files are the schema. Cost: SELECT lists repeat.</text>
+<text x="54.0" y="14453.4" font-size="11.5" fill="#334155" text-anchor="start">No Redis: rate-limit counters live in a Map, or in a table when instances share a database.</text>
+<text x="54.0" y="14468.6" font-size="11.5" fill="#334155" text-anchor="start">No message broker: the only asynchronous work is a sweep that can run anywhere.</text>
+<text x="54.0" y="14483.8" font-size="11.5" fill="#334155" text-anchor="start">No API gateway, no service mesh, no second deployable.</text>
+<text x="1214.0" y="14400.7" font-size="16" fill="#7f1d1d" text-anchor="start">Declared but unused — say it before it is found</text>
+<text x="1214.0" y="14423.1" font-size="11.5" fill="#334155" text-anchor="start">argon2 is still in apps/api/package.json. Authentication was removed, and nothing</text>
+<text x="1214.0" y="14438.2" font-size="11.5" fill="#334155" text-anchor="start">imports it: grep for 'argon2' in apps/api/src returns nothing.</text>
+<text x="1214.0" y="14453.4" font-size="11.5" fill="#334155" text-anchor="start">It is a leftover of the password-login era (migration 0014, local_credentials).</text>
+<text x="1214.0" y="14468.6" font-size="11.5" fill="#334155" text-anchor="start">Removing it is a one-line change with a lockfile update; it is left in place here</text>
+<text x="1214.0" y="14483.8" font-size="11.5" fill="#334155" text-anchor="start">so the dependency change is not mixed into an architecture commit.</text>
+<text x="54.0" y="14580.7" font-size="16" fill="#0f172a" text-anchor="start">Versions that matter to understanding</text>
+<text x="54.0" y="14603.1" font-size="11.5" fill="#334155" text-anchor="start">Node engines: &gt;=22.18.0 &lt;25 — the floor is default type stripping (.ts entrypoints), the ceiling keeps CI and local development on the same line.</text>
+<text x="54.0" y="14618.2" font-size="11.5" fill="#334155" text-anchor="start">Fastify 5 · pg 8 · zod 4 · React 19 · react-router 7 · TanStack Query 5 · Vite 7 · TypeScript 5 · PostgreSQL 16.</text>
+<text x="54.0" y="14633.4" font-size="11.5" fill="#334155" text-anchor="start">The one pinned exactly is @fastify/static 10.1.3, because 10.1.4 pulls an ESM-only transitive into a CommonJS graph (frame 09).</text>
+<text x="32.0" y="14937.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">12 · Source map — path → responsibility → the symbol to look at</text>
+<text x="32.0" y="14963.5" font-size="12.5" fill="#64748b" text-anchor="start">read this frame to navigate the repository; every path exists at the inspected commit</text>
+<text x="54.0" y="15028.7" font-size="16" fill="#0f172a" text-anchor="start">API — entry and wiring</text>
+<text x="54.0" y="15051.1" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/entrypoints/index.ts → deployed entry; binds PORT → default export</text>
+<text x="54.0" y="15066.2" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/index.ts → container entry; also starts the sweeper</text>
+<text x="54.0" y="15081.4" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/app.ts → buildApp(): plugins, hooks, errors, static</text>
+<text x="54.0" y="15096.6" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/config.ts → env view (Proxy, resolved per access)</text>
+<text x="54.0" y="15111.8" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/routes/index.ts → every HTTP handler (~100 routes)</text>
+<text x="54.0" y="15127.0" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/routes/operator.ts → /api/auth/session; 410 for retired logins</text>
+<text x="54.0" y="15142.1" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/lib/http.ts → ok / page / HttpError / validators</text>
+<text x="54.0" y="15157.3" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/lib/misconfigured.ts → boot-failure record and body</text>
+<text x="54.0" y="15172.5" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/lib/metrics.ts → counters, gauges, renderMetrics</text>
+<text x="54.0" y="15187.7" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/lib/rate-limit.ts → RateLimiter, LoginThrottle</text>
+<text x="814.0" y="15028.7" font-size="16" fill="#0f172a" text-anchor="start">API — domain, services, data</text>
+<text x="814.0" y="15051.1" font-size="11.5" fill="#334155" text-anchor="start">services/tasks.ts → createTask, nextKey, acceptance ladder, taskDetail</text>
+<text x="814.0" y="15066.2" font-size="11.5" fill="#334155" text-anchor="start">services/clocks.ts → startTimer, sweepTimers, pause/resume, clockHealth</text>
+<text x="814.0" y="15081.4" font-size="11.5" fill="#334155" text-anchor="start">services/lifecycle.ts → stages, TRANSITIONS, transition, addEvidence</text>
+<text x="814.0" y="15096.6" font-size="11.5" fill="#334155" text-anchor="start">services/shipgate.ts → evaluateShipGate, markShipped</text>
+<text x="814.0" y="15111.8" font-size="11.5" fill="#334155" text-anchor="start">services/partners.ts · legal.ts · communications.ts → provider status, agreements</text>
+<text x="814.0" y="15127.0" font-size="11.5" fill="#334155" text-anchor="start">domain/turnover.ts → evaluateGates, AUTO_RULES</text>
+<text x="814.0" y="15142.1" font-size="11.5" fill="#334155" text-anchor="start">domain/planner.ts → plan(), capacity and critical path</text>
+<text x="814.0" y="15157.3" font-size="11.5" fill="#334155" text-anchor="start">domain/risk.ts → scoreRisk, slaDueAt, slaState</text>
+<text x="814.0" y="15172.5" font-size="11.5" fill="#334155" text-anchor="start">db/index.ts → getDb/createDb (PostgreSQL, or explicit SQLite)</text>
+<text x="814.0" y="15187.7" font-size="11.5" fill="#334155" text-anchor="start">db/postgres.ts · db/sqlite.ts · db/sql.ts → the Db implementations and dialect</text>
+<text x="814.0" y="15202.9" font-size="11.5" fill="#334155" text-anchor="start">db/migrate.ts → migrate(), schema_migrations ledger</text>
+<text x="814.0" y="15218.0" font-size="11.5" fill="#334155" text-anchor="start">repositories/query.ts → TASK_SELECT and the map* row mappers</text>
+<text x="1574.0" y="15028.7" font-size="16" fill="#0f172a" text-anchor="start">Frontend</text>
+<text x="1574.0" y="15051.1" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/main.tsx → React root, QueryClient, BrowserRouter</text>
+<text x="1574.0" y="15066.2" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/App.tsx → ErrorBoundary, Suspense, all routes</text>
+<text x="1574.0" y="15081.4" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/components/Shell.tsx → nav, palette, live pulse</text>
+<text x="1574.0" y="15096.6" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/components/ui.tsx → the design primitives</text>
+<text x="1574.0" y="15111.8" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/components/TaskDrawer.tsx → the create/update form</text>
+<text x="1574.0" y="15127.0" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/components/ApiFailure.tsx · QueryFailure.tsx</text>
+<text x="1574.0" y="15142.1" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/lib/api.ts → BASE, request(), ApiError, api.* (~60 calls)</text>
+<text x="1574.0" y="15157.3" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/lib/query-state.ts → useQueryState, useMutationFailure</text>
+<text x="1574.0" y="15172.5" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/lib/live.ts → useLiveUpdates (polls /api/changes)</text>
+<text x="1574.0" y="15187.7" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/lib/diagnose.ts → classifies a failure for the UI</text>
+<text x="1574.0" y="15202.9" font-size="11.5" fill="#334155" text-anchor="start">apps/web/src/pages/*.tsx → 13 screens, one per route</text>
+<text x="54.0" y="15316.7" font-size="16" fill="#0f172a" text-anchor="start">Database and migrations</text>
+<text x="54.0" y="15339.1" font-size="11.5" fill="#334155" text-anchor="start">db/migrations/pg/0001_core.sql → clients, projects, users, deals, milestones</text>
+<text x="54.0" y="15354.2" font-size="11.5" fill="#334155" text-anchor="start">0002_work.sql → boards, columns, tasks, turnover gates and checks</text>
+<text x="54.0" y="15369.4" font-size="11.5" fill="#334155" text-anchor="start">0003_intel.sql → audit_log, insights, saved views, risk scores</text>
+<text x="54.0" y="15384.6" font-size="11.5" fill="#334155" text-anchor="start">0004_delivery_os.sql → releases, qa_reports, sla_clocks, sla_timers, docs, partners</text>
+<text x="54.0" y="15399.8" font-size="11.5" fill="#334155" text-anchor="start">0005…0013 → policy, identity, ship gate, scope, lifecycle, pause, comms, oidc, edge</text>
+<text x="54.0" y="15415.0" font-size="11.5" fill="#334155" text-anchor="start">0014…0017 → credentials, db rate limits, dismissals, change_log</text>
+<text x="54.0" y="15430.1" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/db/scaffolding.ts → Studio board, 6 columns, 12 pipeline stages</text>
+<text x="54.0" y="15445.3" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/db/seed.ts → optional demo data, only via npm run db:seed</text>
+<text x="814.0" y="15316.7" font-size="16" fill="#0f172a" text-anchor="start">Scripts that prove things</text>
+<text x="814.0" y="15339.1" font-size="11.5" fill="#334155" text-anchor="start">scripts/test-pg.mjs → real PostgreSQL 16 conformance run</text>
+<text x="814.0" y="15354.2" font-size="11.5" fill="#334155" text-anchor="start">scripts/smoke-web.mjs → every screen rendered against a live API</text>
+<text x="814.0" y="15369.4" font-size="11.5" fill="#334155" text-anchor="start">scripts/verify-web-routing.mjs → deep links, assets, JSON 404 for /api</text>
+<text x="814.0" y="15384.6" font-size="11.5" fill="#334155" text-anchor="start">scripts/production-boot.mjs → dist boots with no auth environment</text>
+<text x="814.0" y="15399.8" font-size="11.5" fill="#334155" text-anchor="start">scripts/persistence-restart.mjs → write, restart, read back</text>
+<text x="814.0" y="15415.0" font-size="11.5" fill="#334155" text-anchor="start">scripts/backup.mjs → snapshot and restore drill</text>
+<text x="814.0" y="15430.1" font-size="11.5" fill="#334155" text-anchor="start">scripts/embed-web-assets.mjs → dist → generated TypeScript module</text>
+<text x="814.0" y="15445.3" font-size="11.5" fill="#334155" text-anchor="start">scripts/guard-deployment-config.mjs → vercel.json agrees with the repo</text>
+<text x="1574.0" y="15316.7" font-size="16" fill="#0f172a" text-anchor="start">Tests, in the order they matter</text>
+<text x="1574.0" y="15339.1" font-size="11.5" fill="#334155" text-anchor="start">apps/api/test/http.test.mjs → route contracts and envelopes</text>
+<text x="1574.0" y="15354.2" font-size="11.5" fill="#334155" text-anchor="start">crud.test.mjs · editing.test.mjs → create/update/delete behaviour</text>
+<text x="1574.0" y="15369.4" font-size="11.5" fill="#334155" text-anchor="start">domain.test.mjs · shipgate.test.mjs → the business rules</text>
+<text x="1574.0" y="15384.6" font-size="11.5" fill="#334155" text-anchor="start">clock-scope.test.mjs · clocks-pause.test.mjs → SLA semantics</text>
+<text x="1574.0" y="15399.8" font-size="11.5" fill="#334155" text-anchor="start">lifecycle.test.mjs · partners.test.mjs · comms-legal.test.mjs</text>
+<text x="1574.0" y="15415.0" font-size="11.5" fill="#334155" text-anchor="start">resilience.test.mjs → pool exhaustion, failing statements</text>
+<text x="1574.0" y="15430.1" font-size="11.5" fill="#334155" text-anchor="start">vercel.test.mjs · service-entry.test.mjs · platform-launcher.test.mjs</text>
+<text x="1574.0" y="15445.3" font-size="11.5" fill="#334155" text-anchor="start">deployment-layout.test.mjs · module-format.test.mjs → deployment shape</text>
+<text x="54.0" y="15582.7" font-size="16" fill="#0f172a" text-anchor="start">Reading order for a reviewer</text>
+<text x="54.0" y="15605.1" font-size="11.5" fill="#334155" text-anchor="start">package.json → vercel.json → apps/api/src/app.ts → apps/api/src/routes/index.ts (skim by group) → services/tasks.ts → db/migrate.ts + one migration → apps/web/src/main.tsx + App.tsx → lib/api.ts → one page.</text>
+<text x="32.0" y="15907.9" font-size="26" fill="#0f172a" text-anchor="start" font-weight="bold">13 · Known gaps — stated plainly, with the evidence for each</text>
+<text x="32.0" y="15933.5" font-size="12.5" fill="#64748b" text-anchor="start">every line below was read out of the repository at the inspected commit</text>
+<text x="54.0" y="15998.7" font-size="16" fill="#7f1d1d" text-anchor="start">Deliberate, and still a limitation</text>
+<text x="54.0" y="16021.1" font-size="11.5" fill="#334155" text-anchor="start">No authentication. Anyone who can reach the URL can read and write.</text>
+<text x="54.0" y="16036.2" font-size="11.5" fill="#334155" text-anchor="start">One identity for every write: usr_owner, role 'admin'.</text>
+<text x="54.0" y="16051.4" font-size="11.5" fill="#334155" text-anchor="start">The schema carries RBAC (project_members, partner_iam_users,</text>
+<text x="54.0" y="16066.6" font-size="11.5" fill="#334155" text-anchor="start">client_portal_users, auth initialisation in 0006/0012/0014) but</text>
+<text x="54.0" y="16081.8" font-size="11.5" fill="#334155" text-anchor="start">no sign-in path is mounted, so none of it is in force.</text>
+<text x="54.0" y="16097.0" font-size="11.5" fill="#334155" text-anchor="start">Per-user attribution is therefore impossible today.</text>
+<text x="54.0" y="16112.1" font-size="11.5" fill="#334155" text-anchor="start">The audit trail answers what changed, not who changed it.</text>
+<text x="814.0" y="15998.7" font-size="16" fill="#0f172a" text-anchor="start">Implemented as data, not as an integration</text>
+<text x="814.0" y="16021.1" font-size="11.5" fill="#334155" text-anchor="start">Comms: /api/comms/providers reports whether SMTP or WhatsApp is</text>
+<text x="814.0" y="16036.2" font-size="11.5" fill="#334155" text-anchor="start">configured; threads, messages and follow-ups are stored; nothing sends.</text>
+<text x="814.0" y="16051.4" font-size="11.5" fill="#334155" text-anchor="start">E-signature: esignStatus() reports DocuSign / Dropbox Sign config;</text>
+<text x="814.0" y="16066.6" font-size="11.5" fill="#334155" text-anchor="start">decisions and manual uploads are recorded, no API call is made.</text>
+<text x="814.0" y="16081.8" font-size="11.5" fill="#334155" text-anchor="start">Legal renewals: renewal_notice_days is stored; no reminder job exists.</text>
+<text x="814.0" y="16097.0" font-size="11.5" fill="#334155" text-anchor="start">Partner console: devices, entitlements and usage are tracked as rows;</text>
+<text x="814.0" y="16112.1" font-size="11.5" fill="#334155" text-anchor="start">nothing provisions or revokes at a provider.</text>
+<text x="1574.0" y="15998.7" font-size="16" fill="#0f172a" text-anchor="start">Technical debt a reviewer will find</text>
+<text x="1574.0" y="16021.1" font-size="11.5" fill="#334155" text-anchor="start">argon2 is declared in apps/api/package.json and imported nowhere.</text>
+<text x="1574.0" y="16036.2" font-size="11.5" fill="#334155" text-anchor="start">routes/index.ts is 3,370 lines: ~100 handlers in one module.</text>
+<text x="1574.0" y="16051.4" font-size="11.5" fill="#334155" text-anchor="start">Rate limiting is per IP and in memory unless the shared</text>
+<text x="1574.0" y="16066.6" font-size="11.5" fill="#334155" text-anchor="start">rate_limit_counters store is configured (migration 0015).</text>
+<text x="1574.0" y="16081.8" font-size="11.5" fill="#334155" text-anchor="start">Migrations run on boot; a failing migration blocks cold start</text>
+<text x="1574.0" y="16097.0" font-size="11.5" fill="#334155" text-anchor="start">(SKIP_MIGRATE=1 is the escape hatch).</text>
+<text x="1574.0" y="16112.1" font-size="11.5" fill="#334155" text-anchor="start">The web app has no unit tests: rendering is covered by the</text>
+<text x="1574.0" y="16127.3" font-size="11.5" fill="#334155" text-anchor="start">server-render smoke suite and the Chromium e2e run.</text>
+<text x="1574.0" y="16142.5" font-size="11.5" fill="#334155" text-anchor="start">Docker is built and started on CI, not deployed anywhere.</text>
+<text x="54.0" y="16278.7" font-size="16" fill="#7f1d1d" text-anchor="start">Needs verification — do not claim it</text>
+<text x="54.0" y="16301.1" font-size="11.5" fill="#334155" text-anchor="start">1. The Node version the Vercel function actually runs. The failing runtime</text>
+<text x="54.0" y="16316.2" font-size="11.5" fill="#334155" text-anchor="start">demonstrably lacked require(esm); the fix no longer depends on it either way.</text>
+<text x="54.0" y="16331.4" font-size="11.5" fill="#334155" text-anchor="start">2. Whether the production environment sets DATABASE_URL and CRON_SECRET.</text>
+<text x="54.0" y="16346.6" font-size="11.5" fill="#334155" text-anchor="start">3. Whether the post-fix deployment boots and serves /api/live. Every URL on</text>
+<text x="54.0" y="16361.8" font-size="11.5" fill="#334155" text-anchor="start">this scope is behind Vercel Deployment Protection, so it could not be</text>
+<text x="54.0" y="16377.0" font-size="11.5" fill="#334155" text-anchor="start">observed from outside the account.</text>
+<text x="1214.0" y="16278.7" font-size="16" fill="#0f172a" text-anchor="start">Things that look like debt and are not</text>
+<text x="1214.0" y="16301.1" font-size="11.5" fill="#334155" text-anchor="start">sessions_new / sla_timers_new in migrations 0010 and 0014 are temporary rebuild</text>
+<text x="1214.0" y="16316.2" font-size="11.5" fill="#334155" text-anchor="start">tables: SQLite cannot alter a CHECK in place, so the table is recreated and</text>
+<text x="1214.0" y="16331.4" font-size="11.5" fill="#334155" text-anchor="start">renamed. The final schema has no *_new table.</text>
+<text x="1214.0" y="16346.6" font-size="11.5" fill="#334155" text-anchor="start">apps/api/src/auth/*.ts is not dead code: the operator middleware, scope</text>
+<text x="1214.0" y="16361.8" font-size="11.5" fill="#334155" text-anchor="start">resolution and requireProjectAccess are all on the request path.</text>
+<text x="1214.0" y="16377.0" font-size="11.5" fill="#334155" text-anchor="start">SQLite is not a fallback in production: a serving runtime with no DATABASE_URL</text>
+<text x="1214.0" y="16392.1" font-size="11.5" fill="#334155" text-anchor="start">throws rather than creating a file (test: 'a serving runtime without</text>
+<text x="1214.0" y="16407.3" font-size="11.5" fill="#334155" text-anchor="start">DATABASE_URL throws instead of creating a file').</text>
+<text x="54.0" y="16515.6" font-size="17" fill="#0f172a" text-anchor="start">The honest summary</text>
+<text x="54.0" y="16538.3" font-size="11.5" fill="#334155" text-anchor="start">RelayOS is a working, well-tested single-service application with a real relational schema and real governance rules. Its weak points are the ones the product deliberately chose: no authentication, no external integrations behind the modelled workflows, and no queue. Its engineering strength is that the failure modes are written down</text>
+<text x="54.0" y="16553.5" font-size="11.5" fill="#334155" text-anchor="start">and tested — module loading, boot failure, unknown routes, dead databases, stale screens — rather than discovered in production.</text>
+<text x="54.0" y="16687.8" font-size="15" fill="#0f172a" text-anchor="start">How this document was verified</text>
+<text x="54.0" y="16709.8" font-size="11.5" fill="#334155" text-anchor="start">Source of truth: the commit recorded in docs/architecture/RELAYOS_ARCHITECTURE_TRACEABILITY.md. Every path, symbol, route, table and script named on this board was read from the repository at that commit; nothing here comes from a README, an earlier conversation, or an assumption about how a system like this usually looks.</text>
+</svg>
