@@ -13,6 +13,7 @@ data/
 *.log
 .vite/
 .pgdata/
+.pgdata-boot/
 backups/
 .e2e/
 

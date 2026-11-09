@@ -2,7 +2,7 @@
   "name": "relay-oss",
   "private": true,
   "version": "1.0.0",
-  "description": "Relay OSS — Delivery OS: internal agile delivery board for agency client pipelines",
+  "description": "Relay OSS \u2014 Delivery OS: internal agile delivery board for agency client pipelines",
   "type": "module",
   "workspaces": [
     "apps/api"
@@ -23,7 +23,7 @@
     "test": "node --no-warnings --test apps/api/test/*.test.mjs",
     "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/guard-declared-deps.mjs && node scripts/gen-pg-migrations.mjs --check && node scripts/guard-deployment-config.mjs && node scripts/check-traceability.mjs && node scripts/guard-workflows.mjs",
     "build:api": "npm run build -w @relay/api",
-    "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build:service && npm run verify:routing && npm run smoke:web && npm run test:persistence && npm run backup:verify",
+    "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build:service && npm run verify:routing && npm run smoke:web && npm run verify:boot && npm run test:persistence && npm run backup:verify",
     "pg:start": "node scripts/pg-dev.mjs start",
     "pg:stop": "node scripts/pg-dev.mjs stop",
     "pg:migrate": "DATABASE_URL=$(node scripts/pg-dev.mjs url) node apps/api/src/db/cli.ts migrate",
@@ -51,7 +51,8 @@
     "verify:routing": "node scripts/verify-web-routing.mjs",
     "db:migrate:prod": "node apps/api/dist/db/cli.js migrate",
     "install:web": "npm ci --prefix apps/web --include=dev --no-audit --no-fund",
-    "build:web": "npm run build --prefix apps/web"
+    "build:web": "npm run build --prefix apps/web",
+    "verify:boot": "node --no-warnings scripts/production-boot.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
