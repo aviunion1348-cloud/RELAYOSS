@@ -8,7 +8,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.ts';
@@ -538,7 +537,35 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
    */
   const resolved = resolveWebDist(opts.webDist ?? config.webDist);
   const webDist = resolved.dir;
+
+  /*
+   * `@fastify/static` is loaded only when there is a directory to serve, and never at
+   * module scope.
+   *
+   * It is a CommonJS package that `require`s its dependencies, and in 10.1.4 one of them
+   * (`content-disposition`) switched to ESM-only. On a runtime without CommonJS→ESM
+   * `require` support, importing this module at the top of the file threw
+   * `ERR_REQUIRE_ESM` while the function was being *loaded* — so every request, including
+   * `/api/live`, returned `boot_failed` before any of our code ran. The version is pinned
+   * to 10.1.3 and that is the fix; this is the structural half.
+   *
+   * In a deployment bundle there is no `apps/web/dist` at all — the SPA is compiled in
+   * (see `lib/embedded-web.ts`) — so this import now never executes there, and a future
+   * regression in that dependency's module format cannot stop the API from booting. Where
+   * a directory does exist (a workstation, the container image, `npm start`) the import
+   * is reached and any failure is real, so it is thrown rather than logged and ignored.
+   */
   if (serveStatic && webDist) {
+    let fastifyStatic: typeof import('@fastify/static').default;
+    try {
+      fastifyStatic = (await import('@fastify/static')).default;
+    } catch (err) {
+      throw new Error(
+        `Could not load @fastify/static, which is required to serve ${webDist}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
     await app.register(fastifyStatic, { root: webDist, wildcard: false, cacheControl: true, maxAge: '1h' });
   }
   /*

@@ -309,14 +309,18 @@ The dev toolchain occupies build-machine disk for the duration of the build and 
 else. That is the normal arrangement for compiling TypeScript at build time, and it is
 cheaper than the alternative: a runtime install that cannot rebuild the bundle.
 
-**Node version.** `engines.node` is a bounded range, `>=22.18.0 <23`, not `>=22.18.0`.
+**Node version.** `engines.node` is a bounded range, `>=22.18.0 <25`, not `>=22.18.0`.
 The lower bound is not a preference: the deployed entrypoint is TypeScript importing
 `.ts` specifiers, which Node executes only with default type stripping (22.18.0 and
 later). A floor below that pins a range that cannot run the file it selects.
-An open-ended lower bound is satisfied by every future major, so Vercel would auto-upgrade
-the build image and change the runtime without anyone deciding to — the deploy log warned
-about precisely this. GitHub Actions uses `node-version: 22`, so CI and the platform stay
-on the same line.
+The upper bound keeps the range inside the majors this project is exercised on: CI runs
+`node-version: 22`, and §1.2.7 is the account of a runtime that differs from CI in a way
+that mattered. An open-ended range is satisfied by every future major, so the platform
+would change the runtime without anyone deciding to.
+
+**The application does not require `require(esm)`.** Node 22.12 and 24 can `require()` an
+ES module; the runtime that failed in production could not. Nothing in the boot path
+depends on that capability now (see §1.2.7), so the same code runs on either.
 
 ### 1.2.3 Install scripts: the Argon2 approval
 
@@ -426,6 +430,76 @@ Consequences worth knowing:
 
 Locally you may install however you like; the constraint is on the deployment path. Just
 do not add `apps/web` back to `workspaces` — the guard fails if you do.
+
+### 1.2.7 A transitive ESM-only dependency took the whole deployment down
+
+The symptom was total: every route returned `boot_failed`, including `/api/live`.
+
+The cause was one line in a package nobody here wrote. `@fastify/static` is CommonJS in
+every 10.1.x release, and it `require`s its dependencies. In **10.1.4** one of them,
+`content-disposition`, switched to `^3.0.0` — a `"type": "module"` package. The API
+imported `@fastify/static` at *module scope*, so on a runtime that cannot `require()` an
+ES module the `ERR_REQUIRE_ESM` was thrown while the function was still being **loaded**.
+No route had been registered yet, so no route could report anything except the boot
+failure it did report.
+
+| `@fastify/static` | `content-disposition` | module format | boots without `require(esm)` |
+| --- | --- | --- | --- |
+| 10.1.3 | `^2.0.1` | CommonJS | yes |
+| 10.1.4 | `^3.0.0` | ESM-only | no |
+| 10.1.10 (was installed) | `^3.0.0` | ESM-only | no |
+
+Two fixes, and they are different in kind:
+
+1. **The pin.** `apps/api/package.json` names `"@fastify/static": "10.1.3"` exactly — no
+   caret. A caret would let the next install walk back into 10.1.4. The lockfile holds a
+   single hoisted copy (`node_modules/@fastify/static@10.1.3` with
+   `node_modules/content-disposition@2.0.1`), and the install is done with
+   `npm install --save-exact -w @relay/api`, which is what actually hoists it: a plain
+   `npm install` after editing the version leaves a nested copy and the root one wins.
+2. **The structure.** `apps/api/src/app.ts` no longer imports the plugin at the top of the
+   file. It is loaded with `await import('@fastify/static')` inside the branch that has a
+   directory to serve. In a deployment bundle there is no such directory — the SPA is
+   compiled in as a module (§1.2.1) — so the import is never reached there at all, and a
+   future module-format change in that dependency cannot stop the API from booting. Where
+   a directory does exist (workstation, container, `npm start`) the import is reached and
+   a failure is **thrown with the directory and the underlying error**, never logged and
+   ignored.
+
+This was not guessed from the message. It was reproduced byte for byte against the real
+installed package:
+
+```
+node --no-experimental-require-module -e "require('content-disposition')"
+Error [ERR_REQUIRE_ESM]: require() of ES Module .../content-disposition/dist/index.js
+from .../@fastify/static/index.js not supported.
+```
+
+`node --no-experimental-require-module` is the flag that matters: this workstation is Node
+22.22, which *can* `require()` ESM, so the defect is invisible here by default. Every
+assertion in `apps/api/test/module-format.test.mjs` runs a child process with that flag.
+
+That file is the permanent regression test, and it asserts four things:
+
+1. the **installed** tree: one copy of `@fastify/static`, exactly 10.1.3, resolved with a
+   `content-disposition` whose manifest says CommonJS and whose major is 2;
+2. `require('@fastify/static')` succeeds on a runtime without `require(esm)`;
+3. the **compiled** entrypoint (`apps/api/dist/app.js` when built) boots on that runtime,
+   serves `/api/live` as JSON, answers an unknown `/api` path with JSON rather than HTML,
+   and — when a web build exists — serves the real `/` and a real `/assets/*.js` from
+   disk at 200 with a non-HTML content type;
+4. the **lockfile**, read as text, has nothing but 10.1.3 for `@fastify/static` and
+   nothing but major 2 for `content-disposition` — which is what a deployment installs,
+   including when someone bumps the manifest and has not yet installed.
+
+`fastify` itself is fine on such a runtime: it loads `light-my-request` lazily, inside
+`inject()`, and never on the request path. That package does `require()` an ESM-only
+`cookie`, so `app.inject()` is unavailable there — which is why the test listens on a
+real socket instead. Nothing in the deployed request path calls `inject()`.
+
+**What this does not claim.** No deployment has been performed from this repository
+(§1.7). The reproduction is local, against the real installed packages, on the module
+capability the failing runtime demonstrated.
 
 ### 1.3 Environment variables
 
