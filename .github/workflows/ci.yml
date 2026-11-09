@@ -101,8 +101,16 @@ jobs:
           #
           # So the assertion is inverted. A production build given no authentication
           # environment must boot, serve, and report that it authenticates nothing.
+          #
+          # It does need a database, and that requirement is deliberate: a serving
+          # runtime with nowhere to persist writes refuses to start rather than
+          # accepting them and losing them on the next cold start. So the step boots a
+          # real PostgreSQL 16 -- the same cluster the conformance suite uses, already
+          # migrated and seeded above. Supplying DATABASE_URL here does not weaken the
+          # assertion: no *authentication* variable is set, which is what it is about.
           npm run build -w @relay/api
-          NODE_ENV=production PORT=4310 node apps/api/dist/index.js > /tmp/boot.log 2>&1 &
+          export DATABASE_URL=postgres://relay:relay_local_dev@127.0.0.1:55432/relay_test
+          NODE_ENV=production PORT=4310 AUTH_MODE= node apps/api/dist/index.js > /tmp/boot.log 2>&1 &
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
 
