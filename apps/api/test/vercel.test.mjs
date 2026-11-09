@@ -102,10 +102,38 @@ test('vercel: an empty database works, because boot creates exactly one operator
   assert.equal(people.length, 1, 'boot creates exactly one operator, not a cast of characters');
   assert.equal(people[0].role, 'admin', 'the operator must be able to administer the instance');
 
-  for (const table of ['clients', 'projects', 'tasks', 'deals', 'boards', 'activity', 'teams']) {
+  for (const table of ['clients', 'projects', 'tasks', 'deals', 'activity', 'teams']) {
     const row = await db.get(`SELECT COUNT(*) AS c FROM ${table}`);
     assert.equal(Number(row.c), 0, `${table} must be empty on a first run — nothing is invented`);
   }
+
+  /*
+   * One board and its columns, and not a single card on it.
+   *
+   * This used to assert zero boards, and that assertion was describing the defect: with
+   * no board there is no `columns` row, `tasks.column_id` has nothing to point at, and
+   * the first task anyone tried to create failed. A board is structure, in the same
+   * category as the users row that makes `created_by` possible — not content. Content is
+   * still zero: no client, no project, no deal, no task, no activity.
+   */
+  const boards = await db.all('SELECT id, name, project_id FROM boards');
+  assert.equal(boards.length, 1, 'a first run gets exactly one board to hold work');
+  assert.equal(boards[0].project_id, null, 'it is the studio board, not one project’s');
+  const columns = await db.all('SELECT key, is_done FROM columns WHERE board_id = ? ORDER BY position', [boards[0].id]);
+  assert.deepEqual(
+    columns.map((c) => c.key),
+    ['backlog', 'todo', 'in_progress', 'review', 'blocked', 'done'],
+    'the board carries the six delivery states the interface groups by',
+  );
+  assert.equal(Number(columns.filter((c) => Number(c.is_done)).length), 1, 'exactly one column means "shipped"');
+
+  /*
+   * And the pipeline has its gates, for the same reason: `deals.stage_id` is NOT NULL
+   * and references `pipeline_stages`, so without them the first deal is refused with
+   * "Unknown stage" — the same empty-installation defect, one screen over.
+   */
+  const stages = await db.get('SELECT COUNT(*) AS c FROM pipeline_stages');
+  assert.equal(Number(stages.c), 12, 'the twelve consultation-to-kickoff gates exist before any deal does');
 
   // The probes still work, and they are how an operator finds out about the engine.
   for (const url of ['/api/live', '/api/health']) {

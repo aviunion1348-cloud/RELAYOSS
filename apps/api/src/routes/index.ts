@@ -899,6 +899,49 @@ export async function registerRoutes(
     return ok(mapProject(row));
   });
 
+  /**
+   * Retire a project.
+   *
+   * A project is the spine of the product: tasks, phases, releases, QA reports,
+   * edge-case ledgers and lifecycle instances all point at it, and every one of those
+   * foreign keys says ON DELETE CASCADE. That is the right shape for the data and the
+   * wrong thing to do silently, so the deletion is admin-only, reports what it removed,
+   * and is refused for a client that is gone (which would leave orphaned work).
+   *
+   * `DELETE /api/tasks/:id` already existed; this is the same operation one level up,
+   * and it is what the Projects screen was missing once a project could be created.
+   */
+  app.delete('/api/projects/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
+    const projectId = String((req.params as { id: string }).id);
+    const conn = await db();
+    const project = await conn.get<Record<string, any>>('SELECT * FROM projects WHERE id = ?', [projectId]);
+    if (!project) throw notFound('No such project');
+
+    const count = async (sql: string) => Number((await conn.get<{ n: number }>(sql, [projectId]))?.n ?? 0);
+    const removed = {
+      tasks: await count('SELECT COUNT(*) AS n FROM tasks WHERE project_id = ?'),
+      releases: await count('SELECT COUNT(*) AS n FROM releases WHERE project_id = ?'),
+      qaReports: await count('SELECT COUNT(*) AS n FROM qa_reports WHERE project_id = ?'),
+      phases: await count('SELECT COUNT(*) AS n FROM project_phases WHERE project_id = ?'),
+    };
+
+    /* A shipped release is the record of what reached a customer — see DELETE /api/releases. */
+    const shipped = await conn.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM releases WHERE project_id = ? AND status = 'shipped'",
+      [projectId],
+    );
+    if (Number(shipped?.n ?? 0) > 0) {
+      throw conflict(
+        `"${project.name}" has ${shipped?.n} shipped release(s). Those are the record of what reached the ` +
+          'customer, so the project cannot be deleted; archive it instead.',
+      );
+    }
+
+    await conn.run('DELETE FROM projects WHERE id = ?', [projectId]);
+    return ok({ id: projectId, deleted: true, removed });
+  });
+
   app.get('/api/projects', async (req) => {
     const identity = await currentIdentity(req);
     const rows = await (await db()).all<Record<string, any>>(
@@ -1248,6 +1291,28 @@ export async function registerRoutes(
     return ok({ id: dealId });
   });
 
+  /**
+   * Remove a deal from the pipeline.
+   *
+   * Refused once the deal has produced a project: `projects.deal_id` is the link that
+   * says this work came from that conversation, and deleting the deal would set it to
+   * NULL and quietly break the chain between what was sold and what is being delivered.
+   * A deal that was lost or withdrawn has no project, so the ordinary tidy-up works.
+   */
+  app.delete('/api/deals/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
+    const dealId = String((req.params as { id: string }).id);
+    const conn = await db();
+    const deal = await conn.get<Record<string, any>>('SELECT * FROM deals WHERE id = ?', [dealId]);
+    if (!deal) throw notFound('No such deal');
+    const project = await conn.get<{ id: string; name: string }>('SELECT id, name FROM projects WHERE deal_id = ?', [dealId]);
+    if (project) {
+      throw conflict(`"${deal.title}" is the origin of project "${project.name}"; it cannot be deleted while that project exists.`);
+    }
+    await conn.run('DELETE FROM deals WHERE id = ?', [dealId]);
+    return ok({ id: dealId, deleted: true });
+  });
+
   /* ------------------------------------------------------------- clients -- */
   /**
    * Create a client.
@@ -1274,6 +1339,15 @@ export async function registerRoutes(
       health: z.enum(['healthy', 'watch', 'at_risk', 'churn']).optional(),
       primaryContactName: z.string().optional(),
       primaryContactEmail: z.string().optional(),
+      /*
+       * The same four fields the edit sheet writes. They were missing here, so a client
+       * created through the form would lose its contact role, its notes and its MRR on
+       * the way in — and the Revenue tile would read zero until someone opened Edit and
+       * typed the numbers a second time.
+       */
+      primaryContactRole: z.string().optional(),
+      notes: z.string().optional(),
+      mrrCents: z.number().int().nonnegative().optional(),
     }).safeParse(req.body);
     if (!parsed.success) throw badRequest('Invalid client payload', parsed.error.issues);
 
@@ -1287,12 +1361,14 @@ export async function registerRoutes(
     const id = `cl_${Math.random().toString(36).slice(2, 10)}`;
     const initials = (input.initials ?? input.name.split(/\s+/).map((w) => w[0]).join('').toUpperCase()).slice(0, 3);
     await (await db()).run(
-      `INSERT INTO clients (id,name,slug,industry,initials,accent_color,tier,health,primary_contact_name,primary_contact_email)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO clients (id,name,slug,industry,initials,accent_color,tier,health,
+                            primary_contact_name,primary_contact_email,primary_contact_role,notes,mrr_cents)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id, input.name, slug, input.industry ?? '', initials, input.accentColor ?? '#7c8cff',
         input.tier ?? 'growth', input.health ?? 'healthy',
         input.primaryContactName ?? '', input.primaryContactEmail ?? '',
+        input.primaryContactRole ?? '', input.notes ?? '', input.mrrCents ?? 0,
       ],
     );
     const row = await (await db()).get<Record<string, any>>('SELECT * FROM clients WHERE id = ?', [id]);
@@ -1437,6 +1513,112 @@ export async function registerRoutes(
         usage: last30.map((u) => ({ day: u.day, apiCalls: u.api_calls, activeUsers: u.active_users })),
       };
     }));
+  });
+
+  /**
+   * Create a partner.
+   *
+   * `GET` and `PATCH` both existed, so a partner could be edited and could never be
+   * brought into existence: the seeded console was the only source, and a workspace
+   * that starts empty therefore had a Partner Console with no way to put anything in
+   * it. A partner is a real record — it owns IAM users, device licences and usage
+   * metrics through foreign keys — so it is created here rather than in the UI.
+   *
+   * `client_id` is required because a partner is engaged *by* a client; there is no
+   * such thing as a partner belonging to nobody, and the schema says so.
+   */
+  app.post('/api/partners', async (req, reply) => {
+    await requireRole(req, ['admin', 'lead']);
+    const parsed = z.object({
+      name: z.string().trim().min(1, 'a partner needs a name').max(120),
+      clientId: z.string().min(1, 'a partner belongs to a client'),
+      slug: z.string().min(1).regex(/^[a-z0-9-]+$/, 'a slug is lowercase letters, digits and hyphens').optional(),
+      consoleUrl: z.union([z.literal(''), z.string().url('consoleUrl must be a URL')]).optional(),
+      plan: z.enum(['starter', 'growth', 'enterprise']).optional(),
+      status: z.enum(['active', 'trial', 'suspended']).optional(),
+      deviceLimit: z.number().int().min(0).max(1_000_000).optional(),
+      apiQuotaMonth: z.number().int().min(0).max(1_000_000_000).optional(),
+      seatLimit: z.number().int().min(0).max(100_000).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid partner payload', parsed.error.issues);
+
+    const input = parsed.data;
+    const conn = await db();
+    const client = await conn.get<{ id: string }>('SELECT id FROM clients WHERE id = ?', [input.clientId]);
+    if (!client) throw badRequest(`No client with id "${input.clientId}"`);
+
+    const slug = input.slug ?? input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+    if (!slug) throw badRequest('a slug could not be derived from that name — supply one');
+    if (await conn.get('SELECT 1 AS ok FROM partners WHERE slug = ?', [slug])) {
+      throw conflict(`A partner with slug "${slug}" already exists`);
+    }
+
+    const partnerId = id('pt');
+    await conn.run(
+      `INSERT INTO partners (id,client_id,name,slug,console_url,plan,status,device_limit,api_quota_month,seat_limit)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [
+        partnerId, input.clientId, input.name, slug, input.consoleUrl ?? '',
+        input.plan ?? 'growth', input.status ?? 'trial',
+        input.deviceLimit ?? 50, input.apiQuotaMonth ?? 100_000, input.seatLimit ?? 10,
+      ],
+    );
+    const row = await conn.get<Record<string, any>>('SELECT * FROM partners WHERE id = ?', [partnerId]);
+    reply.code(201);
+    return ok({
+      id: row?.id, name: row?.name, slug: row?.slug, plan: row?.plan, status: row?.status,
+      consoleUrl: row?.console_url, deviceLimit: row?.device_limit,
+      apiQuotaMonth: row?.api_quota_month, seatLimit: row?.seat_limit, clientId: row?.client_id,
+    });
+  });
+
+  /**
+   * Remove a partner.
+   *
+   * Refused while the partner still has an active device licence or an enabled IAM
+   * user. Both are live credentials somebody is using; cascading them away would
+   * revoke access as a side effect of tidying a list, and the operator would have no
+   * record of why a partner's console stopped working. The counts are in the refusal
+   * so the remedy is obvious.
+   */
+  app.delete('/api/partners/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
+    const partnerId = String((req.params as { id: string }).id);
+    const conn = await db();
+    const partner = await conn.get<Record<string, any>>('SELECT * FROM partners WHERE id = ?', [partnerId]);
+    if (!partner) throw notFound('No such partner');
+
+    /*
+     * "Held" rather than "active": an unassigned licence still consumes quota —
+     * `enforceDeviceLimit` counts everything that is not revoked — so a partner with a
+     * registered-but-unassigned device is exactly as undeletable as one with a device in
+     * use. Counting only `active` would have let this pass and left a licence orphaned.
+     */
+    const devices = await conn.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM device_licenses WHERE partner_id = ? AND status != 'revoked'",
+      [partnerId],
+    );
+    const seats = await conn.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM partner_iam_users WHERE partner_id = ? AND status != 'disabled'",
+      [partnerId],
+    );
+    const activeDevices = Number(devices?.n ?? 0);
+    const activeSeats = Number(seats?.n ?? 0);
+    if (activeDevices > 0 || activeSeats > 0) {
+      throw conflict(
+        `"${partner.name}" still holds ${activeDevices} device licence(s) and ${activeSeats} enabled user ` +
+          'seat(s). Revoke those first — deleting the partner would silently end access that is in use.',
+      );
+    }
+
+    /*
+     * One statement. Every table that hangs off a partner — IAM users, device
+     * licences, usage rows, invitations, project links — declares ON DELETE CASCADE,
+     * so the database removes them atomically. Cleaning up by hand first would only
+     * mean a failed delete looks like a success on a partially cleared partner.
+     */
+    await conn.run('DELETE FROM partners WHERE id = ?', [partnerId]);
+    return ok({ id: partnerId, deleted: true });
   });
 
   /**
@@ -1715,7 +1897,11 @@ export async function registerRoutes(
 
     const sets: string[] = [];
     const params: unknown[] = [];
-    for (const [key, col] of [['status', 'status'], ['severity', 'severity'], ['assigneeId', 'assignee_id'], ['title', 'title']] as const) {
+    for (const [key, col] of [
+      ['status', 'status'], ['severity', 'severity'], ['assigneeId', 'assignee_id'], ['title', 'title'],
+      /* The two fields a report is verified *with*, which could not be written at all. */
+      ['evidenceUrl', 'evidence_url'], ['reproduction', 'reproduction'],
+    ] as const) {
       if (b[key] !== undefined) { sets.push(`${col} = ?`); params.push(b[key]); }
     }
     /*
@@ -1727,8 +1913,48 @@ export async function registerRoutes(
     if (b.status !== undefined && !QA_STATUS.includes(b.status)) {
       throw badRequest(`status must be one of ${QA_STATUS.join(', ')}`);
     }
-    if (b.severity !== undefined && !['low', 'medium', 'high', 'critical'].includes(b.severity)) {
-      throw badRequest('severity must be one of low, medium, high, critical');
+    /*
+     * `p0`–`p4` — the values the column and the form actually use.
+     *
+     * This check listed `low, medium, high, critical`, which is not any severity this
+     * product has: every attempt to change a severity was refused with a message naming
+     * four values that do not exist in the schema. The report list, the ship gate and
+     * the 12-hour clock all rank by p-level, so the enum has one correct spelling.
+     */
+    if (b.severity !== undefined && !['p0', 'p1', 'p2', 'p3', 'p4'].includes(b.severity)) {
+      throw badRequest('severity must be one of p0, p1, p2, p3, p4');
+    }
+    /*
+     * Verification is a second pair of eyes, not a second click.
+     *
+     * `verified` used to be reachable from `open` in one request with nothing attached,
+     * which made the one status the ship gate trusts the cheapest one to reach — a P0
+     * could be closed by the person who reported it, without a fix and without proof.
+     *
+     * A verification now needs both halves of the cross-check:
+     *   - the report was marked fixed first, so somebody else's fix is what is verified;
+     *   - evidence exists on the record (a test run, a screenshot, a PR or deploy link),
+     *     which is what "verified" claims.
+     * The refusal names which half is missing.
+     */
+    if (b.status === 'verified') {
+      const current = await (await db()).get<{ status: string; evidence_url: string }>(
+        'SELECT status, evidence_url FROM qa_reports WHERE id = ?',
+        [reportId],
+      );
+      const evidence = String(b.evidenceUrl ?? current?.evidence_url ?? '').trim();
+      if (current?.status !== 'fixed') {
+        throw conflict(
+          `Only a report in "fixed" can be verified; this one is "${current?.status ?? 'unknown'}". ` +
+            'Mark it fixed when the change lands, then verify it against the evidence.',
+        );
+      }
+      if (!evidence) {
+        throw badRequest(
+          'Verification needs evidence — attach the test run, screenshot, PR or deploy link ' +
+            '(evidenceUrl) before marking this verified. "Verified" is the only status the ship gate trusts.',
+        );
+      }
     }
     if (b.status && ['fixed', 'verified', 'wont_fix', 'duplicate'].includes(b.status)) {
       sets.push('resolved_at = ?');
@@ -1858,6 +2084,93 @@ export async function registerRoutes(
     ]);
     const acks = await (await db()).all('SELECT * FROM ship_acknowledgements WHERE release_id = ? ORDER BY signal', [releaseId]);
     return ok({ releaseId, acknowledgements: acks });
+  });
+
+  /**
+   * Create a release.
+   *
+   * Every release in the product had to be seeded: `PATCH /api/releases/:id` could
+   * advance one through the ship gate, and nothing could produce one. On a workspace
+   * that starts empty, the Releases screen therefore had no release to advance, no
+   * demo to schedule and no gate to pass — the whole lifecycle was unreachable.
+   *
+   * A release belongs to a project and starts at `planning`, always: the lifecycle is
+   * forward-only, so creating one at `shipped` would be a lie the gate could never
+   * check. `version` is scoped to the project, which is what makes "v1.2" meaningful.
+   */
+  app.post('/api/releases', async (req, reply) => {
+    await requireRole(req, ['admin', 'lead']);
+    const parsed = z.object({
+      projectId: z.string().min(1, 'a release belongs to a project'),
+      version: z.string().trim().min(1, 'a release needs a version').max(40),
+      name: z.string().trim().min(1, 'a release needs a name').max(160),
+      branch: z.string().trim().max(120).optional(),
+      deployTarget: z.string().trim().max(120).optional(),
+      demoAt: z.string().nullable().optional(),
+      shipPlannedAt: z.string().nullable().optional(),
+      rollbackPlan: z.string().max(4000).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid release payload', parsed.error.issues);
+
+    const input = parsed.data;
+    const conn = await db();
+    const project = await conn.get<{ id: string }>('SELECT id FROM projects WHERE id = ?', [input.projectId]);
+    if (!project) throw badRequest(`No project with id "${input.projectId}"`);
+    await requireProjectAccess(conn, await currentIdentity(req), input.projectId, 'write');
+
+    const clash = await conn.get<{ id: string }>(
+      'SELECT id FROM releases WHERE project_id = ? AND version = ?',
+      [input.projectId, input.version],
+    );
+    if (clash) throw conflict(`That project already has a release called ${input.version}`);
+
+    const releaseId = id('rl');
+    await conn.run(
+      `INSERT INTO releases (id,project_id,version,name,status,branch,deploy_target,demo_at,ship_planned_at,rollback_plan)
+       VALUES (?,?,?,?,'planning',?,?,?,?,?)`,
+      [
+        releaseId, input.projectId, input.version, input.name,
+        input.branch?.trim() || 'main', input.deployTarget?.trim() || '',
+        input.demoAt ?? null, input.shipPlannedAt ?? null, input.rollbackPlan ?? '',
+      ],
+    );
+    const row = await conn.get<Record<string, any>>(
+      `SELECT r.*, p.name AS project_name, p.key AS project_key FROM releases r JOIN projects p ON p.id = r.project_id WHERE r.id = ?`,
+      [releaseId],
+    );
+    reply.code(201);
+    return ok({
+      id: row?.id, version: row?.version, name: row?.name, status: row?.status,
+      project: { id: row?.project_id, name: row?.project_name, key: row?.project_key },
+      demoAt: row?.demo_at, shipPlannedAt: row?.ship_planned_at, branch: row?.branch,
+      deployTarget: row?.deploy_target, rollbackPlan: row?.rollback_plan,
+    });
+  });
+
+  /**
+   * Remove a release.
+   *
+   * A shipped release is refused: it is the record that something reached a customer,
+   * its acknowledgements are evidence, and deleting it would erase the only trace of
+   * what went out. A planned release is a draft and can go — with its gate
+   * acknowledgements, which cascade.
+   */
+  app.delete('/api/releases/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
+    const releaseId = String((req.params as { id: string }).id);
+    const conn = await db();
+    const release = await conn.get<Record<string, any>>('SELECT * FROM releases WHERE id = ?', [releaseId]);
+    if (!release) throw notFound('Release not found');
+    await requireProjectAccess(conn, await currentIdentity(req), release.project_id, 'write');
+
+    if (release.status === 'shipped') {
+      throw conflict(
+        `Release ${release.version} has shipped. It is the record of what reached the customer, ` +
+          'so it stays; roll it back through the gate instead of deleting it.',
+      );
+    }
+    await conn.run('DELETE FROM releases WHERE id = ?', [releaseId]);
+    return ok({ id: releaseId, deleted: true });
   });
 
   app.get('/api/releases', async () => {

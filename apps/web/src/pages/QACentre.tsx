@@ -8,10 +8,167 @@ import { relTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
 import { MutationFailure, QueryFailure } from '../components/QueryFailure';
 import { useMutationFailure, useQueryState } from '../lib/query-state';
-import { Badge, Button, Card, Input, SectionHeader, Segmented, Select, Skeleton } from '../components/ui';
+import { Badge, Button, Card, Field, Input, Modal, SectionHeader, Segmented, Select, Skeleton, Textarea } from '../components/ui';
+import { ApiFailure } from '../components/ApiFailure';
 
 const SEV_TONE: Record<string, string> = { p0: 'rose', p1: 'rose', p2: 'amber', p3: 'sky', p4: 'neutral' };
 const STATUS_TONE: Record<string, string> = { open: 'amber', triaged: 'sky', in_progress: 'iris', fixed: 'mint', verified: 'mint', wont_fix: 'neutral', duplicate: 'neutral' };
+
+/**
+ * One report, with the verification chain attached.
+ *
+ * The four states are a sequence, not a set of labels: reported → triaged → fixed →
+ * verified. The only status the ship gate trusts is the last one, and the server now
+ * refuses it unless the report was fixed first and carries evidence. This row explains
+ * that where the reader is standing instead of in a policy card at the bottom of the
+ * page, and it names the missing half when a verification is refused.
+ */
+function ReportRow({
+  report,
+  onUpdate,
+  pending,
+}: {
+  report: {
+    id: string; title: string; kind: string; severity: string; status: string;
+    project: { name: string; key: string }; reporter: string | null; assignee: string | null;
+    reproduction: string; evidenceUrl: string; submittedAt: string; dueAt: string | null;
+    overdue: boolean;
+  };
+  onUpdate: (patch: Record<string, unknown>) => void;
+  pending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [evidence, setEvidence] = useState(report.evidenceUrl ?? '');
+  const [error, setError] = useState<unknown>(null);
+
+  const saveEvidence = async () => {
+    setError(null);
+    try {
+      await api.updateQA(report.id, { evidenceUrl: evidence.trim() });
+      onUpdate({}); /* invalidate */
+    } catch (e) {
+      setError(e);
+    }
+  };
+
+  const hasEvidence = Boolean(report.evidenceUrl?.trim());
+  const closed = ['verified', 'wont_fix', 'duplicate'].includes(report.status);
+
+  return (
+    <div className="px-4 py-2.5 transition-colors hover:bg-ink-800/30">
+      <div className="flex items-start gap-2.5">
+        <Badge tone={SEV_TONE[report.severity]} mono>{report.severity}</Badge>
+        <div className="min-w-0 flex-1">
+          <button onClick={() => setOpen((v) => !v)} className="block w-full text-left">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-[9px] text-mist-500">{report.project.key}</span>
+              <p className="text-[11.5px] font-medium text-mist-200">{report.title}</p>
+              {report.overdue && <Badge tone="amber"><Icons.Clock size={8} /> 12h missed</Badge>}
+            </div>
+            <p className="mt-0.5 truncate text-[10px] text-mist-500">
+              {report.reproduction || 'No reproduction steps recorded.'}
+            </p>
+          </button>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[9.5px] text-mist-500">
+            <Badge tone="outline">{report.kind}</Badge>
+            <span>reported {relTime(report.submittedAt)} by {report.reporter ?? 'QA'}</span>
+            {report.dueAt && <span>· due {shortDate(report.dueAt)}</span>}
+            {report.assignee && <span>· {report.assignee.split(' ')[0]}</span>}
+            {hasEvidence
+              ? <span className="flex items-center gap-0.5 text-sky-400"><Icons.Paperclip size={8} /> evidence attached</span>
+              : <span className="text-mist-500/70">no evidence</span>}
+            <button
+              onClick={() => setOpen((v) => !v)}
+              className="ml-1 rounded px-1 text-[9.5px] text-mist-500 underline-offset-2 hover:text-gold-300 hover:underline"
+            >
+              {open ? 'hide detail' : 'detail & evidence'}
+            </button>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Badge tone={STATUS_TONE[report.status] ?? 'neutral'}>{report.status.replace('_', ' ')}</Badge>
+          {!closed && (
+            <>
+              {report.status === 'open' && (
+                <Button size="xs" variant="ghost" disabled={pending} onClick={() => onUpdate({ status: 'triaged' })}>
+                  Triage
+                </Button>
+              )}
+              {(report.status === 'open' || report.status === 'triaged' || report.status === 'in_progress') && (
+                <Button size="xs" variant="secondary" disabled={pending} onClick={() => onUpdate({ status: 'fixed' })}>
+                  Mark fixed
+                </Button>
+              )}
+              {report.status === 'fixed' && (
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  disabled={pending || !hasEvidence}
+                  title={hasEvidence ? 'Verify against the attached evidence' : 'Attach evidence first — verification without proof is not verification'}
+                  onClick={() => onUpdate({ status: 'verified' })}
+                >
+                  Verify
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {report.status === 'fixed' && !hasEvidence && (
+        <p className="mt-1.5 rounded border border-amber-500/25 bg-amber-500/[0.06] px-2 py-1 text-[10px] leading-relaxed text-amber-300/90">
+          Verification is blocked: this report has no evidence. Attach a test run, screenshot or PR link below —
+          that is what “verified” will mean when the ship gate reads it.
+        </p>
+      )}
+
+      {open && (
+        <div className="mt-2 space-y-2 rounded-lg border border-ink-700 bg-ink-850/50 p-2.5">
+          <div>
+            <p className="text-[9.5px] font-semibold uppercase tracking-wider text-mist-500">Reproduction</p>
+            <p className="mt-0.5 whitespace-pre-wrap text-[10.5px] leading-relaxed text-mist-300">
+              {report.reproduction || 'Not recorded. A report without a reproduction is a rumour.'}
+            </p>
+          </div>
+          <Field
+            label="Evidence"
+            hint="A URL to the failing test run, the screenshot, the PR or the deploy. Required before verification."
+          >
+            {({ id }) => (
+              <div className="flex gap-1.5">
+                <Input
+                  id={id}
+                  value={evidence}
+                  placeholder="https://…"
+                  onChange={(e) => setEvidence(e.target.value)}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={evidence.trim() === (report.evidenceUrl ?? '')}
+                  onClick={() => void saveEvidence()}
+                >
+                  Save
+                </Button>
+              </div>
+            )}
+          </Field>
+          {report.evidenceUrl && (
+            <a
+              href={report.evidenceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] text-sky-400 hover:underline"
+            >
+              <Icons.ExternalLink size={9} /> open the attached evidence
+            </a>
+          )}
+          {error !== null && <ApiFailure error={error} what="Could not save that evidence." />}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function QACentre() {
   const qc = useQueryClient();
@@ -55,7 +212,16 @@ export default function QACentre() {
         right={
           <>
             <Segmented value={status} onChange={setStatus} options={[{ value: 'all', label: 'All' }, { value: 'open', label: 'Open' }, { value: 'verified', label: 'Verified' }]} />
-            <Button variant="primary" size="md" icon="Plus" onClick={() => setShowNew(true)}>New report</Button>
+            <Button
+              variant="primary"
+              size="md"
+              icon="Plus"
+              disabled={!meta || meta.projects.length === 0}
+              title={meta && meta.projects.length === 0 ? 'A report belongs to a project — create one first.' : undefined}
+              onClick={() => setShowNew(true)}
+            >
+              New report
+            </Button>
           </>
         }
       />
@@ -80,41 +246,60 @@ export default function QACentre() {
         </Card>
       </div>
 
+      {data.length === 0 && (
+        <div className="px-5 pt-4">
+          <Card className="p-6">
+            <div className="mx-auto max-w-[52ch] text-center">
+              <span className="mx-auto grid size-11 place-items-center rounded-xl border border-gold-600/30 bg-gold-500/[0.08] text-gold-300">
+                <Icons.ShieldCheck size={18} />
+              </span>
+              {meta && meta.projects.length === 0 ? (
+                <>
+                  <p className="mt-3 text-[14px] font-semibold text-white">A QA report belongs to a project</p>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                    Create a project first. Reports are ranked per project, and the ship gate counts the
+                    open P0s of the project it is releasing.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-3 text-[14px] font-semibold text-white">No QA reports yet</p>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                    Filing one starts a 12-hour turnover clock. It then moves reported → triaged → fixed →
+                    verified, and only a verified report stops blocking a release.
+                  </p>
+                  <Button
+                    variant="primary"
+                    className="mt-4"
+                    icon="Plus"
+                    disabled={!meta || meta.projects.length === 0}
+                    onClick={() => setShowNew(true)}
+                  >
+                    File the first report
+                  </Button>
+                </>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
       <div className="px-5 pt-3">
         <Card className="overflow-hidden">
           <div className="divide-y divide-ink-700/50">
-            {filtered.map((q) => (
-              <div key={q.id} className="flex items-start gap-2.5 px-4 py-2.5 transition-colors hover:bg-ink-800/40">
-                <Badge tone={SEV_TONE[q.severity]} mono>{q.severity}</Badge>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-mono text-[9px] text-mist-500">{q.project.key}</span>
-                    <p className="text-[11.5px] font-medium text-mist-200">{q.title}</p>
-                    {q.overdue && <Badge tone="amber"><Icons.Clock size={8} /> 12h missed</Badge>}
-                  </div>
-                  <p className="mt-0.5 truncate text-[10px] text-mist-500">
-                    {q.reproduction || 'No reproduction steps recorded.'}
-                  </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[9.5px] text-mist-500">
-                    <Badge tone="outline">{q.kind}</Badge>
-                    <span>reported {relTime(q.submittedAt)} by {q.reporter ?? 'QA'}</span>
-                    {q.dueAt && <span>· due {shortDate(q.dueAt)}</span>}
-                    {q.assignee && <span>· {q.assignee.split(' ')[0]}</span>}
-                    {q.evidenceUrl && <span className="flex items-center gap-0.5 text-sky-400"><Icons.Paperclip size={8} /> evidence</span>}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Badge tone={STATUS_TONE[q.status] ?? 'neutral'}>{q.status.replace('_', ' ')}</Badge>
-                  {q.status !== 'verified' && (
-                    <>
-                      {q.status === 'open' && <Button size="xs" variant="ghost" onClick={() => update.mutate({ id: q.id, patch: { status: 'triaged' } })}>Triage</Button>}
-                      <Button size="xs" variant="secondary" disabled={update.isPending} onClick={() => update.mutate({ id: q.id, patch: { status: q.status === 'fixed' ? 'verified' : 'fixed' } })}>
-                        {q.status === 'fixed' ? 'Verify' : 'Fix'}
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
+            {filtered.map((row) => (
+              <ReportRow
+                key={row.id}
+                report={row}
+                pending={update.isPending}
+                onUpdate={(patch) => {
+                  if (Object.keys(patch).length === 0) {
+                    qc.invalidateQueries({ queryKey: ['qa'] });
+                    return;
+                  }
+                  update.mutate({ id: row.id, patch });
+                }}
+              />
             ))}
             {filtered.length === 0 && <p className="px-4 py-10 text-center text-[11.5px] text-mist-500">No reports in this view.</p>}
           </div>
@@ -126,9 +311,9 @@ export default function QACentre() {
           <SectionHeader title="QA contract" subtitle="What the delivery board requires from every QA pass" />
           <div className="mt-3 grid gap-2 md:grid-cols-3">
             {[
-              ['12-hour report turnover', 'A report lands within 12 hours of the QA pass. The clock starts on submission and is audited.'],
+              ['12-hour report turnover', 'A report lands within 12 hours of the QA pass. The clock starts on submission and is audited against the record.'],
               ['Per-module and per-milestone', 'Both module turnover (24h) and milestone turnover (7d) require recorded test evidence, not a verbal OK.'],
-              ['Verification is separate', 'Status moves open → triaged → fixed → verified. Only a verified report stops blocking the ship gate.'],
+              ['Verification is a cross-check', 'Reported → triaged → fixed → verified. “Verified” needs the report to be fixed first and to carry evidence — a test run, a screenshot, a PR or a deploy link. The server refuses it otherwise, so the ship gate never trusts a self-certified fix.'],
             ].map(([t, b]) => (
               <div key={t} className="rounded-lg border border-ink-700 bg-ink-850/50 p-2.5">
                 <p className="text-[11px] font-medium text-mist-200">{t}</p>

@@ -293,34 +293,17 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
             <span className="flex-1 text-left">Search…</span>
             <Kbd>⌘K</Kbd>
           </button>
-          {meta && (
-            <div className="mt-2 flex items-center gap-2 rounded-lg px-1.5 py-1.5">
-              <Avatar
-                name={session?.user.name ?? meta.currentUser.name}
-                initials={meta.currentUser.initials}
-                color={meta.currentUser.color}
-                size={26}
-              />
-              <div className="min-w-0 flex-1 leading-tight">
-                <p className="truncate text-[11.5px] font-medium text-mist-200">
-                  {session?.user.name ?? meta.currentUser.name}
-                </p>
-                <p className="truncate text-[10px] text-mist-500">
-                  {session?.user.email ?? meta.currentUser.title}
-                </p>
-              </div>
-              {/*
-                No sign-out control.
+          {/*
+            No identity block.
 
-                There was one, and it called `auth.logout()` then reloaded. With no
-                session, "sign out" cannot mean anything: there is nothing to end,
-                and the reload would return to the same dashboard. A control that
-                does nothing is worse than an absent one — it implies a security
-                boundary that does not exist, and someone will trust it.
-              */}
-              <Badge tone="iris" className="shrink-0">{session?.user.role ?? meta.currentUser.role}</Badge>
-            </div>
-          )}
+            There used to be a card here with an avatar, a name and an email —
+            "Owner" and "owner@localhost" on a fresh workspace. It was not a
+            profile: the product has no sign-in, no accounts to switch and no
+            settings behind it, so the block was decoration shaped like a control,
+            and the address on it was an internal placeholder shown to a person who
+            reasonably read it as a broken sign-in. The header already says who the
+            workspace operates as, where it is fact rather than furniture.
+          */}
         </div>
       </aside>
 
@@ -426,12 +409,16 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
                 {metaQuery.isError ? 'API unreachable' : metaQuery.isPending ? 'Connecting…' : 'API live'}
               </span>
             </div>
-            {meta && (
-              <div className="flex items-center gap-1.5 rounded-lg border border-ink-600 bg-ink-850 py-0.5 pl-0.5 pr-2">
-                <Avatar name={meta.currentUser.name} initials={meta.currentUser.initials} color={meta.currentUser.color} size={22} />
-                <span className="hidden text-[11px] font-medium text-mist-300 sm:inline">{meta.currentUser.name.split(' ')[0]}</span>
-              </div>
-            )}
+            {/*
+              No account chip either.
+
+              It showed the seeded operator's first name — "Owner" on a fresh
+              install — beside an avatar, on every screen. There are no accounts to
+              switch and no profile behind it, so it read as a signed-in user that
+              the reader could not identify, which is exactly the confusion a
+              placeholder name creates. The `API live` badge next to it is the only
+              status this header needs to carry.
+            */}
           </div>
         </header>
 

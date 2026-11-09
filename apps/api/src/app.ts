@@ -106,13 +106,17 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     );
   }
 
-  if (bootstrap?.created) {
+  if (bootstrap?.created || bootstrap?.boardCreated) {
     // eslint-disable-next-line no-console
     console.info(
       JSON.stringify({
         level: 30,
-        msg: `created the operator (${bootstrap.userId}) and no other records; ` +
-          'clients, projects and tasks are yours to enter or import',
+        msg:
+          (bootstrap.created ? `created the operator (${bootstrap.userId})` : 'operator already existed') +
+          (bootstrap.boardCreated
+            ? '; created an empty Studio board so a task has somewhere to go'
+            : '') +
+          '. No demo content: clients, projects, deals and tasks are yours to enter or import',
       }),
     );
   }

@@ -1,5 +1,6 @@
 /** Project detail — phase spine, turnover gates, ship gate, edge-case ledger. */
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icons } from '../components/icons';
 import { api } from '../lib/api';
@@ -8,7 +9,8 @@ import { clockLabel, inr, relTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
 import { MutationFailure, QueryFailure } from '../components/QueryFailure';
 import { useMutationFailure, useQueryState } from '../lib/query-state';
-import { Avatar, Badge, Button, Card, HEALTH_TONE, Progress, Ring, SectionHeader, Skeleton, Tooltip } from '../components/ui';
+import { Avatar, Badge, Button, Card, HEALTH_TONE, Modal, Progress, Ring, SectionHeader, Skeleton, Tooltip } from '../components/ui';
+import { ApiFailure } from '../components/ApiFailure';
 
 const PHASE_STATUS_TONE: Record<string, string> = { done: 'mint', active: 'iris', blocked: 'rose', locked: 'neutral' };
 
@@ -27,6 +29,25 @@ export default function ProjectDetail() {
    */
   const projectQuery = useQuery({ queryKey: ['project', id ?? ''], queryFn: () => api.project(id ?? '') });
   const q = useQueryState(projectQuery);
+
+  const navigate = useNavigate();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  /*
+   * Removing a project is a genuine operation with a genuine refusal. The server
+   * declines while it has a shipped release — that is the record of what reached the
+   * customer — and reports exactly what the deletion takes with it otherwise (tasks,
+   * releases, QA reports, phases, all cascading in the database). Nothing is guessed
+   * in the browser: the counts in the answer are the rows that were removed.
+   */
+  const remove = useMutation({
+    mutationFn: () => api.deleteProject(p.id),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['projects'] });
+      await qc.invalidateQueries({ queryKey: ['dashboard'] });
+      navigate('/projects');
+    },
+  });
 
   const phaseError = useMutationFailure();
   const updatePhase = useMutation({
@@ -80,9 +101,40 @@ export default function ProjectDetail() {
             <Badge tone="outline" mono>{p.branch}</Badge>
             <Badge tone="outline">{p.deployTarget}</Badge>
             {p.owner && <span className="flex items-center gap-1.5 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1"><Avatar {...p.owner} size={16} /><span className="text-[11px] text-mist-300">{p.owner.name}</span></span>}
+            <Button size="sm" variant="ghost" icon="Ban" className="text-rose-300 hover:text-rose-200"
+              onClick={() => { remove.reset(); setConfirmDelete(true); }}>
+              Delete
+            </Button>
           </>
         }
       />
+
+      <Modal
+        open={confirmDelete}
+        icon="Ban"
+        title={`Delete ${p.name}?`}
+        subtitle="This removes the project and everything hanging off it — tasks, phases, releases, QA reports and the edge-case ledger. It cannot be undone."
+        onClose={() => setConfirmDelete(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmDelete(false)}>Keep it</Button>
+            <Button variant="danger" icon="Ban" loading={remove.isPending} onClick={() => remove.mutate()}>
+              Delete project
+            </Button>
+          </>
+        }
+      >
+        {remove.isError ? (
+          <ApiFailure error={remove.error} what="The server refused this deletion." />
+        ) : (
+          <div className="space-y-2">
+            <p className="text-[12px] leading-relaxed text-mist-400">
+              What goes with it: {p.taskCount} task(s), {p.phases.length} phase(s). Ship-gate evidence on the
+              project is removed too, so a project with a shipped release is refused rather than erased.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       {/* top metrics */}
       <div className="grid grid-cols-2 gap-2.5 px-5 pt-4 lg:grid-cols-5">

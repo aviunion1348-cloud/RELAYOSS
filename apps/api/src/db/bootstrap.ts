@@ -29,6 +29,7 @@
  * table is the only state it acts on.
  */
 import type { Db } from './index.ts';
+import { ensureScaffolding } from './scaffolding.ts';
 
 export type BootstrapResult = {
   /** True when this call created the operator; false when one already existed. */
@@ -36,6 +37,8 @@ export type BootstrapResult = {
   userId: string;
   name: string;
   email: string;
+  /** True when this call created the default board (an installation with none). */
+  boardCreated: boolean;
 };
 
 /** What the operator is called, as configured. Split out so tests can read it. */
@@ -67,7 +70,10 @@ export async function ensureOperator(db: Db): Promise<BootstrapResult> {
   const existing = await db.get<{ c: number }>('SELECT COUNT(*) AS c FROM users');
   if (Number(existing?.c ?? 0) > 0) {
     const identity = operatorIdentityFromEnv();
-    return { created: false, userId: identity.userId, name: identity.name, email: identity.email };
+    return {
+      created: false, userId: identity.userId, name: identity.name, email: identity.email,
+      boardCreated: (await ensureScaffolding(db)).boardCreated,
+    };
   }
 
   const { userId, name, email } = operatorIdentityFromEnv();
@@ -86,5 +92,6 @@ export async function ensureOperator(db: Db): Promise<BootstrapResult> {
     [userId, finalEmail, name, '', 'admin', '#6366f1', initialsOf(name), 32, 0, 0, '[]'],
   );
 
-  return { created: true, userId, name, email: finalEmail };
+  return { created: true, userId, name, email: finalEmail, boardCreated: (await ensureScaffolding(db)).boardCreated };
 }
+

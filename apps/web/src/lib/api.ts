@@ -370,18 +370,35 @@ export const api = {
   resolveTimer: (id: string, outcome: string, note?: string) =>
     request(`/clocks/timers/${id}/resolve`, { method: 'POST', body: JSON.stringify({ outcome, note }) }),
   projects: () => request<ProjectSummary[]>('/projects'),
+  createProject: (payload: Record<string, unknown>) =>
+    request<{ id: string; key: string; name: string }>('/projects', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteProject: (id: string) =>
+    request<{ id: string; removed: Record<string, number> }>(`/projects/${id}`, { method: 'DELETE' }),
   project: (id: string) => request<ProjectDetail>(`/projects/${id}`),
   updatePhase: (projectId: string, phaseRowId: string, patch: Record<string, unknown>) =>
     request(`/projects/${projectId}/phases/${phaseRowId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   pipeline: () => request<PipelineData>('/pipeline'),
+  createDeal: (payload: Record<string, unknown>) =>
+    request<{ id: string }>('/deals', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteDeal: (id: string) => request<{ id: string }>(`/deals/${id}`, { method: 'DELETE' }),
   updateDeal: (id: string, patch: Record<string, unknown>) =>
     request(`/deals/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   clients: () => request<ClientSummary[]>('/clients'),
+  createClient: (payload: Record<string, unknown>) =>
+    request<ClientSummary>('/clients', { method: 'POST', body: JSON.stringify(payload) }),
   partners: () => request<Partner[]>('/partners'),
+  createPartner: (payload: Record<string, unknown>) =>
+    request<Partner>('/partners', { method: 'POST', body: JSON.stringify(payload) }),
+  deletePartner: (id: string) => request<{ id: string }>(`/partners/${id}`, { method: 'DELETE' }),
   qa: (params: { projectId?: string; status?: string } = {}) => request<QAReport[]>(`/qa${qs(params)}`),
   createQA: (payload: Record<string, unknown>) => request<{ id: string }>('/qa', { method: 'POST', body: JSON.stringify(payload) }),
   updateQA: (id: string, patch: Record<string, unknown>) => request(`/qa/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   releases: () => request<Release[]>('/releases'),
+  createRelease: (payload: Record<string, unknown>) =>
+    request<Release>('/releases', { method: 'POST', body: JSON.stringify(payload) }),
+  updateRelease: (id: string, patch: Record<string, unknown>) =>
+    request<Release>(`/releases/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteRelease: (id: string) => request<{ id: string }>(`/releases/${id}`, { method: 'DELETE' }),
   releaseGate: (id: string) => request<ShipGate>(`/releases/${id}/gate`),
   /*
    * The change feed: one integer that says whether anything was written.

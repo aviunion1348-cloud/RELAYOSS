@@ -12,7 +12,11 @@ import { inr, relTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
 import { MutationFailure, QueryFailure } from '../components/QueryFailure';
 import { useMutationFailure, useQueryState } from '../lib/query-state';
-import { Avatar, Badge, Button, Card, Dot, Empty, Progress, SectionHeader, Segmented, Skeleton, Tooltip } from '../components/ui';
+import {
+  Avatar, Badge, Button, Card, Dot, Empty, Field, Input, Modal, Progress, SectionHeader, Segmented,
+  Select, Skeleton, Textarea, Tooltip,
+} from '../components/ui';
+import { ApiFailure } from '../components/ApiFailure';
 import type { Deal } from '../types';
 
 const PHASE_TONE: Record<string, string> = {
@@ -25,6 +29,34 @@ export default function Pipeline() {
   const q = useQueryState(pipeline);
   const [view, setView] = useState<'board' | 'table'>('board');
   const [selected, setSelected] = useState<Deal | null>(null);
+  const clientsQuery = useQuery({ queryKey: ['clients'], queryFn: api.clients });
+  const clients = clientsQuery.data ?? [];
+  const [draft, setDraft] = useState<{
+    clientId: string; title: string; valueRupees: string; stageKey: string; probability: string; nextStep: string;
+  } | null>(null);
+
+  /*
+   * A deal starts at the first stage of the pipeline that is not "closed", because a
+   * deal created at a later gate would claim a conversation that has not happened. The
+   * form still lets the reader place it deliberately.
+   */
+  const firstStage = (key: string | undefined) => key ?? 'inbound';
+
+  const create = useMutation({
+    mutationFn: (d: NonNullable<typeof draft>) => api.createDeal({
+      clientId: d.clientId,
+      title: d.title.trim(),
+      valueCents: Math.max(0, Math.round((Number(d.valueRupees) || 0) * 100)),
+      stageKey: d.stageKey,
+      probability: Math.min(100, Math.max(0, Number(d.probability) || 0)),
+      nextStep: d.nextStep.trim(),
+    }),
+    onSuccess: () => {
+      setDraft(null);
+      void qc.invalidateQueries({ queryKey: ['pipeline'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
 
   const moveError = useMutationFailure();
   const move = useMutation({
@@ -70,8 +102,40 @@ export default function Pipeline() {
         eyebrow={<><Icons.GitBranch size={11} /> Revenue pipeline</>}
         title="Consultation → Kickoff"
         subtitle="Every deal moves through the same twelve gates. The clocks start the moment a real commitment is made — a consultation booked, a plan sent, a revision requested."
-        right={<Segmented value={view} onChange={setView} options={[{ value: 'board', label: 'Board', icon: 'Columns3' }, { value: 'table', label: 'Table', icon: 'List' }]} />}
+        right={
+          <>
+            <Segmented value={view} onChange={setView} options={[{ value: 'board', label: 'Board', icon: 'Columns3' }, { value: 'table', label: 'Table', icon: 'List' }]} />
+            <Button
+              variant="primary"
+              size="sm"
+              icon="Plus"
+              disabled={clients.length === 0}
+              onClick={() => { create.reset(); setDraft({ clientId: clients[0]?.id ?? '', title: '', valueRupees: '', stageKey: firstStage(data.columns[0]?.key), probability: '20', nextStep: '' }); }}
+            >
+              New deal
+            </Button>
+          </>
+        }
       />
+
+      {/*
+        How the board actually works, in three sentences.
+
+        The columns are a contract, not a guess: each one states what has to be true to
+        enter it, what has to be true to leave, and the turnaround that was promised.
+        A deal left in a column past its SLA is the thing this screen exists to show.
+      */}
+      <div className="px-5 pt-4">
+        <Card className="p-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10.5px] text-mist-500">
+            <span className="flex items-center gap-1.5 font-medium text-mist-300"><Icons.Info size={11} className="text-gold-400" /> How this board works</span>
+            <span><span className="text-mist-300">1.</span> Add a deal against a client</span>
+            <span><span className="text-mist-300">2.</span> Move it right as each gate is cleared</span>
+            <span><span className="text-mist-300">3.</span> Past the promised days, it turns amber</span>
+            <span><span className="text-mist-300">4.</span> Won work becomes a project</span>
+          </div>
+        </Card>
+      </div>
 
       <div className="grid grid-cols-2 gap-2.5 px-5 pt-4 lg:grid-cols-5">
         <Card className="p-3.5">
@@ -100,6 +164,43 @@ export default function Pipeline() {
           <p className="mt-1 text-[10.5px] text-mist-500">revenue already contracted</p>
         </Card>
       </div>
+
+      {data.deals.length === 0 && (
+        <div className="px-5 pt-4">
+          <Card className="p-6">
+            <div className="mx-auto max-w-[50ch] text-center">
+              <span className="mx-auto grid size-11 place-items-center rounded-xl border border-gold-600/30 bg-gold-500/[0.08] text-gold-300">
+                <Icons.GitBranch size={18} />
+              </span>
+              {clients.length === 0 ? (
+                <>
+                  <p className="mt-3 text-[14px] font-semibold text-white">A deal needs a client</p>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                    Add a client first — a deal is a conversation with one, and every column below
+                    measures how long that conversation has been waiting.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-3 text-[14px] font-semibold text-white">No deals in the pipeline</p>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                    Add the first one. It lands in the earliest stage; each move to the right records a
+                    timestamp and starts the turnaround clock for that gate.
+                  </p>
+                  <Button
+                    variant="primary"
+                    className="mt-4"
+                    icon="Plus"
+                    onClick={() => { create.reset(); setDraft({ clientId: clients[0]?.id ?? '', title: '', valueRupees: '', stageKey: firstStage(data.columns[0]?.key), probability: '20', nextStep: '' }); }}
+                  >
+                    Add the first deal
+                  </Button>
+                </>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
 
       {view === 'board' ? (
         <div className="mt-4 overflow-x-auto px-3">
@@ -216,21 +317,130 @@ export default function Pipeline() {
             qc.invalidateQueries({ queryKey: ['pipeline'] });
             setSelected(null);
           }}
+          onDelete={async () => {
+            await api.deleteDeal(selected.id);
+            await qc.invalidateQueries({ queryKey: ['pipeline'] });
+            await qc.invalidateQueries({ queryKey: ['dashboard'] });
+            setSelected(null);
+          }}
         />
       )}
+      {/* -------------------------------------------------------- create sheet */}
+      <Modal
+        open={draft !== null}
+        icon="GitBranch"
+        title="New deal"
+        subtitle="A deal is a conversation with a client. It starts in a stage, and every move to the right stamps a time and starts that gate's clock."
+        onClose={() => setDraft(null)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDraft(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              icon="Check"
+              loading={create.isPending}
+              disabled={!draft?.title.trim() || !draft?.clientId}
+              onClick={() => draft && create.mutate(draft)}
+            >
+              Add deal
+            </Button>
+          </>
+        }
+      >
+        {create.isError && (
+          <div className="mb-3"><ApiFailure error={create.error} what="Could not add this deal." /></div>
+        )}
+        {draft && (
+          <div className="space-y-3">
+            <Field label="Deal">
+              {({ id }) => (
+                <Input id={id} autoFocus value={draft.title} placeholder="Payments platform rebuild"
+                  onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+              )}
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Client">
+                {({ id }) => (
+                  <Select id={id} value={draft.clientId} onChange={(e) => setDraft({ ...draft, clientId: e.target.value })}>
+                    {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </Select>
+                )}
+              </Field>
+              <Field label="Stage">
+                {({ id }) => (
+                  <Select id={id} value={draft.stageKey} onChange={(e) => setDraft({ ...draft, stageKey: e.target.value })}>
+                    {data.columns.filter((c) => c.key !== 'closed').map((c) => (
+                      <option key={c.key} value={c.key}>{c.name}</option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Value" hint="₹">
+                {({ id }) => (
+                  <Input id={id} type="number" min={0} value={draft.valueRupees} placeholder="0"
+                    onChange={(e) => setDraft({ ...draft, valueRupees: e.target.value })} />
+                )}
+              </Field>
+              <Field label="Confidence" hint="% — 20 is a fair opening guess">
+                {({ id }) => (
+                  <Input id={id} type="number" min={0} max={100} value={draft.probability}
+                    onChange={(e) => setDraft({ ...draft, probability: e.target.value })} />
+                )}
+              </Field>
+            </div>
+            <Field label="Next step" hint="Optional now; the sheet asks for it every time it goes empty.">
+              {({ id }) => (
+                <Textarea id={id} rows={2} value={draft.nextStep} placeholder="Book the technical consultation"
+                  onChange={(e) => setDraft({ ...draft, nextStep: e.target.value })} />
+              )}
+            </Field>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
 
 function DealDrawer({
-  deal, columns, onClose, onMove,
+  deal, columns, onClose, onMove, onDelete,
 }: {
   deal: Deal;
   columns: Array<{ key: string; name: string; phase: string; slaDays: number; entryCriteria: string; exitCriteria: string; description: string }>;
   onClose: () => void;
   onMove: (stageKey: string) => void;
+  onDelete: () => Promise<void>;
 }) {
+  const qc = useQueryClient();
   const idx = columns.findIndex((c) => c.key === deal.stageKey);
+  /*
+   * The three numbers that change as a conversation progresses. They were read-only
+   * here, so a deal's value and its next step could only be set at creation — which is
+   * backwards: the value is discovered during the consultation, and the next step is
+   * the thing that changes every week.
+   */
+  const [valueRupees, setValueRupees] = useState(String(Math.round(deal.valueCents / 100)));
+  const [probability, setProbability] = useState(String(deal.probability));
+  const [nextStep, setNextStep] = useState(deal.nextStep ?? '');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const save = useMutation({
+    mutationFn: () => api.updateDeal(deal.id, {
+      valueCents: Math.max(0, Math.round((Number(valueRupees) || 0) * 100)),
+      probability: Math.min(100, Math.max(0, Number(probability) || 0)),
+      nextStep: nextStep.trim(),
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pipeline'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: () => onDelete(),
+    onError: () => undefined,
+  });
   return (
     <>
       <div className="fixed inset-0 z-40 bg-ink-950/65 backdrop-blur-[2px] animate-fade" onClick={onClose} />
@@ -269,11 +479,67 @@ function DealDrawer({
           </div>
 
           <div className="mt-4">
-            <SectionHeader title="Next step" subtitle="The single next action that moves this deal" />
-            <p className="mt-1.5 rounded-lg border border-ink-700 bg-ink-850/60 p-2.5 text-[11.5px] leading-relaxed text-mist-300">
-              {deal.nextStep || 'No next step recorded — that is itself a risk.'}
-            </p>
+            <SectionHeader title="Deal detail" subtitle="Value, confidence and the single next action — editable as the conversation moves" />
+            {(save.isError || remove.isError) && (
+              <div className="mt-2">
+                <ApiFailure error={save.error ?? remove.error} what="That change was refused." />
+              </div>
+            )}
+            {save.isSuccess && !save.isError && (
+              <p className="mt-1.5 text-[10px] text-mint-400">Saved.</p>
+            )}
+            <div className="mt-2 grid grid-cols-[1fr_90px] gap-2">
+              <Field label="Value" hint="₹ — what this is worth if it closes">
+                {({ id }) => (
+                  <Input id={id} type="number" min={0} value={valueRupees}
+                    onChange={(e) => setValueRupees(e.target.value)} />
+                )}
+              </Field>
+              <Field label="Confidence" hint="%">
+                {({ id }) => (
+                  <Input id={id} type="number" min={0} max={100} value={probability}
+                    onChange={(e) => setProbability(e.target.value)} />
+                )}
+              </Field>
+            </div>
+            <div className="mt-2">
+              <Field label="Next step" hint={nextStep.trim() ? undefined : 'Nothing recorded is itself a risk — say what happens next.'}>
+                {({ id }) => (
+                  <Textarea id={id} rows={2} value={nextStep} placeholder="Send the revised SOW by Friday"
+                    onChange={(e) => setNextStep(e.target.value)} />
+                )}
+              </Field>
+            </div>
+            <div className="mt-2 flex items-center gap-1.5">
+              <Button size="sm" variant="primary" icon="Check" loading={save.isPending} onClick={() => save.mutate()}>
+                Save changes
+              </Button>
+              <Button size="sm" variant="ghost" icon="Ban" className="ml-auto text-rose-300 hover:text-rose-200"
+                onClick={() => setConfirmDelete(true)}>
+                Delete deal
+              </Button>
+            </div>
           </div>
+
+          <Modal
+            open={confirmDelete}
+            icon="Ban"
+            title="Delete this deal?"
+            subtitle="A deal that has produced a project cannot be deleted — that link is the record of where the work came from. Lost or withdrawn deals can go."
+            onClose={() => setConfirmDelete(false)}
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setConfirmDelete(false)}>Keep it</Button>
+                <Button variant="danger" icon="Ban" loading={remove.isPending} onClick={() => remove.mutate()}>
+                  Delete deal
+                </Button>
+              </>
+            }
+          >
+            {remove.isError
+              ? <ApiFailure error={remove.error} what="The server refused this deletion." />
+              : <p className="text-[12px] leading-relaxed text-mist-400">{deal.title} — {deal.clientName}</p>}
+          </Modal>
 
           <div className="mt-4">
             <SectionHeader title="Move stage" subtitle="Server stamps the timestamp and starts any attached clock" />

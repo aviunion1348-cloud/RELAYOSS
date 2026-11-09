@@ -102,7 +102,30 @@ export async function createTask(db: Db, input: Record<string, any>, actorId: st
   const board = await db.get<{ id: string; project_id: string | null }>('SELECT id, project_id FROM boards WHERE id = ?', [boardId]);
   if (!board) throw notFound('Board not found');
 
-  const columnId = input.columnId ?? `${boardId}_${input.status ?? 'backlog'}`;
+  /*
+   * The column is looked up, never derived.
+   *
+   * This used to guess `${boardId}_${status}` — an id shape only the demo seed happens
+   * to produce. Any board built another way (a board created by the application itself,
+   * a restored database, a project board with its own ids) then failed the foreign key
+   * on `tasks.column_id` and surfaced as a 500 on "create the first task". The status is
+   * a stable key; resolving it through `(board_id, key)` is the lookup the schema
+   * actually supports.
+   */
+  const desiredStatus = input.status ?? 'backlog';
+  let columnId = input.columnId as string | undefined;
+  if (!columnId) {
+    const column = await db.get<{ id: string }>(
+      'SELECT id FROM columns WHERE board_id = ? AND key = ?',
+      [boardId, desiredStatus],
+    );
+    if (!column) {
+      throw badRequest(
+        `Board "${boardId}" has no "${desiredStatus}" column. Supply columnId, or pick one of the board's own statuses.`,
+      );
+    }
+    columnId = column.id;
+  }
   const projectId = input.projectId ?? board.project_id ?? null;
   const priority = input.priority ?? 'medium';
 

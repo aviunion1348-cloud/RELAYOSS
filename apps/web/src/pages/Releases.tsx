@@ -1,5 +1,17 @@
-/** Releases — demo → approval → ship, with the exec-summary clock enforced. */
-import { useQuery } from '@tanstack/react-query';
+/**
+ * Releases — demo → approval → ship, with the exec-summary clock enforced.
+ *
+ * The screen could show a release and refuse to ship it; it could not create one and
+ * could not remove a draft. On an empty workspace it therefore showed nothing at all
+ * with no way to begin, which made the whole gate unreachable — the checks were real
+ * and there was nothing to run them against.
+ *
+ * Every release on this page is now editable in the two ways that matter: advance it
+ * along the lifecycle (forward only — the server refuses a rewind and this UI does not
+ * offer one), and delete a draft. A shipped release stays, because it is the record of
+ * what reached a customer.
+ */
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Icons } from '../components/icons';
 import { api } from '../lib/api';
@@ -8,7 +20,10 @@ import { daysBetween, dateTime, shortDate } from '../lib/format';
 import { PageHeader } from '../components/Shell';
 import { QueryFailure } from '../components/QueryFailure';
 import { useQueryState } from '../lib/query-state';
-import { Badge, Card, Progress, SectionHeader, Skeleton } from '../components/ui';
+import {
+  Badge, Button, Card, Field, Input, Modal, Progress, SectionHeader, Select, Skeleton, Textarea,
+} from '../components/ui';
+import { ApiFailure } from '../components/ApiFailure';
 
 const FLOW = ['planning', 'in_qa', 'demo_ready', 'demo_done', 'approved', 'shipped'];
 
@@ -86,9 +101,154 @@ function ShipGatePanel({ releaseId }: { releaseId: string }) {
   );
 }
 
+/**
+ * What can be done to one release, on the card itself.
+ *
+ * Advancing is a single explicit action rather than a free-choice dropdown: the
+ * lifecycle is forward-only, so offering every status would invite a selection the
+ * server is guaranteed to refuse. The button names the next step ("Mark demo done"),
+ * and when the server refuses — a demo that was never scheduled, an exec summary that
+ * is not 48 hours old — the refusal is printed here verbatim.
+ */
+function ReleaseActions({ release, onDelete }: {
+  release: { id: string; status: string; version: string };
+  onDelete: () => void;
+}) {
+  const qc = useQueryClient();
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [demoAt, setDemoAt] = useState('');
+  const [shipAt, setShipAt] = useState('');
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  const advance = useMutation({
+    mutationFn: (next: string) => api.updateRelease(release.id, { status: next }),
+    onSuccess: (_data, next) => {
+      setFeedback(`Moved to ${String(next).replace('_', ' ')}.`);
+      void qc.invalidateQueries({ queryKey: ['releases'] });
+      void qc.invalidateQueries({ queryKey: ['release-gate', release.id] });
+    },
+  });
+
+  const schedule = useMutation({
+    mutationFn: () => api.updateRelease(release.id, {
+      ...(demoAt ? { demoAt: new Date(demoAt).toISOString() } : {}),
+      ...(shipAt ? { shipPlannedAt: new Date(shipAt).toISOString() } : {}),
+    }),
+    onSuccess: () => {
+      setScheduleOpen(false);
+      setFeedback('Dates saved.');
+      void qc.invalidateQueries({ queryKey: ['releases'] });
+    },
+  });
+
+  const next = FLOW[FLOW.indexOf(release.status) + 1];
+  const label = (s: string) => s.replace(/_/g, ' ');
+
+  return (
+    <div className="mt-2.5 border-t border-ink-700/60 pt-2.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {next && (
+          <Button size="sm" variant="primary" icon="ArrowRight" loading={advance.isPending}
+            onClick={() => { setFeedback(null); advance.mutate(next); }}>
+            Mark {label(next)}
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" icon="Calendar" onClick={() => { setScheduleOpen(true); schedule.reset(); }}>
+          Schedule demo &amp; ship
+        </Button>
+        {release.status !== 'shipped' && (
+          <Button size="sm" variant="ghost" icon="Ban" onClick={onDelete} className="text-rose-300 hover:text-rose-200">
+            Delete
+          </Button>
+        )}
+        <span className="ml-auto text-[9.5px] text-mist-500">forward-only lifecycle</span>
+      </div>
+
+      {(advance.isError || schedule.isError) && (
+        <div className="mt-2">
+          <ApiFailure
+            error={advance.error ?? schedule.error}
+            what={`The server refused that change to ${release.version}.`}
+          />
+        </div>
+      )}
+      {feedback && !advance.isError && !schedule.isError && (
+        <p className="mt-1.5 text-[10px] text-mint-400">{feedback}</p>
+      )}
+
+      <Modal
+        open={scheduleOpen}
+        icon="Calendar"
+        title={`Schedule ${release.version}`}
+        subtitle="A demo must be scheduled before it can be marked done, and the ship date is what the 48-hour exec-summary rule measures against."
+        onClose={() => setScheduleOpen(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setScheduleOpen(false)}>Cancel</Button>
+            <Button variant="primary" icon="Check" loading={schedule.isPending}
+              disabled={!demoAt && !shipAt} onClick={() => schedule.mutate()}>
+              Save dates
+            </Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Demo date" hint="The client walkthrough.">
+            {({ id }) => <Input id={id} type="date" value={demoAt} onChange={(e) => setDemoAt(e.target.value)} />}
+          </Field>
+          <Field label="Planned ship date" hint="Exec summary must exist 48h before this.">
+            {({ id }) => <Input id={id} type="date" value={shipAt} onChange={(e) => setShipAt(e.target.value)} />}
+          </Field>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+type ReleaseDraft = {
+  projectId: string; version: string; name: string; branch: string;
+  deployTarget: string; demoAt: string; shipPlannedAt: string; rollbackPlan: string;
+};
+
+const emptyRelease = (projectId: string): ReleaseDraft => ({
+  projectId, version: '', name: '', branch: 'main', deployTarget: '',
+  demoAt: '', shipPlannedAt: '', rollbackPlan: '',
+});
+
 export default function Releases() {
+  const qc = useQueryClient();
   const releases = useQuery({ queryKey: ['releases'], queryFn: api.releases });
+  const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.projects });
   const q = useQueryState(releases);
+  const [draft, setDraft] = useState<ReleaseDraft | null>(null);
+  const [deleting, setDeleting] = useState<{ id: string; version: string } | null>(null);
+  const projects = projectsQuery.data ?? [];
+
+  const create = useMutation({
+    mutationFn: (d: ReleaseDraft) => api.createRelease({
+      projectId: d.projectId,
+      version: d.version.trim(),
+      name: d.name.trim(),
+      branch: d.branch.trim() || 'main',
+      deployTarget: d.deployTarget.trim(),
+      demoAt: d.demoAt ? new Date(d.demoAt).toISOString() : null,
+      shipPlannedAt: d.shipPlannedAt ? new Date(d.shipPlannedAt).toISOString() : null,
+      rollbackPlan: d.rollbackPlan,
+    }),
+    onSuccess: () => {
+      setDraft(null);
+      void qc.invalidateQueries({ queryKey: ['releases'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteRelease(id),
+    onSuccess: () => {
+      setDeleting(null);
+      void qc.invalidateQueries({ queryKey: ['releases'] });
+    },
+  });
 
   if (q.state === 'failed') return <QueryFailure error={q.error} what="the release calendar" retry={q.refetch} />;
   if (q.state !== 'ready') return <div className="p-5"><Skeleton className="h-8 w-48" /><Skeleton className="mt-4 h-64" /></div>;
@@ -104,7 +264,20 @@ export default function Releases() {
         eyebrow={<><Icons.Rocket size={11} /> Release management</>}
         title="Releases"
         subtitle="Demo within two weeks of kickoff, ship within five days of approval, and the executive summary published at least 48 hours before the proposed ship date. These are clocks, not aspirations."
-        right={<Badge tone="outline">{upcoming.length} in flight · {shipped.length} shipped</Badge>}
+        right={
+          <>
+            <Badge tone="outline">{upcoming.length} in flight · {shipped.length} shipped</Badge>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="Plus"
+              disabled={projects.length === 0}
+              onClick={() => { create.reset(); setDraft(emptyRelease(projects[0]?.id ?? '')); }}
+            >
+              New release
+            </Button>
+          </>
+        }
       />
 
       <div className="px-5 pt-4">
@@ -177,10 +350,44 @@ export default function Releases() {
                   </p>
                 )}
                 <ShipGatePanel releaseId={r.id} />
+                <ReleaseActions release={r} onDelete={() => { remove.reset(); setDeleting({ id: r.id, version: r.version }); }} />
               </Card>
             );
           })}
-          {upcoming.length === 0 && <p className="py-10 text-center text-[11.5px] text-mist-500">No releases in flight.</p>}
+          {upcoming.length === 0 && (
+            <Card className="p-6">
+              <div className="mx-auto max-w-[48ch] text-center">
+                <span className="mx-auto grid size-11 place-items-center rounded-xl border border-gold-600/30 bg-gold-500/[0.08] text-gold-300">
+                  <Icons.Rocket size={18} />
+                </span>
+                {projects.length === 0 ? (
+                  <>
+                    <p className="mt-3 text-[14px] font-semibold text-white">A release belongs to a project</p>
+                    <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                      Create a project first — the demo, the ship date and the gate are all tracked per
+                      project. Then come back and cut the first release.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-3 text-[14px] font-semibold text-white">No releases yet</p>
+                    <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                      A release starts at planning. Schedule the demo and the ship date, then move it
+                      along — the gate refuses to ship until the evidence is there.
+                    </p>
+                    <Button
+                      variant="primary"
+                      className="mt-4"
+                      icon="Plus"
+                      onClick={() => { create.reset(); setDraft(emptyRelease(projects[0]?.id ?? '')); }}
+                    >
+                      Cut your first release
+                    </Button>
+                  </>
+                )}
+              </div>
+            </Card>
+          )}
         </div>
 
         <Card className="mt-3 overflow-hidden">
@@ -237,6 +444,121 @@ export default function Releases() {
           </p>
         </Card>
       </div>
+
+      {/* ------------------------------------------------------- create sheet */}
+      <Modal
+        open={draft !== null}
+        icon="Rocket"
+        title="New release"
+        subtitle="It starts at planning — the lifecycle only moves forward, so nothing is created already-shipped."
+        onClose={() => setDraft(null)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDraft(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              icon="Check"
+              loading={create.isPending}
+              disabled={!draft?.version.trim() || !draft?.name.trim() || !draft?.projectId}
+              onClick={() => draft && create.mutate(draft)}
+            >
+              Create release
+            </Button>
+          </>
+        }
+      >
+        {create.isError && (
+          <div className="mb-3"><ApiFailure error={create.error} what="Could not create this release." /></div>
+        )}
+        {draft && (
+          <div className="space-y-3">
+            <Field label="Project">
+              {({ id }) => (
+                <Select id={id} value={draft.projectId} onChange={(e) => setDraft({ ...draft, projectId: e.target.value })}>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.key} · {p.name}</option>)}
+                </Select>
+              )}
+            </Field>
+            <div className="grid grid-cols-[110px_1fr] gap-3">
+              <Field label="Version" hint="per project">
+                {({ id }) => (
+                  <Input id={id} autoFocus value={draft.version} placeholder="v1.0" maxLength={40}
+                    onChange={(e) => setDraft({ ...draft, version: e.target.value })} />
+                )}
+              </Field>
+              <Field label="Name">
+                {({ id }) => (
+                  <Input id={id} value={draft.name} placeholder="First client demo"
+                    onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                )}
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Branch">
+                {({ id }) => (
+                  <Input id={id} value={draft.branch} onChange={(e) => setDraft({ ...draft, branch: e.target.value })} />
+                )}
+              </Field>
+              <Field label="Deploy target">
+                {({ id }) => (
+                  <Input id={id} value={draft.deployTarget} placeholder="AWS · ap-south-1"
+                    onChange={(e) => setDraft({ ...draft, deployTarget: e.target.value })} />
+                )}
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Demo date" hint="Optional now — required before 'demo done'.">
+                {({ id }) => (
+                  <Input id={id} type="date" value={draft.demoAt}
+                    onChange={(e) => setDraft({ ...draft, demoAt: e.target.value })} />
+                )}
+              </Field>
+              <Field label="Planned ship" hint="Exec summary 48h ahead of this.">
+                {({ id }) => (
+                  <Input id={id} type="date" value={draft.shipPlannedAt}
+                    onChange={(e) => setDraft({ ...draft, shipPlannedAt: e.target.value })} />
+                )}
+              </Field>
+            </div>
+            <Field label="Rollback plan" hint="What happens if this goes wrong in production.">
+              {({ id }) => (
+                <Textarea id={id} rows={2} value={draft.rollbackPlan}
+                  onChange={(e) => setDraft({ ...draft, rollbackPlan: e.target.value })} />
+              )}
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* ------------------------------------------------------- delete sheet */}
+      <Modal
+        open={deleting !== null}
+        icon="Ban"
+        title={`Delete ${deleting?.version ?? 'release'}?`}
+        subtitle="Only a release that has not shipped can be deleted. Its gate acknowledgements go with it; a shipped release stays as the record of what reached the customer."
+        onClose={() => setDeleting(null)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleting(null)}>Keep it</Button>
+            <Button
+              variant="danger"
+              icon="Ban"
+              loading={remove.isPending}
+              onClick={() => deleting && remove.mutate(deleting.id)}
+            >
+              Delete release
+            </Button>
+          </>
+        }
+      >
+        {remove.isError && <ApiFailure error={remove.error} what="The server refused this deletion." />}
+        {!remove.isError && (
+          <p className="text-[12px] leading-relaxed text-mist-400">
+            This removes the release record. Any acknowledgements recorded against it are removed too —
+            the database cascades them, there is no orphaned evidence left behind.
+          </p>
+        )}
+      </Modal>
     </div>
   );
 }
