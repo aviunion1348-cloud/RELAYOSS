@@ -15,7 +15,7 @@ import { config } from './config.ts';
 import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
 import { ensureOperator, type BootstrapResult } from './db/bootstrap.ts';
-import { resolveWebDist } from './lib/web-dist.ts';
+import { describeWebServing, resolveWebDist } from './lib/web-dist.ts';
 import { embeddedFile, embeddedIndex, hasEmbeddedSpa } from './lib/embedded-web.ts';
 import { registerRoutes } from './routes/index.ts';
 import { createOperatorAuth, registerOperatorHook, resolveOperator } from './auth/operator-middleware.ts';
@@ -420,7 +420,22 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
       const index = embeddedIndex();
       if (index) return reply.type('text/html').header('cache-control', 'no-cache').send(index.body);
     }
-    return reply.code(404).send({ error: { code: 'not_found', message: 'Build the web app first (npm run build).' } });
+    /*
+     * Nothing to serve, and the advice has to be accurate for the place this is running.
+     * On a workstation the build is simply missing. In a bundle it means the build ran
+     * without `scripts/embed-web-assets.mjs`, which is a build-order mistake rather than
+     * anything the reader did — saying "run npm run build" to someone who cannot open a
+     * terminal there is worse than saying nothing.
+     */
+    return reply.code(404).send({
+      error: {
+        code: 'not_found',
+        message:
+          'No built dashboard in this installation: no web build on disk and none embedded. ' +
+          'Run `npm run build:service`, which builds the web app and embeds it in the API.',
+        web: describeWebServing(notFoundDist),
+      },
+    });
   });
 
   /**

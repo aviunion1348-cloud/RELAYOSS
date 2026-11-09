@@ -18,6 +18,11 @@ import { WEB_ASSETS, WEB_ASSET_COUNT } from '../generated/web-assets.ts';
 
 export type EmbeddedAsset = { type: string; body: Buffer };
 
+/** How many files were compiled in. 0 means "no build was embedded", not "empty build". */
+export function embeddedFileCount(): number {
+  return WEB_ASSET_COUNT;
+}
+
 /** True when a built SPA was embedded at build time. */
 export function hasEmbeddedSpa(): boolean {
   return WEB_ASSET_COUNT > 0 && 'index.html' in WEB_ASSETS;

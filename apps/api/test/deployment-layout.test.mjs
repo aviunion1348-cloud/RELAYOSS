@@ -153,6 +153,16 @@ test(
         assert.ok(body.data ?? body.ok ?? body, `${endpoint} must carry a payload`);
       }
 
+      /*
+       * The deployment's own account of how it serves the dashboard: the one check a
+       * person can run against a live URL, with no build logs. `embedded` is the only
+       * correct answer in a bundle, and anything else explains a 404 at `/` on sight.
+       */
+      const health = await (await fetch(`http://127.0.0.1:${app.port}/api/health`)).json();
+      const web = health?.data?.web ?? health?.web;
+      assert.equal(web?.source, 'embedded', `health must report the embedded SPA, got ${JSON.stringify(web)}`);
+      assert.ok((web?.files ?? 0) > 1, 'the embedded build must report its file count');
+
       const deep = await fetch(`http://127.0.0.1:${app.port}/projects/anything`);
       assert.equal(deep.status, 200, 'a deep link must be the document too');
       assert.match(await deep.text(), /<!doctype html>/i);
@@ -200,6 +210,10 @@ test(
       assert.match(res.headers.get('content-type') ?? '', /application\/json/);
       const body = await res.json();
       assert.equal(body.error?.code, 'not_found');
+
+      /* The response names the cause instead of leaving it to guesswork. */
+      assert.match(body.error?.message ?? '', /build:service/);
+      assert.equal(body.error?.web?.source, 'none');
 
       /* The API is unaffected — which is exactly why this failure was hard to see. */
       const live = await fetch(`http://127.0.0.1:${app.port}/api/live`);
