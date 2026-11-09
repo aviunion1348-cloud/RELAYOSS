@@ -53,6 +53,26 @@ export default function Workload() {
         }
       />
 
+      {/*
+        The screen answers three questions, and it now says so. Everything below is the
+        evidence for them: who is over, what cannot be placed, and what the machine
+        decided to do next. Without this line the page reads as telemetry rather than a
+        thing you act on.
+      */}
+      <div className="px-5 pt-4">
+        <Card className="p-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10.5px] text-mist-500">
+            <span className="flex items-center gap-1.5 font-medium text-mist-300">
+              <Icons.Info size={11} className="text-gold-400" /> How to use this
+            </span>
+            <span><span className="text-mist-300">1.</span> Find the red or amber cells — that person is over their day</span>
+            <span><span className="text-mist-300">2.</span> Check “Needs a decision” for work that landed nowhere</span>
+            <span><span className="text-mist-300">3.</span> Click any row to open the task and rebalance or re-date it</span>
+            <span><span className="text-mist-300">4.</span> Re-read this page — the plan is recomputed, not saved</span>
+          </div>
+        </Card>
+      </div>
+
       <div className="grid grid-cols-2 gap-2.5 px-5 pt-4 lg:grid-cols-6">
         <Stat label="Scheduled" value={s.tasksScheduled} sub={`${s.totalHours}h of work`} tone="iris" />
         <Stat label="Utilisation" value={`${s.utilisation}%`} sub={`${s.horizonDays}d horizon`} tone={s.utilisation > 95 ? 'rose' : 'mint'} />
@@ -73,6 +93,24 @@ export default function Workload() {
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {data.items.length === 0 && data.unassigned.length === 0 && (
+        <div className="px-5 pt-4">
+          <Card className="p-6">
+            <div className="mx-auto max-w-[50ch] text-center">
+              <span className="mx-auto grid size-11 place-items-center rounded-xl border border-gold-600/30 bg-gold-500/[0.08] text-gold-300">
+                <Icons.GanttChartSquare size={18} />
+              </span>
+              <p className="mt-3 text-[14px] font-semibold text-white">Nothing to schedule yet</p>
+              <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                The planner schedules work that has an owner and an estimate. Add tasks on the
+                board with an estimate and an assignee, and they will appear here on the right
+                person's calendar — nothing is entered on this screen.
+              </p>
+            </div>
+          </Card>
         </div>
       )}
 
@@ -203,10 +241,21 @@ export default function Workload() {
         </Card>
       </div>
 
-      <div className="px-5 pt-3">
-        <Card className="p-4">
-          <SectionHeader title="How the plan is produced" subtitle="Reproducible, auditable, and safe to argue with" />
-          <div className="mt-3 grid gap-2 md:grid-cols-4">
+      {/*
+        Collapsed by default: the method is worth reading once, and it was sitting between
+        the reader and the plan on every visit. A <details> keeps it one click away with no
+        state to manage and no JavaScript to get wrong.
+      */}
+      <details className="px-5 pt-3">
+        <summary className="cursor-pointer list-none">
+          <Card className="flex items-center gap-2 p-3">
+            <Icons.ChevronRight size={12} className="text-mist-500" />
+            <p className="text-[11.5px] font-medium text-mist-300">How the plan is produced</p>
+            <p className="text-[10px] text-mist-500">— reproducible, auditable, safe to argue with</p>
+          </Card>
+        </summary>
+        <Card className="mt-2 p-4">
+          <div className="grid gap-2 md:grid-cols-4">
             {[
               { n: '01', t: 'Dependency graph', b: 'Task dependencies are topologically sorted to find the critical path and per-task slack. Cycles are detected and broken safely.' },
               { n: '02', t: 'Priority scoring', b: 'WSPT: priority weight × deadline urgency ÷ remaining effort, with blocked work demoted to 15%.' },
@@ -221,7 +270,7 @@ export default function Workload() {
             ))}
           </div>
         </Card>
-      </div>
+      </details>
 
       {openTask && <TaskDrawer taskId={openTask} onClose={() => setParams(new URLSearchParams())} />}
     </div>

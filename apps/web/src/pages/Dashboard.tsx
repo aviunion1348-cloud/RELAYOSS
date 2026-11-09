@@ -106,6 +106,55 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/*
+            A brand-new workspace, told what to do first.
+
+            The dashboard is the screen a new operator lands on, and with no data it
+            used to show a greeting, six zeros and two buttons into screens that were
+            themselves empty — accurate, and useless. This is the one place a new
+            installation should be able to learn the order the product expects: a client,
+            then a project, then work on the board, then the deals and releases that hang
+            off both.
+
+            It disappears the moment anything exists, so it can never become permanent
+            furniture or claim a step is done when it is not.
+          */}
+          {data.projects.length === 0 && k.openTasks === 0 && k.openDeals === 0 && (
+            <Card className="mt-5 overflow-hidden">
+              <div className="flex flex-wrap items-center gap-2 border-b border-ink-700/70 px-4 py-3">
+                <span className="grid size-6 place-items-center rounded-md border border-gold-600/35 bg-gold-500/10 text-gold-300">
+                  <Icons.Sparkles size={12} />
+                </span>
+                <p className="text-[12.5px] font-semibold text-white">Start here</p>
+                <p className="text-[10.5px] text-mist-500">
+                  Nothing has been entered yet. Five steps, in the order the product expects them.
+                </p>
+              </div>
+              <ol className="divide-y divide-ink-700/40">
+                {[
+                  { n: 1, title: 'Add a client', to: '/clients', body: 'The relationship every project, deal and invoice hangs from. Only a name is required.' },
+                  { n: 2, title: 'Create a project', to: '/projects', body: 'Gives you a board, a phase spine, a ship gate and a release timeline.' },
+                  { n: 3, title: 'Put work on the board', to: '/board', body: 'Tasks with an estimate and an owner are what the planner and the clocks measure.' },
+                  { n: 4, title: 'Add a deal to the pipeline', to: '/pipeline', body: 'Twelve gates from first contact to kickoff, each with a turnaround promise.' },
+                  { n: 5, title: 'Cut a release', to: '/releases', body: 'Demo, approval, ship. The gate refuses until the evidence is there.' },
+                ].map((step) => (
+                  <li key={step.n}>
+                    <Link to={step.to} className="flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-ink-800/40">
+                      <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border border-ink-600 bg-ink-850 text-[9.5px] font-semibold tabular text-mist-400">
+                        {step.n}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[11.5px] font-medium text-mist-200">{step.title}</span>
+                        <span className="block text-[10.5px] leading-relaxed text-mist-500">{step.body}</span>
+                      </span>
+                      <Icons.ChevronRight size={12} className="mt-1 shrink-0 text-mist-500" />
+                    </Link>
+                  </li>
+                ))}
+              </ol>
+            </Card>
+          )}
+
           {/* KPI rail */}
           <div className="mt-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4 2xl:grid-cols-6">
             <KpiTile label="In flight" value={k.inFlight} tone="iris" icon="Activity" sub={`${k.openTasks} open`} foot={<Progress value={Math.round((k.inFlight / Math.max(1, k.openTasks)) * 100)} tone="iris" />} />

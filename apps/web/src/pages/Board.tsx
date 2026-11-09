@@ -113,6 +113,8 @@ export default function Board() {
   const [dragging, setDragging] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  /* Which column the new task should land in — set by whichever + was clicked. */
+  const [newStatus, setNewStatus] = useState('todo');
 
   const metaQuery = useQuery({ queryKey: ['meta'], queryFn: api.meta });
   const meta = metaQuery.data;
@@ -217,7 +219,7 @@ export default function Board() {
                 <option key={b.id} value={b.id}>{b.kind === 'triage' ? '⚠ ' : ''}{b.projectName ?? b.name}</option>
               ))}
             </Select>
-            <Button variant="primary" size="md" icon="Plus" onClick={() => setShowNew(true)}>New task</Button>
+            <Button variant="primary" size="md" icon="Plus" onClick={() => { setNewStatus('todo'); setShowNew(true); }}>New task</Button>
           </>
         }
       />
@@ -327,8 +329,15 @@ export default function Board() {
                     </Tooltip>
                   )}
                   {overWip && <Icons.TriangleAlert size={10} className="text-rose-400" />}
+                  {/*
+                    The + in a column header now means "add here". It used to open the
+                    same sheet with no column attached, so a task created from In
+                    Progress landed in Ready and had to be dragged again — the small
+                    wrongness that makes a board feel like it is not tracking anything.
+                  */}
                   <button
-                    onClick={() => setShowNew(true)}
+                    onClick={() => { setNewStatus(col.key); setShowNew(true); }}
+                    title={`Add a task to ${col.label}`}
                     className="ml-auto rounded p-0.5 text-mist-500 transition-colors hover:bg-ink-700 hover:text-mist-200"
                   >
                     <Icons.Plus size={11} />
@@ -341,9 +350,15 @@ export default function Board() {
                 )}
                 <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-2 pb-2 pt-1">
                   {list.length === 0 && (
-                    <div className="grid h-20 place-items-center rounded-lg border border-dashed border-ink-600 text-[10.5px] text-mist-500">
-                      Drop cards here
-                    </div>
+                    <button
+                      onClick={() => { setNewStatus(col.key); setShowNew(true); }}
+                      className="grid h-20 w-full place-items-center rounded-lg border border-dashed border-ink-600 text-[10.5px] text-mist-500 transition-colors hover:border-gold-600/40 hover:text-gold-300"
+                    >
+                      <span className="flex flex-col items-center gap-1">
+                        <Icons.Plus size={11} />
+                        {col.key === 'done' ? 'Nothing shipped yet' : `Add a task to ${col.label}`}
+                      </span>
+                    </button>
                   )}
                   {list.map((t) => (
                     <TaskCard key={t.id} task={t} dragging={dragging === t.id} onDragStart={() => setDragging(t.id)} onOpen={() => setOpenTask(t.id)} />
@@ -361,6 +376,7 @@ export default function Board() {
           users={meta.users}
           labels={meta.labels}
           defaultBoard={activeBoard}
+          defaultStatus={newStatus}
           onClose={() => setShowNew(false)}
           onCreated={(id) => {
             setShowNew(false);
@@ -378,17 +394,19 @@ export default function Board() {
 }
 
 function NewTaskModal({
-  boards, users, labels, defaultBoard, onClose, onCreated,
+  boards, users, labels, defaultBoard, defaultStatus, onClose, onCreated,
 }: {
   boards: Array<{ id: string; name: string; kind: string; projectName: string | null }>;
   users: Array<{ id: string; name: string }>;
   labels: Array<{ id: string; name: string; color: string }>;
   defaultBoard: string;
+  /** The column whose + opened this sheet. A task lands where it was asked for. */
+  defaultStatus: string;
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
   const [form, setForm] = useState({
-    title: '', description: '', boardId: defaultBoard, priority: 'medium', type: 'feature',
+    title: '', description: '', boardId: defaultBoard, status: defaultStatus, priority: 'medium', type: 'feature',
     assigneeId: '', estimateHours: 4, storyPoints: 3, dueAt: '', labelIds: [] as string[], clientVisible: false,
   });
   const create = useMutation({
@@ -430,6 +448,12 @@ function NewTaskModal({
               <Select value={form.assigneeId} onChange={(e) => setForm((f) => ({ ...f, assigneeId: e.target.value }))}>
                 <option value="">Unassigned</option>
                 {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </Select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase tracking-wider text-mist-500">Column</span>
+              <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}>
+                {COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
               </Select>
             </label>
             <label className="block">

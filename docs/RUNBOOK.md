@@ -117,6 +117,33 @@ questions that come up instead:
 | a stale `AUTH_MODE` or `SESSION_SECRET` in the environment | inert | harmless; delete when convenient so it does not imply a login |
 | `authMode` in `/api/health` is not `none` | a mode was reintroduced | it should read `none`; anything else is a regression |
 
+## 6a. What a first run creates
+
+A migrated-but-empty database is not usable until two things exist, and boot creates
+them automatically (`apps/api/src/db/scaffolding.ts`):
+
+| Created | Why it cannot wait |
+| --- | --- |
+| One `users` row (the operator, named from `OPERATOR_NAME`) | every `created_by` is a foreign key; nothing can be written without an identity |
+| One studio board + its six columns | `tasks.column_id` is `NOT NULL` and references `columns`; with no board the first task is refused |
+| The twelve `pipeline_stages` | `deals.stage_id` is `NOT NULL`; with no gates the first deal is refused with "Unknown stage" |
+
+**Nothing else.** No clients, projects, tasks, deals, partners, releases, QA reports
+or activity — a first run reports zeros for all of them, and `npm run db:seed` is still
+the only way to get demo content. This is the difference between *scaffolding* (the
+product's own method: which columns a board has, which gates the pipeline has) and
+*content* (a record of work somebody did).
+
+If a first run looks empty to the point of being broken, check the three rows above
+exist before suspecting the UI:
+
+```sql
+SELECT (SELECT COUNT(*) FROM boards) AS boards,
+       (SELECT COUNT(*) FROM columns) AS columns,
+       (SELECT COUNT(*) FROM pipeline_stages) AS stages;
+-- expect 1 | 6 | 12
+```
+
 ## 7. Worker / sweeper
 
 `/api/health` → `worker: {name:"clock-sweeper", intervalMs}`.

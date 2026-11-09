@@ -12,6 +12,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts';
 import { Icons } from '../components/icons';
 import { api } from '../lib/api';
@@ -30,6 +31,9 @@ const PARTNER_STATUS = ['active', 'trial', 'suspended'] as const;
 
 type PartnerDraft = {
   id: string;
+  /** Only used when creating: a partner is always engaged by a client, and that
+   *  link is fixed afterwards (the server does not accept a change to it). */
+  clientId: string;
   name: string;
   plan: string;
   status: string;
@@ -39,8 +43,22 @@ type PartnerDraft = {
   apiQuota: string;
 };
 
+/** A blank partner, in the shape the sheet uses. */
+const emptyPartner = (clientId: string): PartnerDraft => ({
+  id: '',
+  clientId,
+  name: '',
+  plan: 'growth',
+  status: 'trial',
+  consoleUrl: '',
+  deviceLimit: '50',
+  seatLimit: '10',
+  apiQuota: '100000',
+});
+
 const draftOf = (p: Partner): PartnerDraft => ({
   id: p.id,
+  clientId: '',
   name: p.name,
   plan: p.plan,
   status: p.status,
@@ -53,8 +71,12 @@ const draftOf = (p: Partner): PartnerDraft => ({
 export default function Partners() {
   const qc = useQueryClient();
   const partners = useQuery({ queryKey: ['partners'], queryFn: api.partners });
+  const clientsQuery = useQuery({ queryKey: ['clients'], queryFn: api.clients });
   const q = useQueryState(partners);
   const [editing, setEditing] = useState<PartnerDraft | null>(null);
+  const [deleting, setDeleting] = useState<Partner | null>(null);
+  const clients = clientsQuery.data ?? [];
+  const creating = editing?.id === '';
 
   /*
    * A limit change has to re-read the list rather than patch the row: `usage`,
@@ -63,8 +85,8 @@ export default function Partners() {
    * The entitlements endpoint is what enforcement reads, so it is refreshed too.
    */
   const save = useMutation({
-    mutationFn: (d: PartnerDraft) =>
-      api.updatePartner(d.id, {
+    mutationFn: (d: PartnerDraft) => {
+      const limits = {
         name: d.name.trim(),
         plan: d.plan,
         status: d.status,
@@ -72,11 +94,29 @@ export default function Partners() {
         deviceLimit: Number(d.deviceLimit),
         seatLimit: Number(d.seatLimit),
         apiQuotaMonth: Number(d.apiQuota),
-      }),
+      };
+      return d.id
+        ? api.updatePartner(d.id, limits)
+        : api.createPartner({ ...limits, clientId: d.clientId });
+    },
     onSuccess: (_saved, d) => {
       void qc.invalidateQueries({ queryKey: ['partners'] });
-      void qc.invalidateQueries({ queryKey: ['partner-entitlements', d.id] });
+      if (d.id) void qc.invalidateQueries({ queryKey: ['partner-entitlements', d.id] });
       setEditing(null);
+    },
+  });
+
+  /*
+   * Removal is a real operation with a real refusal: the server declines while the
+   * partner has an active device licence or an enabled seat, because cascading those
+   * away would end access that someone is currently using. The refusal is shown
+   * verbatim, with its counts, instead of being pre-empted by a guess here.
+   */
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deletePartner(id),
+    onSuccess: () => {
+      setDeleting(null);
+      void qc.invalidateQueries({ queryKey: ['partners'] });
     },
   });
 
@@ -91,7 +131,20 @@ export default function Partners() {
         eyebrow={<><Icons.KeyRound size={11} /> Partner operations</>}
         title="Partner console"
         subtitle="Each partner gets its own console: IAM users, device licences, API quota, usage metering and uptime. Limits are enforced at the edge — a partner cannot exceed contracted devices or seats."
-        right={<Badge tone="outline">{data.length} partner consoles</Badge>}
+        right={
+          <>
+            <Badge tone="outline">{data.length} partner consoles</Badge>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="Plus"
+              disabled={clients.length === 0}
+              onClick={() => { save.reset(); remove.reset(); setEditing(emptyPartner(clients[0]?.id ?? '')); }}
+            >
+              New partner
+            </Button>
+          </>
+        }
       />
 
       <div className="grid grid-cols-2 gap-2.5 px-5 pt-4 lg:grid-cols-4">
@@ -137,12 +190,20 @@ export default function Partners() {
                   </div>
                   <p className="mt-0.5 truncate font-mono text-[9.5px] text-mist-500">{p.consoleUrl || 'no console URL'}</p>
                 </div>
-                <button
-                  onClick={() => { save.reset(); setEditing(draftOf(p)); }}
-                  className="shrink-0 rounded-md border border-ink-600 px-1.5 py-0.5 text-[9.5px] text-mist-400 transition-colors hover:border-gold-600/50 hover:text-gold-300"
-                >
-                  Edit
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => { save.reset(); setEditing(draftOf(p)); }}
+                    className="rounded-md border border-ink-600 px-1.5 py-0.5 text-[9.5px] text-mist-400 transition-colors hover:border-gold-600/50 hover:text-gold-300"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => { remove.reset(); setDeleting(p); }}
+                    className="rounded-md border border-ink-600 px-1.5 py-0.5 text-[9.5px] text-mist-400 transition-colors hover:border-rose-500/50 hover:text-rose-300"
+                  >
+                    Delete
+                  </button>
+                </div>
                 <Ring value={Math.round(p.uptimePct)} size={40} stroke={3} tone={p.uptimePct > 99.5 ? '#22c98a' : '#f5a524'} label={<span className="text-[8px]">{p.uptimePct.toFixed(1)}</span>} />
               </div>
 
@@ -201,6 +262,46 @@ export default function Partners() {
         })}
       </div>
 
+      {data.length === 0 && (
+        <div className="px-5 pt-4">
+          <Card className="p-6">
+            <div className="mx-auto max-w-[48ch] text-center">
+              <span className="mx-auto grid size-11 place-items-center rounded-xl border border-gold-600/30 bg-gold-500/[0.08] text-gold-300">
+                <Icons.KeyRound size={18} />
+              </span>
+              {clients.length === 0 ? (
+                <>
+                  <p className="mt-3 text-[14px] font-semibold text-white">A partner is engaged by a client</p>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                    Add a client first. A partner's console exists inside a client relationship — its
+                    seats, devices and quota are contracted through one.
+                  </p>
+                  <Link to="/clients" className="mt-4 inline-flex">
+                    <Button variant="primary" icon="Building2">Go to Clients</Button>
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <p className="mt-3 text-[14px] font-semibold text-white">No partner consoles yet</p>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                    Create one and its limits start being enforced on the next request — device ceiling,
+                    seat count and API quota are checked at the edge, not at the next deploy.
+                  </p>
+                  <Button
+                    variant="primary"
+                    className="mt-4"
+                    icon="Plus"
+                    onClick={() => { save.reset(); setEditing(emptyPartner(clients[0]?.id ?? '')); }}
+                  >
+                    Create a partner console
+                  </Button>
+                </>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
       <div className="px-5 pt-3">
         <Card className="p-4">
           <SectionHeader title="Enforcement policy" subtitle="Applied per partner at the API edge" />
@@ -224,8 +325,12 @@ export default function Partners() {
       <Modal
         open={editing !== null}
         icon="Handshake"
-        title={editing ? `Edit ${editing.name}` : 'Edit partner'}
-        subtitle="Limits are enforced on the next request, not at the next deployment."
+        title={creating ? 'New partner' : editing ? `Edit ${editing.name}` : 'Edit partner'}
+        subtitle={
+          creating
+            ? 'A partner is an external agency engaged by one of your clients. It gets its own console, IAM users, device licences and quota from the moment it exists.'
+            : 'Limits are enforced on the next request, not at the next deployment.'
+        }
         onClose={() => setEditing(null)}
         footer={
           <>
@@ -234,16 +339,28 @@ export default function Partners() {
               variant="primary"
               icon="Check"
               loading={save.isPending}
-              disabled={!editing?.name.trim()}
+              disabled={!editing?.name.trim() || (creating && !editing?.clientId)}
               onClick={() => editing && save.mutate(editing)}
             >
-              Save partner
+              {creating ? 'Create partner' : 'Save partner'}
             </Button>
           </>
         }
       >
+        {save.isError && (
+          <div className="mb-3"><ApiFailure error={save.error} what="Could not save this partner." /></div>
+        )}
         {editing && (
           <div className="space-y-3">
+            {creating && (
+              <Field label="Engaged by client" hint={clients.length === 0 ? 'Add a client first — a partner cannot belong to nobody.' : undefined}>
+                {({ id }) => (
+                  <Select id={id} value={editing.clientId} onChange={(e) => setEditing({ ...editing, clientId: e.target.value })}>
+                    {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </Select>
+                )}
+              </Field>
+            )}
             <Field label="Partner name">
               {({ id }) => (
                 <Input id={id} autoFocus value={editing.name}
@@ -304,6 +421,39 @@ export default function Partners() {
 
             {save.error ? <ApiFailure error={save.error} what="the partner was not saved." /> : null}
           </div>
+        )}
+      </Modal>
+
+      {/* ------------------------------------------------------- delete sheet */}
+      <Modal
+        open={deleting !== null}
+        icon="Ban"
+        title={`Delete ${deleting?.name ?? 'partner'}?`}
+        subtitle="A partner with an active device licence or an enabled seat cannot be deleted — those are credentials in use, and the server refuses rather than revoking them silently."
+        onClose={() => setDeleting(null)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleting(null)}>Keep it</Button>
+            <Button
+              variant="danger"
+              icon="Ban"
+              loading={remove.isPending}
+              onClick={() => deleting && remove.mutate(deleting.id)}
+            >
+              Delete partner
+            </Button>
+          </>
+        }
+      >
+        {remove.isError ? (
+          <ApiFailure error={remove.error} what="The server refused this deletion." />
+        ) : deleting && (
+          <p className="text-[12px] leading-relaxed text-mist-400">
+            {deleting.devicesActive === 0 && deleting.seats === 0
+              ? 'This partner has no active devices and no enabled seats, so nothing in flight is ended by removing it.'
+              : `Right now it has ${deleting.devicesActive} active device(s) and ${deleting.seats} enabled seat(s), so expect a refusal until those are revoked.`}
+            {' '}Usage history and invitations are removed with the console.
+          </p>
         )}
       </Modal>
     </div>

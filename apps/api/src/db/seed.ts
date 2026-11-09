@@ -8,6 +8,7 @@
  * the seeded rows (guard: refuses in production unless FORCE=1).
  */
 import type { Db } from './index.ts';
+import { PIPELINE_STAGES } from './scaffolding.ts';
 import { id, addDays } from '../lib/ids.ts';
 import { SLA_HOURS } from '../domain/risk.ts';
 import { config } from '../config.ts';
@@ -101,32 +102,8 @@ export async function seed(db: Db, log: (m: string) => void = console.log): Prom
     }
 
     /* ----------------------------------------------------------- pipeline -- */
-    const stages: Array<any[]> = [
-      ['st_inbound', 'inbound', 'Inbound Lead', 'origin', 10, 'Signal captured from referral, site or outbound.',
-        'Name, company, source, rough budget band', 'ICP fit confirmed, ≥ ₹3L potential', 3, 300000, '#64748b', 'inbox'],
-      ['st_triage', 'triage', 'Triage & Qualify', 'origin', 20, '30-minute fit call with the growth lead.',
-        'Lead in pipeline', 'Problem statement + decision-maker identified', 3, 400000, '#8b5cf6', 'filter'],
-      ['st_consult', 'tech_consult', 'Technical Consultation', 'discovery', 30, 'Paid 60–90 min technical consultation with Maya + Arjun.',
-        'Fit call booked', 'Systems map drafted on Excaliboard, risks logged', 5, 600000, '#6366f1', 'messages'],
-      ['st_scope', 'scope', 'Scope & Architecture', 'discovery', 40, 'Translate the consultation into an architecture and phased plan.',
-        'Consultation delivered', 'Excaliboard architecture link + effort estimate signed off internally', 7, 900000, '#0ea5e9', 'layout'],
-      ['st_proposal', 'proposal', 'Proposal & Commercials', 'proposal', 50, 'Fixed-scope proposal with phase turnover gates attached.',
-        'Architecture approved', 'Proposal sent with 3 pricing options', 5, 1100000, '#06b6d4', 'file-text'],
-      ['st_legal', 'legal', 'Contract & Onboarding', 'proposal', 60, 'MSA, SOW, DPAs, kickoff scheduling.',
-        'Verbal yes', 'Signed SOW + deposit paid', 10, 1100000, '#14b8a6', 'pen-tool'],
-      ['st_kickoff', 'kickoff', 'Delivery Kickoff', 'delivery', 70, 'Pod assembled, board created, turnover gates instantiated.',
-        'Deposit received', 'Board live, phases scheduled, client channel open', 4, 1100000, '#22c55e', 'rocket'],
-      ['st_delivery', 'in_delivery', 'In Delivery', 'delivery', 80, 'Sprint cadence with weekly demo + turnover gates per phase.',
-        'Kickoff complete', 'All phases passed turnover, UAT signed', 45, 1400000, '#eab308', 'hammer'],
-      ['st_handover', 'handover', 'Handover & Enablement', 'delivery', 90, 'Runbooks, credential vault, training, 30-day hypercare.',
-        'UAT signed', 'Handover approved by client + support runbook live', 10, 1400000, '#f97316', 'package-check'],
-      ['st_retainer', 'retainer', 'Retainer & Growth', 'growth', 100, 'Monthly iteration retainer with quarterly roadmap reviews.',
-        'Handover approved', 'Retainer signed, expansion map agreed', 14, 250000, '#a855f7', 'repeat'],
-      ['st_expansion', 'expansion', 'Expansion Won', 'growth', 110, 'New scope or new business unit signed.',
-        'Retainer healthy for 2 quarters', 'Expansion SOW signed', 14, 600000, '#ec4899', 'trending-up'],
-      ['st_closed', 'closed', 'Closed / Parked', 'growth', 120, 'Lost, parked or dormant. Kept for win-loss analysis.',
-        'Decision made', 'Loss reason + revisit date recorded', 0, 0, '#475569', 'archive'],
-    ];
+    /* The gate list lives in scaffolding.ts — the demo seed must not own a second copy. */
+    const stages = PIPELINE_STAGES;
     for (const [sid, key, name, phase, pos, desc, entry, exit, sla, val, color, icon] of stages) {
       await db.run(
         `INSERT INTO pipeline_stages (id,key,name,phase,position,description,entry_criteria,exit_criteria,default_sla_days,default_value_cents,color,icon) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (key) DO UPDATE SET name = excluded.name, description = excluded.description, position = excluded.position, entry_criteria = excluded.entry_criteria, exit_criteria = excluded.exit_criteria, default_sla_days = excluded.default_sla_days, default_value_cents = excluded.default_value_cents`,

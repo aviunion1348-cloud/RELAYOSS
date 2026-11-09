@@ -41,6 +41,21 @@ type ClientDraft = {
   mrrRupees: string;
 };
 
+/** A blank client, in the same shape the edit sheet uses. */
+const emptyDraft = (): ClientDraft => ({
+  id: '',
+  name: '',
+  industry: '',
+  initials: '',
+  tier: 'growth',
+  health: 'healthy',
+  contactName: '',
+  contactEmail: '',
+  contactRole: '',
+  notes: '',
+  mrrRupees: '',
+});
+
 const draftOf = (c: ClientSummary): ClientDraft => ({
   id: c.id,
   name: c.name,
@@ -76,9 +91,16 @@ export default function Clients() {
     void qc.invalidateQueries({ queryKey: ['pipeline'] });
   };
 
+  /*
+   * One sheet for both jobs. Editing and creating collect the same dozen facts, and a
+   * second copy of the form would drift from this one the first time a field changed —
+   * which is exactly how the create endpoint ended up ignoring contact role, notes and
+   * MRR while the edit sheet wrote them.
+   */
   const save = useMutation({
-    mutationFn: (d: ClientDraft) =>
-      api.updateClient(d.id, {
+    mutationFn: (d: ClientDraft) => {
+      /* Paise in the database, rupees in the form — converted once, here. */
+      const fields = {
         name: d.name.trim(),
         industry: d.industry.trim(),
         initials: d.initials.trim(),
@@ -89,7 +111,10 @@ export default function Clients() {
         primaryContactRole: d.contactRole.trim(),
         notes: d.notes,
         mrrCents: Math.max(0, Math.round((Number(d.mrrRupees) || 0) * 100)),
-      }),
+      };
+      /* An empty id is a client that does not exist yet; it is the only difference. */
+      return d.id ? api.updateClient(d.id, fields) : api.createClient(fields);
+    },
     onSuccess: () => { refresh(); setEditing(null); },
   });
 
@@ -115,11 +140,50 @@ export default function Clients() {
         subtitle="Health is computed, not declared: turnover performance, blocked work, payment cadence and executive engagement. A client that needs attention shows up here before they tell you."
         right={
           <>
-            <Badge tone="mint" dot>{inr(totalMrr, { compact: true })} MRR</Badge>
+            {data.length > 0 && <Badge tone="mint" dot>{inr(totalMrr, { compact: true })} MRR</Badge>}
             {atRisk.length > 0 && <Badge tone="rose">{atRisk.length} need attention</Badge>}
+            <Button
+              variant="primary"
+              size="sm"
+              icon="Plus"
+              onClick={() => { save.reset(); remove.reset(); setEditing(emptyDraft()); }}
+            >
+              New client
+            </Button>
           </>
         }
       />
+
+      {/*
+        An empty workspace used to render an empty grid — a screen with a heading and
+        nothing else, which reads as a product that does not work rather than one that
+        is waiting for its first record. The first thing to draw is the way in.
+      */}
+      {data.length === 0 && (
+        <div className="px-5 pt-4">
+          <Card className="p-6">
+            <div className="mx-auto max-w-[46ch] text-center">
+              <span className="mx-auto grid size-11 place-items-center rounded-xl border border-gold-600/30 bg-gold-500/[0.08] text-gold-300">
+                <Icons.Building2 size={18} />
+              </span>
+              <p className="mt-3 text-[14px] font-semibold text-white">No clients yet</p>
+              <p className="mt-1.5 text-[12px] leading-relaxed text-mist-500">
+                A client is the record everything else hangs from: projects belong to one, deals
+                move one into the pipeline, and the turnover clocks measure what was promised to
+                them. Add the first one and the rest of the product opens up.
+              </p>
+              <Button
+                variant="primary"
+                className="mt-4"
+                icon="Plus"
+                onClick={() => { save.reset(); remove.reset(); setEditing(emptyDraft()); }}
+              >
+                Add your first client
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       <div className="grid gap-3 px-5 pt-4 md:grid-cols-2 xl:grid-cols-3">
         {data.map((c) => {
@@ -223,8 +287,12 @@ export default function Clients() {
       <Modal
         open={editing !== null}
         icon="Building2"
-        title={editing ? `Edit ${editing.name || 'client'}` : 'Edit client'}
-        subtitle="These fields drive the health badges, the pipeline columns and every report that names this client."
+        title={editing?.id === '' ? 'New client' : editing ? `Edit ${editing.name || 'client'}` : 'Edit client'}
+        subtitle={
+          editing?.id === ''
+            ? 'Only the name is required. Everything else can be filled in now or later — the client is created either way.'
+            : 'These fields drive the health badges, the pipeline columns and every report that names this client.'
+        }
         onClose={() => setEditing(null)}
         footer={
           <>
@@ -236,11 +304,16 @@ export default function Clients() {
               disabled={!editing?.name.trim()}
               onClick={() => editing && save.mutate(editing)}
             >
-              Save client
+              {editing?.id === '' ? 'Create client' : 'Save client'}
             </Button>
           </>
         }
       >
+        {save.isError && (
+          <div className="mb-3">
+            <ApiFailure error={save.error} what="Could not save this client." />
+          </div>
+        )}
         {editing && (
           <div className="space-y-3">
             <div className="grid grid-cols-[1fr_90px] gap-3">
