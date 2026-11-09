@@ -90,7 +90,7 @@ const SETTINGS = [
   {
     name: 'DATABASE_URL',
     required: false,
-    purpose: 'PostgreSQL. Without it data lives in ephemeral per-instance SQLite and is lost when the instance recycles',
+    purpose: 'PostgreSQL. Required by any deployment: without it the instance refuses to boot rather than writing to a per-instance file that is discarded when the instance recycles',
   },
 ] as const;
 
@@ -126,7 +126,10 @@ export function bootFailureBody(err: BootFailure): BootFailureBody {
    */
   const causal = !process.env.DATABASE_URL
     ? [
-        'No DATABASE_URL is set, so this instance is using SQLite in its temporary directory. Reads and writes work, but the file is per-instance and is lost on the next cold start or redeploy, and concurrent instances will not see each other\'s data. Set DATABASE_URL to a PostgreSQL connection string for durable storage.',
+        'No DATABASE_URL is set. A deployed instance does not fall back to a local file: ' +
+          'a database file inside a serverless runtime is per-instance and is discarded on the ' +
+          'next cold start, so the instance refuses to boot rather than appearing to work and ' +
+          'silently losing every write.',
       ]
     : [];
 
@@ -144,7 +147,13 @@ export function bootFailureBody(err: BootFailure): BootFailureBody {
      */
     ...(process.env.DATABASE_URL
       ? ['Run the schema migration: npm run db:migrate:prod']
-      : ['Set DATABASE_URL to a PostgreSQL connection string for durable storage', 'Then run: npm run db:migrate:prod']),
+      : [
+          'Create a PostgreSQL database (Neon, Supabase, or Vercel Postgres)',
+          'Copy its pooled connection string — the pooler endpoint, not the direct one',
+          'Add it as DATABASE_URL in the project settings (on Vercel: Settings → Environment ' +
+            'Variables) for Production, and for Preview if previews should work',
+          'Redeploy, then run: npm run db:migrate:prod',
+        ]),
     'Redeploy and confirm GET /api/ready returns 200',
   ];
 

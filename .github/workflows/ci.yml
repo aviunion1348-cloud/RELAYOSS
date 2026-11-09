@@ -223,6 +223,14 @@ jobs:
         env:
           NODE_ENV: test
 
+      # The deployment layout: compiled API + built SPA unpacked into a bare directory,
+      # with no repository around them. This is where the module-relative path to
+      # `apps/web/dist` stops working, and it is the shape `/` broke in.
+      - name: "The dashboard loads in the deployed file layout"
+        run: node --test apps/api/test/deployment-layout.test.mjs
+        env:
+          NODE_ENV: test
+
   # `engines.node` allows 22.18 through 24 so a developer on Node 24 (the current LTS
   # line for new installs) is not warned off a repository that works there. That claim
   # is only worth making if something runs on it, so this job does: typecheck, the full

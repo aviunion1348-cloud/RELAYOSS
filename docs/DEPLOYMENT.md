@@ -49,7 +49,7 @@ the behaviour instead of simulating a routing table.
 | Concern | How it is handled | Why not the obvious way |
 | --- | --- | --- |
 | API | `apps/api/src/entrypoints/index.ts`, declared explicitly in `vercel.json` and compiled to `apps/api/dist/entrypoints/index.js` | The entrypoint is named rather than discovered, so the file production runs is the file CI boots. `entrypoints/vercel.ts` remains as the in-process handler the tests drive; it is **not** the deployed entry. |
-| SPA | The same process serves `apps/web/dist` through `@fastify/static`, with a not-found handler | One origin means the browser has no cross-origin hop, and `/api` has no route to misconfigure. |
+| SPA | The same process serves `apps/web/dist` through `@fastify/static`, with a not-found handler. The directory travels with the function via `includeFiles` in `vercel.json`, and is located by search rather than by a path computed from the module | One origin means the browser has no cross-origin hop. The tracer follows module imports only, so a directory read with `fs` is invisible to it — without `includeFiles` the bundle shipped without the document and `/` answered a JSON 404 while `/api` worked (§1.1.2). |
 | Deep links | The not-found handler answers a browser route with `index.html` | Reloading `/projects/pr_northwind` must not 404. |
 | Missing assets | The not-found handler returns **404** for any path that names a file | The naive fallback answers `/assets/index-abc123.js` with the document and status 200, so a stale reference renders a blank page with a MIME-type error instead of failing cleanly. A rewrite rule used to prevent this; the rule now lives in the handler, and `verify:routing` asserts it against the running process. |
 | Listening | **Not in the entrypoint.** It exports a handler; the platform launcher binds and proxies. `apps/api/src/index.ts` is the process that listens, for `npm start` and Docker | The launcher stubs `http.Server.prototype.listen` while importing the module and never calls its callback, so an entrypoint that awaits `listen()` deadlocks the import. See §1.1.1 — this is the mistake that caused the outage. |
@@ -117,6 +117,35 @@ a two-service era. In a single service the catch-all rewrite sends every browser
 here, so `/` and deep links were being answered `404` JSON by the only public
 entrypoint. `serveStatic` is now on, and the launcher test asserts `/` returns the
 document.
+
+#### 1.1.2 Why `/` answered a JSON 404 while the API worked
+
+The SPA is served by the API process with `@fastify/static`. That is a directory read at
+runtime, and the platform's bundler traces **module imports only** — it does not see
+`fs.readdir`, so `apps/web/dist` was not in the deployed function. The deployment then
+started cleanly, served every `/api` route, and answered every browser path with
+`{"error":{"code":"not_found"}}`.
+
+Two things were wrong, and both are now enforced rather than remembered:
+
+- **The files were not shipped.** `vercel.json` declares
+  `"includeFiles": ["apps/web/dist/**"]` on the service, which is the only way to put a
+  runtime-read directory into the bundle. `npm run guard` fails the build if that
+  declaration is missing.
+- **The path was computed, not found.** `config.webDist` is derived from
+  `import.meta.url` — three levels up from the module file. In a bundle that is a single
+  flattened file, that lands outside the artefact. `lib/web-dist.ts` now searches
+  candidate directories, including the process working directory (the function root,
+  where included files are unpacked at their repository paths).
+
+`apps/api/test/deployment-layout.test.mjs` builds that layout in a temporary directory —
+compiled API, built SPA, no repository — and runs the server there. It asserts `/`, a
+deep link, a real asset, `/api/dashboard`, `/api/clients` and `/api/projects`. With the
+old path resolution it fails with exactly the production symptom: `GET / must return the
+dashboard, got 404`.
+
+The same file also proves the migrations fallback, by omitting `db/migrations` the way
+the deployment does: boot uses the generated `BUNDLED_MIGRATIONS` module.
 
 ### 1.2 The project settings
 
