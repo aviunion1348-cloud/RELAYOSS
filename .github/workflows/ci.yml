@@ -226,7 +226,7 @@ jobs:
       # The deployment layout: compiled API + built SPA unpacked into a bare directory,
       # with no repository around them. This is where the module-relative path to
       # `apps/web/dist` stops working, and it is the shape `/` broke in.
-      - name: `/` and the dashboard data work in the deployed file layout
+      - name: "The dashboard loads in the deployed file layout"
         run: node --test apps/api/test/deployment-layout.test.mjs
         env:
           NODE_ENV: test
