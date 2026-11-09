@@ -609,8 +609,12 @@ for (const [name, , route, endpoints] of SCREENS) {
  */
 {
   const nodeFs = await import('node:fs');
-  const shellPath = "/home/user/RELAYOSS/apps/web/src/components/Shell.tsx";
-  const livePath = "/home/user/RELAYOSS/apps/web/src/lib/live.ts";
+  /*
+   * Resolved from this file, never hardcoded: an absolute sandbox path passes here and
+   * fails on CI, which is the worst kind of green.
+   */
+  const shellPath = ${JSON.stringify(path.join(ROOT, 'apps', 'web', 'src', 'components', 'Shell.tsx'))};
+  const livePath = ${JSON.stringify(path.join(ROOT, 'apps', 'web', 'src', 'lib', 'live.ts'))};
 
   const shellSource = nodeFs.readFileSync(shellPath, 'utf8');
   /*
