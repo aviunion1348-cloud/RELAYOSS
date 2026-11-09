@@ -17,6 +17,10 @@ WORKDIR /app
 # other's dependencies.
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
+# The root `postinstall` installs apps/web, which developers need after `npm install`.
+# The script has to exist for npm to run it; here `apps/web/package.json` is not copied
+# yet, so it does nothing and the explicit frontend install below stays in charge of it.
+COPY scripts/install-web-deps.mjs scripts/
 RUN npm ci --no-audit --no-fund
 
 COPY apps/web/package.json apps/web/package-lock.json apps/web/
@@ -46,6 +50,10 @@ RUN apk add --no-cache tini curl && addgroup -S relay && adduser -S relay -G rel
 # The SPA is already built, so the frontend needs no dependencies at runtime at all.
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
+# Same reason as the build stage: `npm ci` runs the root `postinstall`, so the file it
+# references must be present. `apps/web/package.json` is not in this stage, so it exits
+# without installing anything — the SPA is already built and needs no runtime deps.
+COPY scripts/install-web-deps.mjs scripts/
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 # The PostgreSQL driver must exist in a production-only install. It once did not:
 # `pg` resolved only through a dev tool, so the image built and then crashed on
