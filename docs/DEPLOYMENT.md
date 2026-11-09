@@ -49,7 +49,7 @@ the behaviour instead of simulating a routing table.
 | Concern | How it is handled | Why not the obvious way |
 | --- | --- | --- |
 | API | `apps/api/src/entrypoints/index.ts`, declared explicitly in `vercel.json` and compiled to `apps/api/dist/entrypoints/index.js` | The entrypoint is named rather than discovered, so the file production runs is the file CI boots. `entrypoints/vercel.ts` remains as the in-process handler the tests drive; it is **not** the deployed entry. |
-| SPA | The same process serves `apps/web/dist` through `@fastify/static`, with a not-found handler. The directory travels with the function via `includeFiles` in `vercel.json`, and is located by search rather than by a path computed from the module | One origin means the browser has no cross-origin hop. The tracer follows module imports only, so a directory read with `fs` is invisible to it — without `includeFiles` the bundle shipped without the document and `/` answered a JSON 404 while `/api` worked (§1.1.2). |
+| SPA | The same process serves `apps/web/dist` through `@fastify/static` when a build is on disk; in a deployment bundle it serves the same files from `src/generated/web-assets.ts`, compiled in by `scripts/embed-web-assets.mjs`. A not-found handler answers browser routes with the document | One origin means the browser has no cross-origin hop. The tracer follows module imports only, so a directory read with `fs` is invisible to it — and `includeFiles`, the documented-looking remedy, is rejected by the services schema. Embedding is the form that survives both (§1.1.2). |
 | Deep links | The not-found handler answers a browser route with `index.html` | Reloading `/projects/pr_northwind` must not 404. |
 | Missing assets | The not-found handler returns **404** for any path that names a file | The naive fallback answers `/assets/index-abc123.js` with the document and status 200, so a stale reference renders a blank page with a MIME-type error instead of failing cleanly. A rewrite rule used to prevent this; the rule now lives in the handler, and `verify:routing` asserts it against the running process. |
 | Listening | **Not in the entrypoint.** It exports a handler; the platform launcher binds and proxies. `apps/api/src/index.ts` is the process that listens, for `npm start` and Docker | The launcher stubs `http.Server.prototype.listen` while importing the module and never calls its callback, so an entrypoint that awaits `listen()` deadlocks the import. See §1.1.1 — this is the mistake that caused the outage. |
@@ -120,32 +120,49 @@ document.
 
 #### 1.1.2 Why `/` answered a JSON 404 while the API worked
 
-The SPA is served by the API process with `@fastify/static`. That is a directory read at
+The SPA was served by the API process with `@fastify/static`. That is a directory read at
 runtime, and the platform's bundler traces **module imports only** — it does not see
 `fs.readdir`, so `apps/web/dist` was not in the deployed function. The deployment then
 started cleanly, served every `/api` route, and answered every browser path with
-`{"error":{"code":"not_found"}}`.
+`{"error":{"code":"not_found"}}`. To a user that looks like "the login doesn't work"; the
+API was the only part that did.
 
-Two things were wrong, and both are now enforced rather than remembered:
+The obvious fix — declaring the directory with `includeFiles` on the service — is not
+available: the services schema rejects it (`services.app should NOT have additional
+property includeFiles`), and it was published that way once before being noticed. A
+config key the platform refuses is not a fix, it is a failed deploy.
 
-- **The files were not shipped.** `vercel.json` declares
-  `"includeFiles": ["apps/web/dist/**"]` on the service, which is the only way to put a
-  runtime-read directory into the bundle. `npm run guard` fails the build if that
-  declaration is missing.
-- **The path was computed, not found.** `config.webDist` is derived from
-  `import.meta.url` — three levels up from the module file. In a bundle that is a single
-  flattened file, that lands outside the artefact. `lib/web-dist.ts` now searches
-  candidate directories, including the process working directory (the function root,
-  where included files are unpacked at their repository paths).
+So the SPA is **compiled into the API** instead, which is the one thing a bundler is
+guaranteed to follow. `scripts/embed-web-assets.mjs` walks `apps/web/dist` after the Vite
+build and writes `apps/api/src/generated/web-assets.ts` — every file inlined, text as text
+and binary as base64 (~1 MB for the current build). `build:service` runs it *before*
+`tsc`, so the module is part of `apps/api/dist` and travels with the function. The server
+serves `web-dist.ts`'s directory when one exists (development, Docker, `npm start`) and
+the embedded copy when it does not (a deployment bundle). Nothing in `vercel.json`
+declares it; there is no key to get wrong.
+
+Three things are enforced rather than remembered:
+
+- **The embed runs, and runs first.** `npm run guard` fails if `build:service` stops
+  calling `scripts/embed-web-assets.mjs`, or compiles the API before embedding it — the
+  latter silently ships the *previous* module. It also fails if `includeFiles` reappears
+  on the service, because the schema will reject the deployment before it reaches a
+  browser.
+- **The path is found, not computed.** `config.webDist` is derived from
+  `import.meta.url` — three levels up from the module file, which in a flattened bundle
+  is outside the artefact. `lib/web-dist.ts` searches candidate directories instead, and
+  `resolveWebDist` returning `null` is the normal case in a bundle, not an error.
+- **An unbuilt SPA is visible.** With neither a directory nor an embedded build the
+  server answers a JSON 404 naming the path, rather than a 200 with nothing in it.
 
 `apps/api/test/deployment-layout.test.mjs` builds that layout in a temporary directory —
-compiled API, built SPA, no repository — and runs the server there. It asserts `/`, a
-deep link, a real asset, `/api/dashboard`, `/api/clients` and `/api/projects`. With the
-old path resolution it fails with exactly the production symptom: `GET / must return the
-dashboard, got 404`.
-
-The same file also proves the migrations fallback, by omitting `db/migrations` the way
-the deployment does: boot uses the generated `BUNDLED_MIGRATIONS` module.
+compiled API **only**, no `apps/web/dist`, no repository — and runs the server there. It
+asserts `/`, a deep link, a real asset from the embedded map, and
+`/api/dashboard|clients|projects|live|health`. Before the embedding it failed with
+exactly the production symptom: `GET / must return the dashboard, got 404`. It also
+covers the opposite mistake: replace the embedded module with an empty one and `/` must
+answer a JSON 404 while `/api/live` keeps working — the misleading shape this
+deployment had.
 
 ### 1.2 The project settings
 

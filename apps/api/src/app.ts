@@ -16,6 +16,7 @@ import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
 import { ensureOperator, type BootstrapResult } from './db/bootstrap.ts';
 import { resolveWebDist } from './lib/web-dist.ts';
+import { embeddedFile, embeddedIndex, hasEmbeddedSpa } from './lib/embedded-web.ts';
 import { registerRoutes } from './routes/index.ts';
 import { createOperatorAuth, registerOperatorHook, resolveOperator } from './auth/operator-middleware.ts';
 import { registerOperatorRoutes } from './routes/operator.ts';
@@ -385,6 +386,22 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
       /^\/assets\//.test(pathname) ||
       /^\/\.well-known\//.test(pathname) ||
       /\.(?:js|mjs|css|map|json|txt|xml|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|wasm|pdf)$/i.test(lastSegment);
+    /*
+     * A file that names a real asset is served from the embedded build, then from disk.
+     * This is the deployment path: `/assets/index-abc123.js` is not a route, and in a
+     * bundle it is not on disk either, so without this the document would load and every
+     * script it references would 404 — a blank page that looks like a JavaScript bug.
+     */
+    if (useEmbedded && looksLikeFile) {
+      const asset = embeddedFile(pathname);
+      if (asset) {
+        return reply
+          .type(asset.type)
+          .header('cache-control', asset.type.startsWith('text/html') ? 'no-cache' : 'public, max-age=31536000, immutable')
+          .send(asset.body);
+      }
+    }
+
     if (looksLikeFile) {
       return reply.code(404).send({ error: { code: 'not_found', message: `No such file: ${pathname}` } });
     }
@@ -398,6 +415,10 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     const indexFile = notFoundDist ? path.join(notFoundDist, 'index.html') : null;
     if (indexFile && fs.existsSync(indexFile)) {
       return reply.type('text/html').send(fs.readFileSync(indexFile));
+    }
+    if (useEmbedded) {
+      const index = embeddedIndex();
+      if (index) return reply.type('text/html').header('cache-control', 'no-cache').send(index.body);
     }
     return reply.code(404).send({ error: { code: 'not_found', message: 'Build the web app first (npm run build).' } });
   });
@@ -500,6 +521,21 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   const webDist = resolved.dir;
   if (serveStatic && webDist) {
     await app.register(fastifyStatic, { root: webDist, wildcard: false, cacheControl: true, maxAge: '1h' });
+  }
+  /*
+   * No directory? Use the build compiled into this process.
+   *
+   * A deployment bundle contains only what the bundler followed, which is imports — so
+   * `apps/web/dist` is absent there even though the build produced it. The embedded copy
+   * is the same files, compiled in, and it is what keeps `/` from being a JSON 404 in the
+   * place that actually serves users.
+   */
+  const useEmbedded = serveStatic && !webDist && hasEmbeddedSpa();
+  if (serveStatic && !webDist && !hasEmbeddedSpa()) {
+    app.log.warn(
+      'No built SPA found on disk and none embedded: browser routes will answer JSON 404. ' +
+        'Run `npm run build:service` (which builds and embeds it).',
+    );
   }
 
   return { app, db };

@@ -21,6 +21,10 @@ COPY apps/api/package.json apps/api/
 # The script has to exist for npm to run it; here `apps/web/package.json` is not copied
 # yet, so it does nothing and the explicit frontend install below stays in charge of it.
 COPY scripts/install-web-deps.mjs scripts/
+# The root `postinstall` runs two scripts: one writes an empty embedded-SPA module so the
+# API compiles before a build, the other installs apps/web. Both files must exist for npm
+# to run them, and `apps/web/package.json` is not copied yet, so the second no-ops here.
+COPY scripts/embed-web-assets.mjs scripts/
 RUN npm ci --no-audit --no-fund
 
 COPY apps/web/package.json apps/web/package-lock.json apps/web/
@@ -53,7 +57,7 @@ COPY apps/api/package.json apps/api/
 # Same reason as the build stage: `npm ci` runs the root `postinstall`, so the file it
 # references must be present. `apps/web/package.json` is not in this stage, so it exits
 # without installing anything — the SPA is already built and needs no runtime deps.
-COPY scripts/install-web-deps.mjs scripts/
+COPY scripts/install-web-deps.mjs scripts/embed-web-assets.mjs scripts/
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 # The PostgreSQL driver must exist in a production-only install. It once did not:
 # `pg` resolved only through a dev tool, so the image built and then crashed on

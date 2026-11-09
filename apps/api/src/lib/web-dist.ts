@@ -13,10 +13,10 @@
  * process working directory — which on a platform is the function root, the directory
  * the bundle and its included files are unpacked into.
  *
- * The files have to be there in the first place, which is a deployment-configuration
- * fact rather than a runtime one: `vercel.json` declares `includeFiles` for
- * `apps/web/dist/**`, because the platform's tracer follows imports and not `fs` reads.
- * `scripts/guard-deployment-config.mjs` fails the build if that declaration is missing.
+ * The files have to be there in the first place, and in a deployment bundle they are not:
+ * the platform's tracer follows imports and not `fs` reads, and the service schema has no
+ * key for declaring extra files. That is why `lib/embedded-web.ts` exists — the same build
+ * is compiled into the API, and `app.ts` serves from it when this search finds nothing.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -47,8 +47,9 @@ export function candidateWebDirs(preferred?: string): string[] {
   add(preferred);
 
   /*
-   * The process working directory. In a platform bundle this is the function root, and
-   * `includeFiles` preserves repository-relative paths inside it.
+   * The process working directory — the function root on a platform, the repository root
+   * for `npm start`. Nothing is guaranteed to be here in a bundle; this is a candidate,
+   * not an assumption.
    */
   add(path.join(process.cwd(), 'apps', 'web', 'dist'));
   add(path.join(process.cwd(), 'dist'));
