@@ -7,7 +7,7 @@ There are two boards, for two readers:
 
 | Board | For | Shape |
 | --- | --- | --- |
-| `RELAYOS_GUIDED_TOUR` | someone who has never opened the repository | 14 frames, plain English on top, the real file / line / SQL underneath |
+| `RELAYOS_GUIDED_TOUR` | someone who has never opened the repository | 10 frames: an overview grid (00) then nine sections, plain English on top and the real file / line / SQL underneath |
 | `RELAYOS_SYSTEM_ARCHITECTURE` | an engineer navigating the code | 14 frames, dense, every component, path and line number |
 
 The guided tour is the front door; this document is the script you talk over while pointing at the dense one.
