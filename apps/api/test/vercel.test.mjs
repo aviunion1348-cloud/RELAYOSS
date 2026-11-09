@@ -439,24 +439,29 @@ test('vercel: the exported handler itself serves, streams and refuses correctly 
     const body = await missing.json();
     assert.ok(body.error?.code, 'a JSON error must carry a code');
 
-    // 4. The API function does not serve the SPA.
+    // 4. A browser route gets the document, because in this deployment the handler owns
+    //    the browser's paths.
     //
-    //    This assertion has changed twice, and the history is the point.
+    //    This assertion has changed three times, and the history is the point.
     //
-    //    Originally it required 200 + HTML for a browser route, which passed on a
-    //    workstation with a stale `apps/web/dist` and failed on every clean runner,
-    //    because CI builds the unit suite before the web build. That was fixed by
-    //    accepting either the document or the "build the web app first" 404.
+    //    It first required 200 + HTML, which passed on a workstation with a stale
+    //    `apps/web/dist` and failed on clean runners, because CI builds the unit suite
+    //    before the web build.
     //
-    //    In the multi-service deployment neither is right. Vercel rewrites every
-    //    non-`/api` path to the `web` service before a request reaches this
-    //    function, so a browser route arriving here means the routing config is
-    //    wrong. Serving a document — or a document's absence — makes that invisible.
-    //    The API function answers a JSON 404, which is a routing bug you can see.
+    //    It was then inverted to a JSON 404 for the multi-service deployment, where
+    //    Vercel rewrote non-`/api` traffic to a separate `web` service and a browser
+    //    route reaching the function meant the routing config was wrong.
+    //
+    //    The deployment is a single service now: the catch-all rewrite sends every
+    //    browser path to this handler, so `/` and deep links are its responsibility.
+    //    Returning 404 there broke the entire application in production while this
+    //    test insisted it was correct — so it now asserts the behaviour the deployment
+    //    depends on: a browser route is the SPA document, and `/api` is never.
     const spa = await fetch(`${base}/projects/some-deep-link`);
-    assert.equal(spa.status, 404, 'the API function answered a browser route as if it owned it');
-    assert.match(String(spa.headers.get('content-type')), /application\/json/i,
-      'a browser route reaching the API must not be answered with a document');
+    assert.equal(spa.status, 200, 'a browser route must be answered with the SPA document');
+    assert.match(String(spa.headers.get('content-type')), /text\/html/i,
+      'a browser route must be answered with a document, not JSON');
+    assert.match(await spa.text(), /<!doctype html>/i);
 
     /*
      * 5. A request with a body reaches the handler intact — the adapter must not

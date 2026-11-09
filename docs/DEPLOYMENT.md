@@ -52,7 +52,7 @@ the behaviour instead of simulating a routing table.
 | SPA | The same process serves `apps/web/dist` through `@fastify/static`, with a not-found handler | One origin means the browser has no cross-origin hop, and `/api` has no route to misconfigure. |
 | Deep links | The not-found handler answers a browser route with `index.html` | Reloading `/projects/pr_northwind` must not 404. |
 | Missing assets | The not-found handler returns **404** for any path that names a file | The naive fallback answers `/assets/index-abc123.js` with the document and status 200, so a stale reference renders a blank page with a MIME-type error instead of failing cleanly. A rewrite rule used to prevent this; the rule now lives in the handler, and `verify:routing` asserts it against the running process. |
-| Listening | **Immediately, before anything else.** The entry binds `PORT` on `0.0.0.0` with a plain `http` handler, then boots the app behind it | `framework: "fastify"` is a long-lived server: the platform routes the catch-all rewrite to whatever listens on `PORT`. An entrypoint that only exports a `(req, res)` handler binds nothing, so every path — `/` included — answers `500 FUNCTION_INVOCATION_FAILED` before any application code runs, with no way for the app to report why. This was the production outage; see §1.1.1. |
+| Listening | **Not in the entrypoint.** It exports a handler; the platform launcher binds and proxies. `apps/api/src/index.ts` is the process that listens, for `npm start` and Docker | The launcher stubs `http.Server.prototype.listen` while importing the module and never calls its callback, so an entrypoint that awaits `listen()` deadlocks the import. See §1.1.1 — this is the mistake that caused the outage. |
 | `app.ready()` | Called once per process, explicitly, before the first request is dispatched | Fastify installs its hook pipeline here. `listen()` does that for you, but the socket is owned by the entry's own server, so `ready()` is called directly rather than inherited. |
 | Background sweeper | A lazy sweep on real requests + `/api/cron/sweep` | `setInterval` does not survive between invocations, and instances are concurrent — a timer would either never fire or double-fire. |
 | Service-to-service | **None.** There is one service | With a single service there is no private URL to bind, and a hardcoded `localhost` in server code resolves to the caller itself in production. The guard fails on any loopback URL in server code. |
@@ -63,8 +63,7 @@ the behaviour instead of simulating a routing table.
 
 #### 1.1.1 The `500 FUNCTION_INVOCATION_FAILED` outage
 
-A preview deployment answered **every** path, `/` included, with Vercel's platform
-page:
+A preview deployment answered **every** path, `/` included, with Vercel's platform page:
 
 ```
 This page is unavailable
@@ -72,34 +71,52 @@ A function needed by this page temporarily failed.
 500 FUNCTION_INVOCATION_FAILED
 ```
 
-The cause was a contract mismatch, not a bug in any route. `vercel.json` deploys one
-`services` entry with `framework: "fastify"` — a **long-lived server** — and sends every
-browser path to it with a catch-all rewrite. The entrypoint had been written for the
-opposite model: it built the app, exported a `(req, res)` handler and never called
-`listen()`. Nothing bound `PORT`, so the platform had no server to route to.
+It was not a routing bug, a database bug or a migrations bug. It was the entrypoint
+failing the launcher's contract, and it happened twice in opposite directions.
 
-What made it survive review is that the deployment guard *enforced* the wrong shape:
-it failed the build if the entrypoint called `app.listen()`, on the stated grounds that
-"a function is invoked per request". The code and the check agreed with each other and
-disagreed with the platform.
+**The contract.** `framework: "fastify"` is only a filename hint; the invocation is
+`@vercel/node`'s `compileUserCode`, which:
 
-Two consequences worth keeping:
+1. replaces `http.Server.prototype.listen` with a stub that records the server and
+   **returns without binding and without invoking the callback**;
+2. `await import(entrypoint)` with that stub installed;
+3. peels up to five nested `.default` values;
+4. uses a **function** export per request; failing that, a server the module got
+   captured by the stub; failing that, it throws `Can't detect way to handle request`.
 
-* **The absence of an error body was itself the diagnostic.** Every failure path in
-  this application reports through a response — `503 misconfigured`, `500
-  handler_failed`, `500 deployment_misconfigured` — always JSON. A *platform* page
-  means the invocation died outside the handler, so no application code ran. Any
-  change that turns this into a JSON body has moved the fault, not fixed it.
-* **Existence is not liveness.** CI asserted the build produced
-  `dist/entrypoints/*.js` and that routing worked in-process; 268 tests passed against
-  a server the platform never reached. The service job now spawns the built entrypoint
-  as its own process and talks to it over a socket
-  (`apps/api/test/service-entry.test.mjs`).
+**Both failures came from that list:**
 
-The entry now listens first and boots behind the listener, so the port is bound even
-when the database is unreachable; a boot that cannot complete answers `503` naming the
-failed stage rather than exiting, because an exit code is invisible on this platform
-and reads as exactly the opaque 500 above.
+| Entrypoint shape | What the launcher did | What the user saw |
+| --- | --- | --- |
+| Built the app, exported a `(req, res)` handler, never listened — **and the guard failed the build if it *did* call `listen()`** | found a function… but the module graph was imported for a service shim that expected a server, and nothing bound a port | `500 FUNCTION_INVOCATION_FAILED` |
+| `await new Promise(r => server.listen(port, () => r()))` | step 1 swallowed the callback, so the promise never settled, `import()` never resolved, the invocation timed out | the same `500`, with no app log line |
+
+The second one is the important lesson: **binding a port is the wrong fix for this
+launcher.** The launcher binds, and only after the module finishes importing. Awaiting
+`listen()` inside the entrypoint deadlocks by construction.
+
+**What the entrypoint is now.** `apps/api/src/entrypoints/index.ts` exports a handler
+function and binds nothing. Everything else it needs is imported dynamically, inside the
+handler, in a `try`/`catch`, so a failure while loading the application becomes a JSON
+`500 { error: { code: "boot_failed", detail } }` naming the cause instead of an
+unexplained platform page. `apps/api/src/index.ts` remains the process that listens —
+the `npm start`, Docker and Compose path, where nothing stubs `listen`.
+
+**Why it survived review twice.** The absence of an error body was the diagnostic that
+was available all along: every failure path in this application reports through a
+response (`503 misconfigured`, `500 handler_failed`, `500 deployment_misconfigured`),
+always JSON. A *platform* page means the invocation died outside the handler, so no
+application code ran. And the checks agreed with the code rather than the platform —
+first a guard that forbade `listen()`, then tests that booted the app the way we would
+rather than the way the platform does. There is now a test that imports the built
+entrypoint **with `listen` stubbed**, which is the only local test that can see this
+class of failure (`apps/api/test/platform-launcher.test.mjs`).
+
+**A second defect fixed with it.** The handler was built with `serveStatic: false` from
+a two-service era. In a single service the catch-all rewrite sends every browser path
+here, so `/` and deep links were being answered `404` JSON by the only public
+entrypoint. `serveStatic` is now on, and the launcher test asserts `/` returns the
+document.
 
 ### 1.2 The project settings
 
@@ -548,9 +565,8 @@ the fallback and the entrypoint.
 * **no container service**, and no `Dockerfile.vercel` / `deploy/web-server.mjs`
   left behind as dead configuration — the duplicate SPA build that motivated its
   removal;
-* the declared entrypoint exists and **binds a port** — a service is a long-lived
-  server, and an entrypoint that only exports a request handler is the outage in
-  §1.1.1;
+* the declared entrypoint exists, **default-exports a handler**, and does **not** call
+  `.listen()` — both halves of the launcher contract in §1.1.1;
 * `web`'s output directory is `dist`, matching the service build;
 * **every service declares an `installCommand` containing `--include=dev`** — the
   production-mode install that omitted `vite` and broke the deploy;
@@ -571,7 +587,7 @@ never failed is a guard you do not know works.
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `503` with `{"error":{"code":"misconfigured"}}` from every `/api/*` route | The function booted but refused to start: `SESSION_SECRET` or `DATABASE_URL` is unset, or `RELAY_ADMIN_PASSWORD_HASH` is malformed. **This is the intended response** and it names the missing variables in `error.missing` | Read `error.summary` and `error.missing`, then follow `error.remedy`. Complete §1.4, redeploy, confirm `/api/ready` returns 200. Nothing is wrong with the browser or the build |
-| **Platform page: `500 FUNCTION_INVOCATION_FAILED` on every path, `/` included** | Nothing is listening on `PORT`. With `framework: "fastify"` the entrypoint must bind a port; if it only exports a handler the platform never reaches application code, so no JSON error envelope appears. See §1.1.1 | Confirm `apps/api/src/entrypoints/index.ts` calls `listen()`; `npm run guard` now fails the build if it does not, and `node --test apps/api/test/service-entry.test.mjs` boots the built artefact |
+| **Platform page: `500 FUNCTION_INVOCATION_FAILED` on every path, `/` included** | The entrypoint failed the launcher contract: no default export, or it awaited `.listen()` and deadlocked the import. No application code ran, so no JSON envelope appeared. See §1.1.1 | `npm run guard` fails the build on both shapes, and `node --test apps/api/test/platform-launcher.test.mjs` imports the built entrypoint exactly as the launcher does |
 | **`500` with a non-JSON body on every `/api` route** | The function has no handler at all. A version-gated built-in (`node:sqlite`) or a native binding (`argon2`) was imported statically, so the module graph threw while loading — before any error handling existed | Both are now imported on demand. If it recurs, check for a newly added static import of a native/version-gated module in the request graph |
 | Sign-in shows *"Could not reach the API"* rather than the variables above | The request never reached the function — the deployment has no `api` service, or the `/api` rewrite is missing | Check the rewrite order (§1.2) and that both services are detected in the build log |
 | The identity list never loads in development mode | Fixed: the screen called `GET /api/users`, the authenticated directory, which no anonymous visitor can read | `GET /api/auth/dev-users` is the anonymous, minimal counterpart. Update rather than special-casing the 401 |

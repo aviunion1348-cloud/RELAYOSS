@@ -1,28 +1,22 @@
 /**
- * The service entrypoint, executed the way the platform executes it.
+ * The container entrypoint — `apps/api/dist/index.js` — executed as a process.
  *
- * This file exists because of a production outage that every other check missed.
- * `vercel.json` deploys one **service** with `framework: "fastify"`: a long-lived
- * process that must bind `PORT`, to which the platform routes the catch-all rewrite.
- * The entrypoint had been written for the opposite model — it built the app, exported
- * a `(req, res)` handler and never listened — and the deployment guard *enforced*
- * that shape. Nothing bound the port, so the platform answered every path, `/`
- * included, with `500 FUNCTION_INVOCATION_FAILED` before any application code ran.
+ * This is the `npm start`, Docker and Compose path, and it is a different artefact
+ * from the deployed services entrypoint. The difference is deliberate and is the whole
+ * reason both are tested:
  *
- * Every existing test passed throughout. They all imported the app in-process, so
- * they were testing a server that the platform never reached. The missing assertion
- * was never "does the app work" — it was "does the deployed entrypoint come up".
+ *   dist/index.js              binds a port and owns the process. If it cannot boot it
+ *                              exits non-zero, because a supervisor (Docker, systemd,
+ *                              `npm start` in a terminal) is watching and will say so.
  *
- * So this test spawns the **built** entrypoint as its own process, with no
- * supertest, no in-process import and no stubbed `req`:
+ *   dist/entrypoints/index.js  exports a handler and binds nothing. The platform
+ *                              launcher stubs `listen` and proxies requests to the
+ *                              handler; exiting is invisible there, so it reports
+ *                              failures as JSON instead. Covered by
+ *                              `platform-launcher.test.mjs`.
  *
- *   - it must reach a listening socket at all (the exact property that was missing)
- *   - `/api/live` must answer 200 JSON from that socket
- *   - `/` must answer the built SPA document, because the catch-all sends browsers here
- *   - a boot that fails must answer 503 JSON naming the stage, not exit silently
- *
- * The process is spawned with `PORT=0` and the port is read back from its own log
- * line, which also proves the entry reports the socket it actually got.
+ * Both have failed in production at different times by being the other one, so both
+ * get a test that runs them rather than importing them.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,171 +28,152 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
-const entry = path.join(repoRoot, 'apps/api/dist/entrypoints/index.js');
+const entry = path.join(repoRoot, 'apps/api/dist/index.js');
 const webIndex = path.join(repoRoot, 'apps/web/dist/index.html');
-
-/* The built artefact is the thing under test; without it the test would be a lie. */
 const built = fs.existsSync(entry) && fs.existsSync(webIndex);
 
+/** A fresh SQLite database per test, so one test's writes cannot explain another's. */
+function tempDb() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-container-'));
+  return path.join(dir, 'relay.sqlite');
+}
+
 /**
- * Spawn the entrypoint and wait for its listening line.
+ * Spawn the entry and wait until it is serving.
  *
- * Rejects on exit before listening, and carries the collected output into the error,
- * because "the process died" without its stderr is the least useful failure message
- * available.
+ * Fastify logs `Server listening at http://127.0.0.1:<port>` — the *actual* port — which
+ * is what makes `PORT=0` usable here: the test never has to guess a free port or race
+ * another process for one.
  */
-async function start(env, { waitForListen = true } = {}) {
+async function startServing(env, timeoutMs = 30_000) {
   const logs = [];
-  const child = spawn(process.execPath, [entry], {
+  const child = spawn(process.execPath, ['--no-warnings', entry], {
     cwd: repoRoot,
     env: { ...process.env, PORT: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
   const output = () => logs.join('');
-  const collect = (chunk) => {
-    logs.push(chunk.toString());
-  };
-  child.stdout?.on('data', collect);
-  child.stderr?.on('data', collect);
+  const collect = (chunk) => logs.push(chunk.toString());
+  child.stdout.on('data', collect);
+  child.stderr.on('data', collect);
 
-  const exited = new Promise((_, reject) => {
+  const port = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`entry did not start serving within ${timeoutMs}ms\n${output()}`));
+    }, timeoutMs);
+
+    const check = () => {
+      const match = /Server listening at http:\/\/[^\s:]+:(\d+)/.exec(output());
+      if (match) {
+        clearTimeout(timer);
+        resolve(Number(match[1]));
+      }
+    };
+    child.stdout.on('data', check);
+    child.stderr.on('data', check);
     child.once('exit', (code, signal) => {
-      reject(new Error(`entrypoint exited before listening (code=${code} signal=${signal})\n${output()}`));
+      clearTimeout(timer);
+      reject(new Error(`entry exited before serving (code=${code} signal=${signal})\n${output()}`));
     });
   });
-  /* Only reject on exit when the caller is waiting for the listener. */
-  exited.catch(() => {});
 
-  if (!waitForListen) {
-    return { child, port: 0, logs, output };
-  }
+  const stop = async () => {
+    if (child.exitCode !== null) return;
+    await new Promise((resolve) => {
+      child.once('exit', resolve);
+      child.kill('SIGTERM');
+      const force = setTimeout(() => {
+        if (child.exitCode === null) child.kill('SIGKILL');
+        resolve();
+      }, 5_000);
+      force.unref?.();
+    });
+  };
 
-  const port = await Promise.race([
-    exited,
-    new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`entrypoint never listened within 30s\n${output()}`));
-      }, 30_000);
-      const onData = () => {
-        const match = /"msg":"listening on [^"]*:(\d+)"/.exec(output());
-        if (match) {
-          clearTimeout(timer);
-          resolve(Number(match[1]));
-        }
-      };
-      child.stdout?.on('data', onData);
-      child.stderr?.on('data', onData);
-    }),
-  ]);
-
-  return { child, port, logs, output };
+  return { port, output, stop };
 }
-
-async function stop(started) {
-  if (started.child.exitCode !== null) return;
-  await new Promise((resolve) => {
-    started.child.once('exit', () => resolve());
-    started.child.kill('SIGTERM');
-    setTimeout(() => {
-      if (started.child.exitCode === null) started.child.kill('SIGKILL');
-      resolve();
-    }, 5_000).unref?.();
-  });
-}
-
-/** A fresh SQLite file per test, so a boot failure cannot be blamed on another test. */
-function tempDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-entry-'));
-  return path.join(dir, 'relay.sqlite');
-}
-
-test('the built service entrypoint binds a port and serves the app', { skip: !built && 'no dist/ build' }, async () => {
-  const started = await start({
-    /* SQLite, because this assertion is about wiring, not about Postgres. */
-    DATABASE_URL: '',
-    DB_PATH: tempDb(),
-    NODE_ENV: 'test',
-    LOG_LEVEL: 'warn',
-  });
-
-  try {
-    assert.ok(started.port > 0, 'the entrypoint must report the port it bound');
-
-    const live = await fetch(`http://127.0.0.1:${started.port}/api/live`);
-    assert.equal(live.status, 200, `GET /api/live should be 200, got ${live.status}\n${started.output()}`);
-    const body = await live.json();
-    assert.equal(body?.data?.live, true, 'liveness must be reported as live');
-
-    /*
-     * `/` is the path from the outage report. It must return the SPA document: the
-     * catch-all rewrite sends every browser path to this service, so a service that
-     * serves only `/api/*` leaves the application unreachable.
-     */
-    const root = await fetch(`http://127.0.0.1:${started.port}/`);
-    assert.equal(root.status, 200, `GET / should be 200, got ${root.status}\n${started.output()}`);
-    assert.match(root.headers.get('content-type') ?? '', /text\/html/);
-    assert.match(await root.text(), /<!doctype html>/i);
-  } finally {
-    await stop(started);
-  }
-});
 
 test(
-  'a deep link is answered with the SPA, not a 404 the router never sees',
-  { skip: !built && 'no dist/ build' },
+  'the container entry binds a port and serves the API and the SPA',
+  { skip: !built && 'no dist/ build', timeout: 90_000 },
   async () => {
-    const started = await start({
+    const { port, output, stop } = await startServing({
       DATABASE_URL: '',
       DB_PATH: tempDb(),
       NODE_ENV: 'test',
-      LOG_LEVEL: 'warn',
+      /*
+       * `info`, not `warn`: the "Server listening at" line this waits for is an info
+       * record, and silencing it made this test time out with no output at all.
+       */
+      LOG_LEVEL: 'info',
     });
+
     try {
-      const res = await fetch(`http://127.0.0.1:${started.port}/clients`);
-      assert.equal(res.status, 200, `GET /clients should be 200, got ${res.status}\n${started.output()}`);
-      assert.match(res.headers.get('content-type') ?? '', /text\/html/);
+      const live = await fetch(`http://127.0.0.1:${port}/api/live`);
+      assert.equal(live.status, 200, `GET /api/live should be 200\n${output()}`);
+      assert.equal((await live.json())?.data?.live, true);
+
+      /*
+       * The single-process deployment serves the SPA itself. If this fails, `npm start`
+       * and the Docker image both hand a browser a JSON 404 at `/`.
+       */
+      const root = await fetch(`http://127.0.0.1:${port}/`);
+      assert.equal(root.status, 200, `GET / should be 200\n${output()}`);
+      assert.match(root.headers.get('content-type') ?? '', /text\/html/);
+      assert.match(await root.text(), /<!doctype html>/i);
+
+      const deepLink = await fetch(`http://127.0.0.1:${port}/clients`);
+      assert.equal(deepLink.status, 200, `GET /clients should be 200\n${output()}`);
+      assert.match(deepLink.headers.get('content-type') ?? '', /text\/html/);
     } finally {
-      await stop(started);
+      await stop();
     }
   },
 );
 
 test(
-  'an unbootable configuration stays up and explains itself instead of exiting',
-  { skip: !built && 'no dist/ build' },
+  'the container entry exits non-zero when it cannot boot, rather than serving nothing',
+  { skip: !built && 'no dist/ build', timeout: 90_000 },
   async () => {
     /*
-     * A Postgres URL with nothing listening on it. The deployed service must not exit:
-     * an exit is invisible on the platform and reads as "the function failed", which
-     * is the opaque 500 this whole change is about. It must answer 503 with the stage.
+     * A supervisor runs this process, so a failure must be an exit it can act on — and
+     * its stderr must name the reason, which is what the old opaque 500 never did.
+     * Staying up and answering 503 is the *other* entrypoint's job, for a platform where
+     * there is no supervisor to read an exit code.
      */
-    const started = await start({
-      DATABASE_URL: 'postgres://relay:relay@127.0.0.1:1/relay',
-      DB_PATH: tempDb(),
-      NODE_ENV: 'test',
-      LOG_LEVEL: 'warn',
+    const logs = [];
+    const child = spawn(process.execPath, ['--no-warnings', entry], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PORT: '0',
+        DATABASE_URL: 'postgres://relay:relay@127.0.0.1:1/relay',
+        DB_PATH: tempDb(),
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'warn',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    try {
-      assert.ok(started.port > 0, 'a failed boot must still bind a port so it can report');
+    child.stdout.on('data', (c) => logs.push(c.toString()));
+    child.stderr.on('data', (c) => logs.push(c.toString()));
 
-      const res = await fetch(`http://127.0.0.1:${started.port}/api/live`);
-      assert.equal(res.status, 503, `expected 503 while misconfigured, got ${res.status}`);
-      assert.match(res.headers.get('content-type') ?? '', /application\/json/);
-      assert.equal(res.headers.get('cache-control'), 'no-store, max-age=0');
+    const code = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        reject(new Error(`entry neither served nor exited within 60s\n${logs.join('')}`));
+      }, 60_000);
+      child.once('exit', (exitCode) => {
+        clearTimeout(timer);
+        resolve(exitCode);
+      });
+    });
 
-      const body = await res.json();
-      assert.equal(body?.error?.code, 'misconfigured');
-      assert.ok(
-        typeof body.error.stage === 'string' && body.error.stage.length > 0,
-        'the report must name the boot stage that failed',
-      );
-      assert.ok(
-        typeof body.error.summary === 'string' && !/^Failed to start\.?$/.test(body.error.summary),
-        'the report must carry the underlying reason, not a placeholder',
-      );
-    } finally {
-      await stop(started);
-    }
+    assert.notEqual(code, 0, 'an unbootable configuration must not exit 0');
+    assert.match(
+      logs.join(''),
+      /ECONNREFUSED|connect/i,
+      'the failure must be reported in the log, not swallowed',
+    );
   },
 );

@@ -14,19 +14,31 @@ production image.
 
 ## Quick start
 
+Requires Node **22.18+** (24 is fine). Nothing else: no database server, no Docker, no
+`.env`.
+
 ```bash
 npm install
 npm run db:reset     # migrate + seed a realistic studio (89 tasks, 6 projects, 12 deals)
 npm run dev          # API :4000 + SPA :5173
 ```
 
-Open <http://localhost:5173>. No database server, no Docker, no `.env` needed.
+Open <http://localhost:5173>.
+
+`npm install` installs both projects. `apps/web` is a separate npm project — its own
+lockfile, and deliberately not a workspace member so its install cannot disturb the
+API's dependencies — so a root `postinstall` installs it. Without that, `npm run dev`
+starts the API and then fails with `'vite' is not recognized`.
 
 Production-style (single origin, SPA served by the API):
 
 ```bash
-npm run build && npm start     # http://localhost:4000
+npm start            # builds, then serves on http://localhost:4000
 ```
+
+`npm start` compiles first (`prestart`), because it runs `apps/api/dist/index.js` and a
+fresh clone has no `dist`. `npm run build && npm start` still works and skips the
+double compile.
 
 Docker:
 

@@ -159,25 +159,39 @@ if (cfg) {
       fail(`service "${name}" entrypoint "${entry}" does not exist`);
     } else {
       /*
-       * `services` with `framework: "fastify"` runs the entrypoint as a long-lived
-       * server and routes traffic to whatever listens on `PORT`. It is not invoked
-       * per request, so an entrypoint that builds the app and exports a `(req, res)`
-       * handler without listening is not "serverless" — it is a process that never
-       * binds a port. The platform then has nothing to route to and answers every
-       * path, including `/`, with `500 FUNCTION_INVOCATION_FAILED`, before any
-       * application code runs and therefore with no way for the app to explain
-       * itself. That is exactly the failure this check now prevents.
+       * What the platform actually requires of a services entrypoint, from the launcher's
+       * own source (`@vercel/node`, `compileUserCode`):
+       *
+       *   it stubs `http.Server.prototype.listen`, imports the module, peels nested
+       *   `.default` values, then uses a **function** export per request, or a captured
+       *   server, or throws `Can't detect way to handle request`.
+       *
+       * Both failures this deployment has had came from that contract, in opposite
+       * directions, and both were green here first:
+       *
+       *   - an entrypoint with no default export and no listen     → the throw above;
+       *   - `await new Promise(r => server.listen(p, () => r()))`  → the stub swallows the
+       *     callback, the module import never resolves, the invocation times out.
+       *
+       * So the entrypoint must export a handler and must not bind: the launcher binds,
+       * and only after the module has finished importing.
        */
       const src = stripComments(read(entry.replace(/^\.\//, '')));
-      const bindsPort =
-        /\b(?:app|server|fastify|instance)\s*\.\s*listen\s*\(/.test(src) ||
-        /\bcreateServer\s*\(/.test(src) ||
-        /\bBun\.serve\s*\(/.test(src);
-      if (!bindsPort) {
+      if (!/export\s+default\s+(async\s+)?function|export\s+default\s+\w+\s*;?\s*$|export\s+\{[^}]*\bas\s+default\b/.test(src)) {
         fail(
-          `service "${name}" entrypoint "${entry}" never binds a port. A fastify service is a ` +
-            'long-lived server: the platform routes requests to PORT, so an entrypoint that only ' +
-            'exports a request handler answers every path with 500 FUNCTION_INVOCATION_FAILED',
+          `service "${name}" entrypoint "${entry}" has no default export. The platform's launcher ` +
+            'peels `.default` and uses it as the request handler; with none it finds neither a ' +
+            'function nor a server and throws "Can\'t detect way to handle request", which surfaces ' +
+            'as 500 FUNCTION_INVOCATION_FAILED on every path',
+        );
+      }
+      if (/(?:^|\n)\s*(?:await\s+)?new\s+Promise\s*\([^)]*\.listen\s*\(|\.listen\s*\(/.test(src)) {
+        fail(
+          `service "${name}" entrypoint "${entry}" calls .listen(). The launcher stubs ` +
+            'http.Server.prototype.listen while importing the module and never invokes the ' +
+            'callback, so awaiting a listen here hangs the import and times out the invocation. ' +
+            'Export the handler and let the platform bind; apps/api/src/index.ts is the process ' +
+            'that listens for npm start and Docker',
         );
       }
     }
@@ -501,7 +515,7 @@ if (cfg) {
           '500 FUNCTION_INVOCATION_FAILED',
       );
     } else {
-      note(`engines.node ${engines} (bounded to the Node 22 LTS line, type stripping available)`);
+      note(`engines.node ${engines} (bounded, type stripping available, Node 24 permitted for local work)`);
     }
   }
 }
