@@ -1,7 +1,7 @@
 # Deployment
 
-Three supported paths: **Vercel** (serverless, the requested target), **Node
-directly**, and **Docker Compose**.
+Three supported paths: **Vercel** (one long-lived Fastify service, the requested
+target), **Node directly**, and **Docker Compose**.
 
 > **On the Vercel path specifically.** Everything below — the function entry point,
 > the routing, the connection budget, the cron endpoint, the auth mode — is
@@ -48,18 +48,58 @@ the behaviour instead of simulating a routing table.
 
 | Concern | How it is handled | Why not the obvious way |
 | --- | --- | --- |
-| API | `apps/api/src/entrypoints/index.ts` → `entrypoints/vercel.ts`, compiled to `apps/api/dist/entrypoints/vercel.js` | Vercel's Fastify preset discovers entrypoints by filename, and `src/index.ts` is on that list — but that file calls `app.listen()` and starts a `setInterval`. The handler lives in `entrypoints/` precisely so the preset cannot resolve to the long-lived entry. `api/index.js` is retained as the wrapper and delegates to the same artefact. |
+| API | `apps/api/src/entrypoints/index.ts`, declared explicitly in `vercel.json` and compiled to `apps/api/dist/entrypoints/index.js` | The entrypoint is named rather than discovered, so the file production runs is the file CI boots. `entrypoints/vercel.ts` remains as the in-process handler the tests drive; it is **not** the deployed entry. |
 | SPA | The same process serves `apps/web/dist` through `@fastify/static`, with a not-found handler | One origin means the browser has no cross-origin hop, and `/api` has no route to misconfigure. |
 | Deep links | The not-found handler answers a browser route with `index.html` | Reloading `/projects/pr_northwind` must not 404. |
 | Missing assets | The not-found handler returns **404** for any path that names a file | The naive fallback answers `/assets/index-abc123.js` with the document and status 200, so a stale reference renders a blank page with a MIME-type error instead of failing cleanly. A rewrite rule used to prevent this; the rule now lives in the handler, and `verify:routing` asserts it against the running process. |
-| Listening | Never, in the function. The handler mounts `app.server` and returns | `app.listen()` binds a port nothing routes to. It works locally and fails silently on the platform. |
-| `app.ready()` | Called once per instance, explicitly | Fastify installs its hook pipeline here. `listen()` does that for you; without `listen()` the first request crashes inside the hook runner. |
+| Listening | **Immediately, before anything else.** The entry binds `PORT` on `0.0.0.0` with a plain `http` handler, then boots the app behind it | `framework: "fastify"` is a long-lived server: the platform routes the catch-all rewrite to whatever listens on `PORT`. An entrypoint that only exports a `(req, res)` handler binds nothing, so every path — `/` included — answers `500 FUNCTION_INVOCATION_FAILED` before any application code runs, with no way for the app to report why. This was the production outage; see §1.1.1. |
+| `app.ready()` | Called once per process, explicitly, before the first request is dispatched | Fastify installs its hook pipeline here. `listen()` does that for you, but the socket is owned by the entry's own server, so `ready()` is called directly rather than inherited. |
 | Background sweeper | A lazy sweep on real requests + `/api/cron/sweep` | `setInterval` does not survive between invocations, and instances are concurrent — a timer would either never fire or double-fire. |
 | Service-to-service | **None.** There is one service | With a single service there is no private URL to bind, and a hardcoded `localhost` in server code resolves to the caller itself in production. The guard fails on any loopback URL in server code. |
 | Database | `DATABASE_URL` (PostgreSQL, **pooled** endpoint) — **required** | SQLite cannot be written from parallel serverless instances. A local file in `/tmp` accepted writes and lost them on the next cold start; the runtime now refuses to boot without `DATABASE_URL` rather than falling back. |
 | Connections | `DATABASE_POOL_MAX`, defaulting to 3 on Vercel | Each instance owns a pool. `pg`'s default of 10 × concurrent instances exhausts a managed database. |
 | Migrations | `npm run db:migrate:prod`, run by the operator | Migrating on every request is a race and a latency tax. One command, deliberately separate. |
 | Auth | **None.** The API authenticates nobody | This is a deliberate, single-tenant deployment: `/` opens the dashboard with no sign-in. Access control belongs to the hosting layer — see `docs/AUTH-REMOVAL.md`. |
+
+#### 1.1.1 The `500 FUNCTION_INVOCATION_FAILED` outage
+
+A preview deployment answered **every** path, `/` included, with Vercel's platform
+page:
+
+```
+This page is unavailable
+A function needed by this page temporarily failed.
+500 FUNCTION_INVOCATION_FAILED
+```
+
+The cause was a contract mismatch, not a bug in any route. `vercel.json` deploys one
+`services` entry with `framework: "fastify"` — a **long-lived server** — and sends every
+browser path to it with a catch-all rewrite. The entrypoint had been written for the
+opposite model: it built the app, exported a `(req, res)` handler and never called
+`listen()`. Nothing bound `PORT`, so the platform had no server to route to.
+
+What made it survive review is that the deployment guard *enforced* the wrong shape:
+it failed the build if the entrypoint called `app.listen()`, on the stated grounds that
+"a function is invoked per request". The code and the check agreed with each other and
+disagreed with the platform.
+
+Two consequences worth keeping:
+
+* **The absence of an error body was itself the diagnostic.** Every failure path in
+  this application reports through a response — `503 misconfigured`, `500
+  handler_failed`, `500 deployment_misconfigured` — always JSON. A *platform* page
+  means the invocation died outside the handler, so no application code ran. Any
+  change that turns this into a JSON body has moved the fault, not fixed it.
+* **Existence is not liveness.** CI asserted the build produced
+  `dist/entrypoints/*.js` and that routing worked in-process; 268 tests passed against
+  a server the platform never reached. The service job now spawns the built entrypoint
+  as its own process and talks to it over a socket
+  (`apps/api/test/service-entry.test.mjs`).
+
+The entry now listens first and boots behind the listener, so the port is bound even
+when the database is unreachable; a boot that cannot complete answers `503` naming the
+failed stage rather than exiting, because an exit code is invisible on this platform
+and reads as exactly the opaque 500 above.
 
 ### 1.2 The project settings
 
@@ -97,7 +137,7 @@ Three signals in that log identify it, and none of them is a repository defect:
 | Build Command | **Leave empty.** A value here overrides the service's `buildCommand` even when the preset is Services |
 | Install Command | **Leave empty.** Same reason |
 | Output Directory | **Leave empty** — the Fastify service has no static output directory; it serves `apps/web/dist` itself |
-| Node.js Version | **22.x** (`engines.node` is `>=22.5.0 <23`; verified on v22.22.3) |
+| Node.js Version | **22.x** (`engines.node` is `>=22.18.0 <23`; verified on v22.22.3) |
 
 If an existing project was imported before the preset was switched, the framework
 preset and any Build/Install Command overrides must be corrected before redeploying.
@@ -183,8 +223,8 @@ installs at the root and builds both workspaces — a genuinely different thing,
 exactly how a missing build tool reached production while CI stayed green.
 
 **Does `include=dev` ship the development toolchain to production?** No. The
-serverless bundle is not the install tree: Vercel traces the function's actual imports
-and ships only those. Traced from `apps/api/dist/entrypoints/vercel.js`: **80 packages,
+deployed bundle is not the install tree: Vercel traces the service's actual imports
+and ships only those. Traced from `apps/api/dist/entrypoints/index.js`: **80 packages,
 655 files, and zero files from `vite`, `typescript`, `playwright`, `embedded-postgres`,
 `@vitejs/*`, `tailwindcss` or `concurrently`.** The bundle is Fastify, `pg`, `argon2`,
 `zod` and their transitive dependencies.
@@ -193,7 +233,10 @@ The dev toolchain occupies build-machine disk for the duration of the build and 
 else. That is the normal arrangement for compiling TypeScript at build time, and it is
 cheaper than the alternative: a runtime install that cannot rebuild the bundle.
 
-**Node version.** `engines.node` is a bounded range, `>=22.5.0 <23`, not `>=22.5.0`.
+**Node version.** `engines.node` is a bounded range, `>=22.18.0 <23`, not `>=22.18.0`.
+The lower bound is not a preference: the deployed entrypoint is TypeScript importing
+`.ts` specifiers, which Node executes only with default type stripping (22.18.0 and
+later). A floor below that pins a range that cannot run the file it selects.
 An open-ended lower bound is satisfied by every future major, so Vercel would auto-upgrade
 the build image and change the runtime without anyone deciding to — the deploy log warned
 about precisely this. GitHub Actions uses `node-version: 22`, so CI and the platform stay
@@ -505,8 +548,9 @@ the fallback and the entrypoint.
 * **no container service**, and no `Dockerfile.vercel` / `deploy/web-server.mjs`
   left behind as dead configuration — the duplicate SPA build that motivated its
   removal;
-* `api`'s declared entrypoint exists and does **not** call `app.listen()` or start a
-  timer — the failure that would land the Fastify preset on the long-lived entry;
+* the declared entrypoint exists and **binds a port** — a service is a long-lived
+  server, and an entrypoint that only exports a request handler is the outage in
+  §1.1.1;
 * `web`'s output directory is `dist`, matching the service build;
 * **every service declares an `installCommand` containing `--include=dev`** — the
   production-mode install that omitted `vite` and broke the deploy;
@@ -527,6 +571,7 @@ never failed is a guard you do not know works.
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `503` with `{"error":{"code":"misconfigured"}}` from every `/api/*` route | The function booted but refused to start: `SESSION_SECRET` or `DATABASE_URL` is unset, or `RELAY_ADMIN_PASSWORD_HASH` is malformed. **This is the intended response** and it names the missing variables in `error.missing` | Read `error.summary` and `error.missing`, then follow `error.remedy`. Complete §1.4, redeploy, confirm `/api/ready` returns 200. Nothing is wrong with the browser or the build |
+| **Platform page: `500 FUNCTION_INVOCATION_FAILED` on every path, `/` included** | Nothing is listening on `PORT`. With `framework: "fastify"` the entrypoint must bind a port; if it only exports a handler the platform never reaches application code, so no JSON error envelope appears. See §1.1.1 | Confirm `apps/api/src/entrypoints/index.ts` calls `listen()`; `npm run guard` now fails the build if it does not, and `node --test apps/api/test/service-entry.test.mjs` boots the built artefact |
 | **`500` with a non-JSON body on every `/api` route** | The function has no handler at all. A version-gated built-in (`node:sqlite`) or a native binding (`argon2`) was imported statically, so the module graph threw while loading — before any error handling existed | Both are now imported on demand. If it recurs, check for a newly added static import of a native/version-gated module in the request graph |
 | Sign-in shows *"Could not reach the API"* rather than the variables above | The request never reached the function — the deployment has no `api` service, or the `/api` rewrite is missing | Check the rewrite order (§1.2) and that both services are detected in the build log |
 | The identity list never loads in development mode | Fixed: the screen called `GET /api/users`, the authenticated directory, which no anonymous visitor can read | `GET /api/auth/dev-users` is the anonymous, minimal counterpart. Update rather than special-casing the 401 |
@@ -555,10 +600,11 @@ never failed is a guard you do not know works.
 1. No deployment was performed. There is no URL, no project, no team id. The
    configuration is implemented and locally exercised; the platform itself is the
    requester's step.
-2. The serverless handler was verified by mounting it on a real
-   `http.createServer` and driving it with `fetch` against PostgreSQL 16 — which
-   covers routing, readiness, auth and cron, but not Vercel's own invocation
-   wrapper, cold-start timing, or edge network behaviour.
+2. The built service entrypoint is spawned as its own process and driven with `fetch`
+   over a real socket (`apps/api/test/service-entry.test.mjs`) — which covers binding
+   `PORT`, the SPA at `/` and deep links, `/api/live`, and the 503 report for an
+   unbuildable configuration, but not Vercel's own launcher, cold-start timing, or
+   edge network behaviour.
 3. No managed PostgreSQL provider was contacted. The pool sizing and SSL guidance
    are applicable to one; they were not tested against one.
 4. Vercel-specific limits (30 s function duration, 4.5 MB request body on Hobby)

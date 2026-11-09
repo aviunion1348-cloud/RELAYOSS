@@ -60,7 +60,7 @@
     "playwright": "^1.49.1"
   },
   "engines": {
-    "node": ">=22.5.0 <23"
+    "node": ">=22.18.0 <23"
   },
   "dependencies": {
     "argon2": "^0.41.1"

@@ -9,8 +9,8 @@
  * configuration, not the thing itself.
  *
  * The deployment is now one process on one origin, so the honest test is to boot
- * that process and ask it. This starts the compiled server (`apps/api/dist/index.js`)
- * against a throwaway database, points it at the real `apps/web/dist` build, and
+ * that process and ask it. This starts the compiled server against a throwaway
+ * database, points it at the real `apps/web/dist` build, and
  * asserts the behaviours that the previous outages came from:
  *
  *   `/` and a deep link      → the SPA document, so a browser refresh on
@@ -35,7 +35,15 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'apps/web/dist');
-const ENTRY = path.join(ROOT, 'apps/api/dist/index.js');
+/*
+ * Which compiled entry to boot. The default is the container entry behind `npm start`
+ * and the Docker image. CI also runs this against `dist/entrypoints/index.js`, the file
+ * `vercel.json` actually deploys, because the two are separate artefacts: a routing
+ * assertion is only worth something when it is made against the process production runs.
+ */
+const ENTRY = process.env.RELAY_ENTRY
+  ? path.resolve(ROOT, process.env.RELAY_ENTRY)
+  : path.join(ROOT, 'apps/api/dist/index.js');
 const PORT = Number(process.env.ROUTING_PORT ?? 47311);
 const BASE = `http://127.0.0.1:${PORT}`;
 
