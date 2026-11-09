@@ -60,6 +60,17 @@ function walk(dir) {
     if (full.endsWith(path.join('db', 'sql.ts'))) continue;
     // migrate.ts builds the dialect-specific ledger DDL by design.
     if (full.endsWith(path.join('db', 'migrate.ts'))) continue;
+    /*
+     * The embedded migration bundle is the migration SQL itself, generated verbatim
+     * from `db/migrations/`. Its SQLite statements are *supposed* to be SQLite
+     * dialect — the PostgreSQL counterpart is in the same file — so scanning it
+     * reports the schema as unportable for being exactly what it is.
+     *
+     * Exempting it cannot hide a real defect: the bundle is generated, so hand-edited
+     * SQL never appears here, and `check-migrations-bundle.mjs` fails the build if it
+     * differs from the files by a single byte.
+     */
+    if (full.endsWith(path.join('db', 'migrations-bundle.ts'))) continue;
     const lines = fs.readFileSync(full, 'utf8').split('\n');
     lines.forEach((line, i) => {
       if (/sql-portable-ok/.test(line)) return;
