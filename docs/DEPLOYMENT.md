@@ -390,7 +390,7 @@ it is a supported (if non-durable) configuration.
 ```bash
 # 1. Migrate the schema. Idempotent, safe to re-run.
 DATABASE_URL='postgres://…' npm run db:migrate:prod
-# Expected: "✓ migrations applied: 16" (or "already at version 15" on a re-run)
+# Expected: "✓ migrations applied: 17" (or "already at version N" on a re-run)
 
 # 2. Seed the demo studio. Required only on a fresh database: the API attributes
 #    requests to a row in `users`, and cannot invent one.

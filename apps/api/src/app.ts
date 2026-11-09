@@ -231,6 +231,45 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
     );
   });
 
+  /*
+   * The change log.
+   *
+   * The live feed needs one question answered cheaply: "has anything changed since
+   * X?". The obvious source is `audit_log` — an integer primary key is a perfect
+   * version counter — except almost nothing wrote to it: five of forty-nine mutating
+   * routes did, so the feed would have been blind to most edits and every screen would
+   * have gone quietly stale.
+   *
+   * The fix has to be at the one place every write already passes through, not in
+   * forty-nine handlers that someone will forget to extend. This hook records *that*
+   * a mutation succeeded, not *what* it contained: the audit trail stays the place
+   * for rich, entity-specific history, while this table exists only to be counted.
+   *
+   * Two properties make it cheap enough to run on every write:
+   *
+   *   - one statement, no transaction, appended after the response is composed;
+   *   - a failure is swallowed. A change that happened but was not recorded costs a
+   *     stale screen until the next write; a write that succeeded and then reported
+   *     an error because bookkeeping failed is far worse.
+   */
+  const METHODS_THAT_CHANGE_STATE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+  app.addHook('onResponse', async (req, reply) => {
+    if (!METHODS_THAT_CHANGE_STATE.has(req.method)) return;
+    if (reply.statusCode >= 400) return;
+    // The cron sweep is a write, but it is a scheduler's write and nobody is watching.
+    if (req.url.startsWith('/api/cron/')) return;
+    const entityType = entityTypeFor(req.url);
+    if (!entityType) return;
+    try {
+      await db.run(
+        'INSERT INTO change_log (entity_type, entity_id, method, path) VALUES (?,?,?,?)',
+        [entityType, entityIdFrom(req.url), req.method, req.url.split('?')[0].slice(0, 200)],
+      );
+    } catch {
+      /* bookkeeping must never fail a request that already succeeded */
+    }
+  });
+
   app.setErrorHandler((rawErr: unknown, req, reply) => {
     // Fastify's own 4xx errors (unsupported media type, payload too large,
     // malformed body) carry a statusCode; map them to the API's error shape
@@ -462,4 +501,52 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   }
 
   return { app, db };
+}
+
+/**
+ * Which entity type a mutating path touches, derived from the path itself.
+ *
+ * Deliberately a table rather than per-route bookkeeping: it is one place to change,
+ * it works for a route that was added without thinking about the change feed, and the
+ * URL is the only thing every route is guaranteed to have.
+ *
+ * `/api/docs/abc` → `doc`, `/api/insights/x%3Ay/dismiss` → `insight`. The first version
+ * of this guessed `changes` for everything, which made every write invalidate the
+ * feed's own query — a self-sustaining refresh loop. That is why the mapping is a path
+ * segment and not a noun invented from the last word.
+ */
+function entityTypeFor(pathname: string): string | null {
+  const segments = pathname.split('?')[0].split('/').filter(Boolean);
+  // ['api', '<resource>', ...]
+  if (segments[0] !== 'api' || segments.length < 2) return null;
+  const resource = segments[1];
+  const plural: Record<string, string> = {
+    tasks: 'task',
+    clients: 'client',
+    partners: 'partner',
+    projects: 'project',
+    deals: 'deal',
+    docs: 'doc',
+    qa: 'qa_report',
+    releases: 'release',
+    insights: 'insight',
+    clocks: 'clock',
+    planner: 'planner_run',
+    comms: 'thread',
+    meetings: 'meeting',
+    legal: 'legal_document',
+    notifications: 'notification',
+    'change-requests': 'change_request',
+    acceptance: 'acceptance',
+  };
+  return plural[resource] ?? null;
+}
+
+/** The id-ish segment of a mutating path, for the record. Never used as a key. */
+function entityIdFrom(pathname: string): string {
+  const segments = pathname.split('?')[0].split('/').filter(Boolean);
+  const candidate = segments[2] ?? '';
+  // Only something that looks like an identifier: an action segment (`sweep`,
+  // `dismiss`) is not an entity.
+  return /^[A-Za-z0-9_.%:-]{1,80}$/.test(candidate) ? decodeURIComponent(candidate).slice(0, 80) : '';
 }

@@ -4,6 +4,8 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icons } from './icons';
 import { ApiFailure } from './ApiFailure';
+import { LivePulse } from './LivePulse';
+import { useLiveUpdates } from '../lib/live';
 import { api, type SessionInfo } from '../lib/api';
 import { cls } from '../lib/cls';
 import { clockLabel, inr, relTime } from '../lib/format';
@@ -196,6 +198,17 @@ function ClockStrip() {
 export function Shell({ children, session }: { children: React.ReactNode; session?: SessionInfo }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const location = useLocation();
+  /*
+   * The live feed is mounted once, here, because every screen is inside the shell.
+   * Mounting it per page would restart the baseline on every navigation and either
+   * miss changes made while a slow page was loading or refetch the world each time.
+   */
+  /*
+   * Enabled whenever the shell is mounted. There is no sign-in to wait for, so the
+   * only reason not to poll is that the page is hidden — which the hook checks itself.
+   */
+  useLiveUpdates(true);
+  void session;
   const metaQuery = useQuery({ queryKey: ['meta'], queryFn: api.meta });
   const notificationsQuery = useQuery({ queryKey: ['notifications'], queryFn: api.notifications });
   const meta = metaQuery.data;
@@ -333,6 +346,7 @@ export function Shell({ children, session }: { children: React.ReactNode; sessio
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            <LivePulse />
             <ClockStrip />
             <div className="relative">
               <Button variant="ghost" size="sm" onClick={() => setShowNotifs((s) => !s)} className="relative">

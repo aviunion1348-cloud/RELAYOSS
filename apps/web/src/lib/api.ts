@@ -383,6 +383,21 @@ export const api = {
   updateQA: (id: string, patch: Record<string, unknown>) => request(`/qa/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   releases: () => request<Release[]>('/releases'),
   releaseGate: (id: string) => request<ShipGate>(`/releases/${id}/gate`),
+  /*
+   * The change feed: one integer that says whether anything was written.
+   *
+   * `since` is exclusive, so the caller passes the last id it accounted for.
+   */
+  changes: (since: number) =>
+    request<{ since: number; latestId: number; changed: string[]; writes: number }>(
+      `/changes?since=${since}`,
+    ),
+  audit: (params: { limit?: number; entityType?: string } = {}) =>
+    request<Array<{
+      id: number; action: string; entityType: string; entityId: string;
+      actor: string | null; actorInitials: string | null;
+      before: unknown; after: unknown; createdAt: string;
+    }>>(`/audit${qs(params)}`),
   insights: () => request<{
     insights: Issue[];
     dismissed: Array<{

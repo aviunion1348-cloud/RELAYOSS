@@ -2245,15 +2245,97 @@ export async function registerRoutes(
     return null;
   });
 
+  /*
+   * The change feed.
+   *
+   * "Live updateable" needs one thing the application did not have: a cheap way to
+   * ask "has anything changed since X?". Without it every screen has to poll its own
+   * endpoint on a timer, which is a request per screen per interval and still leaves
+   * the reader looking at stale numbers until their own timer fires.
+   *
+   * The first attempt read `MAX(audit_log.id)`, on the assumption that every mutation
+   * wrote an audit row. It did not: five of forty-nine mutating routes did, so the feed
+   * was blind to most edits and every screen would have gone quietly stale — the worst
+   * kind of bug, because nothing looks broken. `change_log` (migration 0017) is written
+   * by one `onResponse` hook for every successful mutation instead, so a route added
+   * tomorrow is covered without anyone remembering to instrument it. Its integer id is
+   * the version counter, and one indexed `MAX(id)` answers the question.
+   *
+   * `since` is exclusive: a caller passes the last id it saw and gets back only what
+   * is newer, which makes the client's refresh edge-triggered rather than
+   * time-triggered. `changed` names the entity types involved so a screen can decide
+   * whether it cares, instead of refetching the whole application.
+   *
+   * Deliberately not built here: websockets or SSE. Those are a second transport to
+   * operate, authenticate and reconnect, and on a serverless platform a long-lived
+   * connection is the one thing the runtime will not keep. Polling one integer is
+   * correct on every platform and costs a single indexed read.
+   */
+  app.get('/api/changes', async (req) => {
+    const since = queryInt(req, 'since', 0);
+    const newest = await (await db()).get<{ id: number }>('SELECT MAX(id) AS id FROM change_log');
+    const latestId = Number(newest?.id ?? 0);
+    if (since >= latestId) {
+      return ok({ since, latestId, changed: [], writes: 0 });
+    }
+    const rows = await (await db()).all<Record<string, any>>(
+      `SELECT entity_type, COUNT(*) AS n FROM change_log WHERE id > ? GROUP BY entity_type ORDER BY n DESC`,
+      [since],
+    );
+    const total = await (await db()).get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM change_log WHERE id > ?', [since],
+    );
+    return ok({
+      since,
+      latestId,
+      changed: rows.map((r) => r.entity_type),
+      writes: Number(total?.n ?? 0),
+    });
+  });
+
   /* ------------------------------------------------------------- audit ---- */
+  /*
+   * The audit trail, readable.
+   *
+   * It was written by every mutation and surfaced by nothing: the data existed for an
+   * auditor and was invisible to the people doing the work. This returns it with the
+   * actor joined and the payloads parsed, newest first, so the Activity surface can
+   * answer "who changed this, and when" without a SQL console.
+   */
   app.get('/api/audit', async (req) => {
     await requireRole(req, ['admin', 'lead']);
     const limit = Math.min(queryInt(req, 'limit', 50), 200);
+    const entityType = queryStr(req, 'entityType');
     const rows = await (await db()).all<Record<string, any>>(
-      `SELECT a.*, u.full_name AS actor FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
-       ORDER BY a.id DESC LIMIT ?`, [limit],
+      `SELECT a.*, u.full_name AS actor, u.initials AS actor_initials FROM audit_log a
+       LEFT JOIN users u ON u.id = a.actor_id
+       ${entityType ? 'WHERE a.entity_type = ?' : ''}
+       ORDER BY a.id DESC LIMIT ?`,
+      entityType ? [entityType, limit] : [limit],
     );
-    return ok(rows);
+    /*
+     * Parse the JSON payloads here rather than sending strings.
+     *
+     * `before_json` and `after_json` are TEXT with a `'null'` default, and a client
+     * that has to `JSON.parse` a column it did not know was JSON is a client that will
+     * render the literal string `null` on screen. Malformed history is returned as
+     * null rather than throwing: one bad row must not make the whole trail unreadable.
+     */
+    const parse = (value: unknown) => {
+      if (value === null || value === undefined) return null;
+      try { return JSON.parse(String(value)); } catch { return null; }
+    };
+    return ok(rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      actor: r.actor ?? null,
+      actorInitials: r.actor_initials ?? null,
+      before: parse(r.before_json),
+      after: parse(r.after_json),
+      createdAt: r.created_at,
+    })));
   });
 
   /* ------------------------------------------------------------- search --- */

@@ -595,6 +595,57 @@ for (const [name, , route, endpoints] of SCREENS) {
 }
 
 /*
+ * The shell must actually mount the live feed.
+ *
+ * "Live updateable" is easy to claim and easy to lose: the hook exists, the endpoint
+ * exists, and one refactor removes the useLiveUpdates call from the shell and nothing
+ * fails. The screens simply stop updating, and they look fine while they do it.
+ *
+ * The assertion is made against source, deliberately, because that is the level the
+ * property lives at: a server render cannot show a polling loop (effects do not run),
+ * and there is no browser here. What this proves is that the shell imports and calls
+ * the feed, that the pulse is rendered in the header, and that the hook actually
+ * invalidates queries. change-feed.test.mjs proves the endpoint behaves.
+ */
+{
+  const nodeFs = await import('node:fs');
+  const shellPath = "/home/user/RELAYOSS/apps/web/src/components/Shell.tsx";
+  const livePath = "/home/user/RELAYOSS/apps/web/src/lib/live.ts";
+
+  const shellSource = nodeFs.readFileSync(shellPath, 'utf8');
+  /*
+   * Comments go first. This module explains the feed at length in prose, and a naive
+   * match would find the explanation rather than the call — a false positive that keeps
+   * passing after the call is deleted.
+   */
+  const clean = shellSource
+    .replace(/\\/\\*[\\s\\S]*?\\*\\//g, '')
+    .split('\\n')
+    .map((line) => line.replace(/(^|\\s)\\/\\/.*$/, '$1'))
+    .join('\\n');
+
+  const imported = /import\\s*\\{[^}]*useLiveUpdates[^}]*\\}/.test(clean);
+  const called = /useLiveUpdates\\s*\\(/.test(clean);
+  const pulseImported = /import\\s*\\{[^}]*LivePulse[^}]*\\}/.test(clean);
+  const pulseRendered = /<LivePulse/.test(clean);
+  const hookExists = nodeFs.existsSync(livePath);
+  const hookInvalidates = hookExists && /invalidateQueries/.test(nodeFs.readFileSync(livePath, 'utf8'));
+
+  const problems = [
+    imported ? null : 'useLiveUpdates is not imported by Shell',
+    called ? null : 'useLiveUpdates is not called by Shell',
+    pulseImported ? null : 'LivePulse is not imported by Shell',
+    pulseRendered ? null : 'LivePulse is not rendered in the header',
+    hookExists ? null : 'lib/live.ts is missing',
+    hookInvalidates ? null : 'the live hook never invalidates a query',
+  ].filter(Boolean);
+
+  check('live-feed', problems.length === 0, problems.length === 0
+    ? 'the shell mounts the feed, renders the pulse, and the hook invalidates the queries it affects'
+    : problems.join('; '));
+}
+
+/*
  * The diagnosis must discriminate, not console.
  *
  * A failure panel that always prints the same advice is worse than no panel: it
