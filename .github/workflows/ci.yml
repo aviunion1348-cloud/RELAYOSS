@@ -207,18 +207,56 @@ jobs:
       - name: Built output routes correctly (deep links, asset 404s, /api not HTML)
         run: npm run verify:routing
 
-      # The routing suite above boots `dist/index.js` — the container entry. This runs
-      # the same assertions against `dist/entrypoints/index.js`, the file `vercel.json`
-      # deploys, because they are different artefacts and only one of them is production.
-      - name: The deployed entrypoint routes correctly, not just the container entry
-        run: RELAY_ENTRY=apps/api/dist/entrypoints/index.js npm run verify:routing
+      # The deployed entrypoint is imported the way the platform imports it: with
+      # `http.Server.prototype.listen` stubbed out. That stub is what made two
+      # consecutive deployments answer every path with 500 FUNCTION_INVOCATION_FAILED
+      # while every other test here passed.
+      - name: The deployed entrypoint satisfies the platform launcher contract
+        run: node --test apps/api/test/platform-launcher.test.mjs
         env:
           NODE_ENV: test
 
-      # Spawns `apps/api/dist/entrypoints/index.js` as its own process and talks to it
-      # over a real socket — the contract `framework: "fastify"` actually uses.
-      - name: The service entry boots, binds a port and serves the app
+      # The container entry is a different artefact and *does* bind a port; it is what
+      # `npm start` and the Docker image run, so it gets its own process-level test.
+      - name: The container entry boots, binds a port and serves the app
         run: node --test apps/api/test/service-entry.test.mjs
+        env:
+          NODE_ENV: test
+
+  # `engines.node` allows 22.18 through 24 so a developer on Node 24 (the current LTS
+  # line for new installs) is not warned off a repository that works there. That claim
+  # is only worth making if something runs on it, so this job does: typecheck, the full
+  # unit suite, and the entrypoint contracts that production actually depends on.
+  node-24:
+    name: Node 24 compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install (root + web, via postinstall)
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build the service
+        run: npm run build:service
+        env:
+          NODE_ENV: production
+
+      - name: Entrypoint contracts
+        run: |
+          node --test apps/api/test/platform-launcher.test.mjs
+          node --test apps/api/test/service-entry.test.mjs
         env:
           NODE_ENV: test
 

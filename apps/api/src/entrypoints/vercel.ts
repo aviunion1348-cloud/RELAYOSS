@@ -75,7 +75,13 @@ async function getApp() {
        * layout is one process on one origin and `npm start` must still work.
        */
       try {
-        const { app } = await buildApp({ serveStatic: false });
+        /*
+         * `serveStatic` stays on. This is a single-service deployment: the catch-all
+         * rewrite sends every browser path here, so `/` and deep links are this
+         * process's to answer. Turning static serving off left them 404ing JSON in a
+         * deployment whose only public entrypoint was this handler.
+         */
+        const { app } = await buildApp();
         /**
          * `ready()` is mandatory here, not an optimisation. Without it Fastify has
          * not finished installing its hook pipeline, and the first request fails

@@ -1,212 +1,110 @@
 /**
- * The service entry point.
+ * The deployed service entrypoint.
  *
- * `framework: "fastify"` makes Vercel run this module as a **server**, not as a
- * per-request function: it executes the file and expects a process listening on
- * `PORT`. The previous version of this file was the serverless shape — it built the
- * app, exported a `(req, res)` handler and never listened — which is right for a
- * function and fatal for a service. Nothing bound the port, so the platform had
- * nothing to route to and answered every request with
- * `500 FUNCTION_INVOCATION_FAILED`, including `/`, before any application code ran.
+ * This file is small on purpose. `vercel.json` declares it as the `app` service's
+ * entrypoint with `framework: "fastify"`, and the platform's Node launcher
+ * (`@vercel/node`, `compileUserCode`) does this with it:
  *
- * That is also why no diagnostic appeared. Every failure path in this repository
- * reports through a response, and a server that never listens cannot send one.
+ *   1. replaces `http.Server.prototype.listen` with a stub that records the server and
+ *      **returns without binding and without calling the callback**;
+ *   2. `await import(entrypoint)` with the stub in place;
+ *   3. peels nested `.default` values;
+ *   4. if the result is a function, calls it per request; else uses a captured server;
+ *      else throws `Can't detect way to handle request`.
  *
- * The shape below is deliberately sequential:
+ * Two entrypoints have already failed this contract in production, both with the same
+ * opaque `500 FUNCTION_INVOCATION_FAILED` and no application log line:
  *
- *   1. **Listen immediately**, on a plain handler. Binding the port is the one thing
- *      the platform kills us for not doing, so it happens before anything slow or
- *      failure-prone. Requests that arrive during the cold start wait on the boot
- *      promise rather than being refused.
+ *   - **No default export and no listen.** The launcher found neither a function nor a
+ *     server and threw before the first request.
+ *   - **`await new Promise(r => server.listen(port, () => r()))`.** Step 1 swallows the
+ *     callback, so the promise never settles, the module import never resolves, and the
+ *     invocation times out. Binding a port was the wrong fix for this launcher: it is
+ *     the launcher that binds, and only after the module finishes importing.
  *
- *   2. **Boot once**, behind that handler. `buildApp()` opens the database and runs
- *      pending migrations; this process also serves the built SPA, so `npm start`,
- *      Docker and Vercel behave identically — one process, one origin.
+ * So this file exports a **function** and never binds anything. `apps/api/src/index.ts`
+ * remains the process that listens — that is the `npm start` and Docker path, where
+ * nothing stubs `listen`.
  *
- *   3. **On failure, stay up and explain.** A wrong configuration or an unreachable
- *      database answers 503 with the stage and the remedy. Exiting would produce the
- *      opaque platform error this file exists to replace, and an exit code is
- *      invisible where this runs.
+ * Everything else is imported dynamically, inside the handler, wrapped in try/catch.
+ * Static imports are evaluated before any of our code runs, so a failure in one of them
+ * (a native binding missing from the bundle, a module that wants configuration at load)
+ * kills the invocation where no error handling exists and produces exactly the
+ * unexplained 500 this file keeps causing. Loaded lazily, the same failure becomes a
+ * JSON response that names it.
  */
-import { createServer, type Server } from 'node:http';
-import { buildApp } from '../app.ts';
-import { config } from '../config.ts';
-import { bootFailure, bootFailureBody, recordBootFailure } from '../lib/misconfigured.ts';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
-type Booted = { app: Awaited<ReturnType<typeof buildApp>>['app'] };
-type Outcome = Booted | { app: null };
+/** What the app module is expected to hand back. Kept narrow so the boundary is typed. */
+type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
+
+let handlerPromise: Promise<Handler> | null = null;
 
 /**
- * Classify a boot error by the check that produced it.
+ * Load the real handler once, and if loading fails, hand back a handler that reports
+ * the failure instead of rethrowing it.
  *
- * Both checks throw plain `Error`s with descriptive messages, so the message is the
- * only discriminator available. A wrong guess is cosmetic — the report carries the
- * original message either way — so this stays a string match rather than a new error
- * taxonomy threaded through the boot path.
+ * The load is cached on the module, which lives as long as the function instance: a
+ * cold start pays for it once.
  */
-function bootFailureStage(err: unknown): 'configuration' | 'database' {
-  const message = err instanceof Error ? err.message : String(err);
-  return /is required|refused in production|is not a complete Argon2id hash|requires OIDC|DATABASE_URL is not set/.test(
-    message,
-  )
-    ? 'configuration'
-    : 'database';
-}
-
-async function boot(): Promise<Outcome> {
-  try {
-    const { app } = await buildApp();
-    /*
-     * `ready()` is mandatory, not an optimisation: Fastify installs its hook pipeline
-     * here, and `inject`-style mounting without it fails on the first request inside
-     * the pre-parsing hooks with a TypeError.
-     */
-    await app.ready();
-    return { app };
-  } catch (err) {
-    let stage: 'configuration' | 'database' = 'database';
-    try {
-      stage = bootFailureStage(err);
-    } catch { /* keep the cautious default */ }
-    try {
-      recordBootFailure(stage, err);
-    } catch { /* the request path still reports something */ }
-    try {
-      // eslint-disable-next-line no-console
-      console.error(
-        JSON.stringify({
-          level: 50,
-          msg: 'API cannot boot — staying up so the reason can be read instead of answered with an opaque 500.',
-          stage,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    } catch { /* logging must not mask the failure it describes */ }
-    return { app: null };
-  }
-}
-
-/**
- * Answer a request when there is no app.
- *
- * Plain `http` on purpose: the app is the thing that failed, so the reporting path
- * must not depend on it. Reporting code that can itself fail is worse than none,
- * because it looks like it works.
- */
-function replyMisconfigured(res: import('node:http').ServerResponse): void {
-  let payload: string;
-  try {
-    const failure = bootFailure();
-    payload = JSON.stringify({
-      error: failure
-        ? bootFailureBody(failure)
-        : {
-            code: 'misconfigured',
-            summary: 'This instance failed to start and no reason was recorded.',
-            missing: [],
-            invalid: [],
-            remedy: [],
-          },
-    });
-  } catch {
-    payload = JSON.stringify({ error: { code: 'misconfigured', summary: 'Failed to start.' } });
-  }
-  res.statusCode = 503;
-  res.setHeader('content-type', 'application/json; charset=utf-8');
-  res.setHeader('cache-control', 'no-store, max-age=0');
-  // A provisioning problem is not a credential problem: nothing may cache this, or
-  // the deployment keeps looking broken after it is fixed.
-  res.setHeader('retry-after', '30');
-  res.end(payload);
-}
-
-let bootPromise: Promise<Outcome> | null = null;
-const getApp = () => (bootPromise ??= boot());
-
-async function dispatch(
-  req: import('node:http').IncomingMessage,
-  res: import('node:http').ServerResponse,
-): Promise<void> {
-  const outcome = await getApp();
-  if (!outcome.app) {
-    replyMisconfigured(res);
-    return;
-  }
-  /*
-   * Let Fastify handle the request on this server's socket. `app.server` is the same
-   * kind of `http.Server`, and Fastify's request pipeline is already installed on it
-   * by `ready()`; emitting the event hands over without a second listener on the port.
-   */
-  outcome.app.server.emit('request', req, res);
-}
-
-async function main(): Promise<Server> {
-  const { port, host } = config;
-
-  const server: Server = createServer((req, res) => {
-    void dispatch(req, res).catch((err: unknown) => {
+function loadHandler(): Promise<Handler> {
+  handlerPromise ??= import('./vercel.js')
+    .then((mod) => {
+      const handler = mod.default;
+      if (typeof handler !== 'function') {
+        throw new Error(
+          'entrypoints/vercel.ts did not export a handler function; got ' + typeof handler,
+        );
+      }
+      return handler as Handler;
+    })
+    .catch((err: { message?: string } | unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
       /*
-       * Last line of defence. A crash here produces the platform error page, so even
-       * this path answers JSON with a reason.
+       * Log to stderr as JSON in the same shape as the app's own logger, so this line is
+       * greppable in the platform's log viewer — which is where the previous failures
+       * had to be diagnosed from, with nothing to read.
        */
       try {
         // eslint-disable-next-line no-console
         console.error(
-          JSON.stringify({
-            level: 50,
-            msg: 'request dispatch failed',
-            url: (() => { try { return String(req.url); } catch { return '(unreadable)'; } })(),
-            error: err instanceof Error ? err.message : String(err),
-          }),
+          JSON.stringify({ level: 50, msg: 'API entrypoint could not load the app', error: message }),
         );
-      } catch { /* nothing left to try */ }
-      if (!res.headersSent) {
-        res.statusCode = 500;
-        res.setHeader('content-type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: { code: 'handler_failed', summary: 'Request failed.' } }));
-      } else if (!res.writableEnded) {
-        res.end();
-      }
+      } catch { /* logging must not mask the failure it describes */ }
+      return reportLoadFailure(message) as Handler;
     });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => resolve());
-  });
-  /*
-   * Report the port the kernel actually assigned, not the one requested: with PORT=0
-   * (tests, and any supervisor that hands out ports) the requested value is 0 and the
-   * real one is only available from the socket. A log line that says ":0" is a log
-   * line that cannot be used to reach the process that printed it.
-   */
-  const bound = server.address();
-  const boundPort = typeof bound === 'object' && bound ? bound.port : port;
-  // Listening first means the platform routes to us while the rest happens.
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ level: 30, msg: `listening on ${host}:${boundPort}`, port: boundPort }));
-
-  const outcome = await getApp();
-  if (outcome.app) {
-    /*
-     * Fastify's own listener is not started — this server owns the port and hands
-     * requests to Fastify's pipeline. That keeps one socket, one origin, and no
-     * window in which two listeners disagree.
-     */
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ level: 30, msg: 'API ready' }));
-  }
-
-  return server;
+  return handlerPromise;
 }
 
-/*
- * The service contract is "bind PORT", and that is what `main()` does. The default
- * export is the listening server as well, because a launcher that imports the module
- * instead of executing it checks for a callable or a server before routing anything;
- * a module that listens but exports nothing is rejected by that check before its
- * listener is ever reached. Exporting the live server satisfies both shapes without a
- * second socket.
+/** Answer every request with the load error, in the app's own error envelope shape. */
+function reportLoadFailure(message: string): Handler {
+  return (req, res) => {
+    const body = JSON.stringify({
+      error: {
+        code: 'boot_failed',
+        summary:
+          'The API module could not be loaded, so no request can be served. The reason is in this ' +
+          'response and in the function log line that accompanies it.',
+        detail: message,
+        stage: 'module_load',
+      },
+    });
+    res.statusCode = 500;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.setHeader('cache-control', 'no-store, max-age=0');
+    res.setHeader('x-relay-request-path', (() => { try { return String(req.url); } catch { return ''; } })());
+    res.end(body);
+  };
+}
+
+/**
+ * The handler the platform calls, once per request.
+ *
+ * Returns the handler's promise rather than `void` so the launcher can await it; a
+ * synchronous throw after headers are sent would otherwise escape as an unhandled
+ * rejection, which the platform reports as a failed invocation.
  */
-const server = await main();
-export default server;
+export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const app = await loadHandler();
+  await app(req, res);
+}

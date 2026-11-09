@@ -21,7 +21,7 @@
     "db:reset": "node apps/api/dist/db/cli.js reset",
     "typecheck": "tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
     "test": "node --no-warnings --test apps/api/test/*.test.mjs",
-    "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/guard-declared-deps.mjs && node scripts/gen-pg-migrations.mjs --check && node scripts/check-migrations-bundle.mjs && node scripts/guard-deployment-config.mjs && node scripts/check-traceability.mjs && node scripts/guard-workflows.mjs",
+    "guard": "node scripts/guard-no-json-store.mjs && node scripts/guard-sql-portability.mjs && node scripts/guard-declared-deps.mjs && node scripts/gen-pg-migrations.mjs --check && node scripts/check-migrations-bundle.mjs && node scripts/guard-deployment-config.mjs && node scripts/check-traceability.mjs && node scripts/guard-workflows.mjs && node scripts/guard-local-run.mjs",
     "build:api": "npm run build -w @relay/api",
     "verify": "npm run guard && npm run typecheck && npm test && npm run test:pg && npm run build:service && npm run verify:routing && npm run smoke:web && npm run verify:boot && npm run test:persistence && npm run backup:verify",
     "pg:start": "node scripts/pg-dev.mjs start",
@@ -51,6 +51,8 @@
     "verify:routing": "node scripts/verify-web-routing.mjs",
     "db:migrate:prod": "node apps/api/dist/db/cli.js migrate",
     "install:web": "npm ci --prefix apps/web --include=dev --no-audit --no-fund",
+    "postinstall": "node scripts/install-web-deps.mjs",
+    "prestart": "npm run build",
     "build:web": "npm run build --prefix apps/web",
     "verify:boot": "node --no-warnings scripts/production-boot.mjs"
   },
@@ -60,7 +62,7 @@
     "playwright": "^1.49.1"
   },
   "engines": {
-    "node": ">=22.18.0 <23"
+    "node": ">=22.18.0 <25"
   },
   "dependencies": {
     "argon2": "^0.41.1"
