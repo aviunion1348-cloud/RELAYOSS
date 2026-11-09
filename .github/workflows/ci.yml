@@ -94,35 +94,22 @@ jobs:
 
       - name: Production build boots with no authentication environment at all
         run: |
-          # This step used to assert the opposite: that a production boot *refused*
-          # to start when AUTH_MODE=dev had no opt-in. That refusal, together with the
-          # missing-SESSION_SECRET one, is exactly what produced the blank dashboard
-          # in production -- an API that would not serve and could not say why.
+          # The check lives in scripts/production-boot.mjs rather than here, because it
+          # needs to own its whole environment and a shell step cannot say that.
           #
-          # So the assertion is inverted. A production build given no authentication
-          # environment must boot, serve, and report that it authenticates nothing.
+          # Two failures led here. The serving runtime now refuses to start without
+          # DATABASE_URL -- deliberately, since the old local-file fallback accepted
+          # every write and discarded it on the next cold start -- so a production boot
+          # needs a real database. And when the step borrowed one from an earlier step,
+          # the embedded cluster had already been stopped by the step that started it,
+          # so the boot failed with a connection error that looked like an app bug.
+          #
+          # The script starts PostgreSQL 16 itself, migrates and seeds a scratch
+          # database, then boots with NODE_ENV=production and no authentication
+          # variable at all. Supplying a database does not weaken the claim: the claim
+          # is that it authenticates nothing, and it now runs against something real.
           npm run build -w @relay/api
-          NODE_ENV=production PORT=4310 node apps/api/dist/index.js > /tmp/boot.log 2>&1 &
-          pid=$!
-          trap 'kill $pid 2>/dev/null || true' EXIT
-
-          for i in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:4310/api/live > /tmp/live.json 2>/dev/null; then break; fi
-            sleep 0.5
-          done
-          grep -q '"live":true' /tmp/live.json \
-            || { echo "::error::the production build did not serve /api/live"; cat /tmp/boot.log; exit 1; }
-
-          curl -fsS http://127.0.0.1:4310/api/health > /tmp/health.json
-          grep -q '"authMode":"none"' /tmp/health.json \
-            || { echo "::error::authMode is not 'none' -- a gate was reintroduced"; cat /tmp/health.json; exit 1; }
-
-          # Retired login endpoints answer 410, never 200 and never 404.
-          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
-            -H 'content-type: application/json' -d '{"username":"x","password":"y"}' \
-            http://127.0.0.1:4310/api/auth/login)
-          [ "$code" = "410" ] || { echo "::error::/api/auth/login answered $code, expected 410"; exit 1; }
-          echo "✓ production boot serves with no authentication environment"
+          npm run verify:boot
 
       - name: Docker image builds
         run: |
@@ -175,12 +162,14 @@ jobs:
             apps/api/dist
           retention-days: 7
 
-  service-builds:
-    # Reproduces what Vercel actually does: each service installed and built on its
-    # own, from a clean tree, with production NODE_ENV. The main `verify` job builds
-    # the workspaces from a root install, which is a different thing — it is exactly
-    # how a missing build tool reached production while CI stayed green.
-    name: Vercel service builds (independent, production install)
+  single-service-build:
+    # Reproduces what the platform actually does now: one service, installed from a
+    # clean tree with production NODE_ENV, whose single build command must produce
+    # *both* artefacts. The API serves `apps/web/dist` itself, so a build that
+    # compiles only the workspace it is standing in deploys a working API behind a
+    # page that 404s — a failure the root `verify` job cannot see, because there the
+    # workspaces are already built from a root install.
+    name: Vercel service build (single service, production install)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -189,28 +178,29 @@ jobs:
         with:
           node-version: 22
 
-      # Deliberately no `cache: npm` and no root `npm ci`: the harness wipes
-      # node_modules and lets each service run its own installCommand.
-      # Order matters and is the point: the api service installs and builds first, then
-      # the web service. The web step asserts the api tree is still on disk afterwards,
-      # which is what the platform's `Deploying outputs` step needs.
-      - name: API service — install and build in isolation
-        run: node scripts/verify-service-builds.mjs . api
+      # Deliberately no `cache: npm` and no root `npm ci`: the service's own
+      # installCommand runs, exactly as the platform runs it.
+      - name: Install (production mode, dev dependencies included)
+        run: npm ci --include=dev --no-audit --no-fund
+        env:
+          NODE_ENV: production
 
-      - name: Web service — install and build, then assert the api tree survived
-        run: node scripts/verify-service-builds.mjs . web
+      - name: Build with the service's declared build command
+        run: npm run build:service
+        env:
+          NODE_ENV: production
 
-      - name: Web build is a complete SPA (document + hashed assets)
+      # Both artefacts, asserted independently: the handler the platform invokes and
+      # the document the SPA is served from.
+      - name: The build produced both artefacts
         run: |
+          test -f apps/api/dist/entrypoints/vercel.js
+          test -f apps/api/dist/index.js
           test -f apps/web/dist/index.html
           test -d apps/web/dist/assets
           grep -q '<div id="root">' apps/web/dist/index.html
-          echo "✓ SPA document and assets present"
+          echo "✓ serverless handler, container entry, SPA document and assets all present"
 
-      # The rewrite table is applied to the real build here, because `vercel dev`
-      # cannot answer this: it proxies the Vite dev server, which serves index.html for
-      # every unmatched path itself. A naive /(.*) fallback would make a missing asset
-      # return the SPA document with status 200 instead of a 404.
       - name: Built output routes correctly (deep links, asset 404s, /api not HTML)
         run: npm run verify:routing
 

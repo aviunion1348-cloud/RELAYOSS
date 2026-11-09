@@ -713,64 +713,163 @@ test('vercel: an in-process failure still answers with JSON, not a blank 500', a
 });
 
 /**
- * A deployment with no PostgreSQL must still be usable.
+ * A deployment with no database must refuse to start, and say why.
  *
- * The realistic first deployment has a secret and nothing else: no database
- * provisioned yet, no credential row. Before this, two things made that state
- * fatal and unrecoverable — the SQLite fallback pointed inside the read-only
- * deployment bundle, so the API could not open a database at all; and even when it
- * could, the file was empty, so no credential existed, so `AUTH_MODE=auto`
- * resolved to `dev`, which a production build refuses.
+ * This test used to assert the opposite: that a production Vercel runtime with no
+ * `DATABASE_URL` would create a SQLite file, seed it and serve data. It did — and
+ * that is precisely the bug. The file lived under `/tmp`, which is per-instance and
+ * discarded, so the product accepted every write, served it back for the life of the
+ * instance, and lost all of it on the next cold start. Nothing appeared broken,
+ * which is why it survived this long.
  *
- * The net effect was a sign-in screen that could never work and a blank 500 to go
- * with it. This asserts the whole path instead: writable location, schema, demo
- * data, credential from the environment, and a real login.
+ * The property worth asserting is the honest one:
+ *
+ *   1. the request fails, and it fails as a *configuration* error rather than a
+ *      blank 500 — the body names `DATABASE_URL` and the remedy;
+ *   2. no SQLite file is created anywhere, because creating one is how the silent
+ *      data loss started;
+ *   3. the same deployment works the moment a database is configured.
+ *
+ * A local process with no `DATABASE_URL` is a different case and is deliberately
+ * still allowed to use a file: that is development, not a deployment.
  */
-test('vercel: a deployment with no database and no environment configures itself and serves data', async () => {
-  /**
-   * The end-to-end cold-start scenario, and the closest possible reproduction of
-   * the production failure: nothing set but `NODE_ENV`, on Vercel, with no
-   * database. The old version of this test proved that a *shared login* was
-   * provisioned from the environment and worked. There is no login, so what it
-   * proves now is the stronger thing the brief actually asked for — that this
-   * configuration boots, creates its own SQLite store, seeds it, and serves real
-   * data to a request carrying no credential at all.
-   */
+test('vercel: a deployment with no database refuses to start and names the missing variable', async () => {
   const saved = { ...process.env };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-cold-'));
 
   try {
     delete process.env.DATABASE_URL;
     delete process.env.SESSION_SECRET;
-    delete process.env.AUTH_MODE;
-    delete process.env.ALLOW_DEV_AUTH_IN_PRODUCTION;
-    delete process.env.RELAY_ADMIN_PASSWORD_HASH;
-    delete process.env.SEED_DEMO_DATA;
-    delete process.env.FORCE;
+    delete process.env.DB_PATH;
     process.env.NODE_ENV = 'production';
     process.env.VERCEL = '1';
-    process.env.DB_PATH = path.join(dir, 'relay.sqlite');
 
-    // Fresh process-level state: no cached app, no cached database handle.
     setDb(null);
     resetOperatorIdentity();
     const entry = await import('../src/entrypoints/vercel.ts');
     entry.resetBootState();
 
+    /*
+     * The boot is expected to fail. What must not happen is a *working* boot backed
+     * by a temporary file, so both outcomes are captured and only one is accepted.
+     */
+    let failure = null;
+    let app = null;
+    try {
+      app = (await buildApp({ serveStatic: false, logger: false })).app;
+    } catch (err) {
+      failure = err;
+    }
+
+    if (app) {
+      // If the app did build, the first data request must be the thing that refuses.
+      const res = await app.inject({ method: 'GET', url: '/api/projects' });
+      await app.close();
+      failure = { message: `the app served ${res.statusCode} with no DATABASE_URL`, body: res.body };
+    }
+
+    assert.ok(failure, 'a production runtime with no database must not boot silently');
+    const detail = String(failure.message ?? failure);
+    assert.match(detail, /DATABASE_URL/, `the failure must name DATABASE_URL, got: ${detail}`);
+    assert.match(
+      detail,
+      /PostgreSQL|per-instance|discarded/i,
+      `the failure must explain why a local file is not a database, got: ${detail}`,
+    );
+
+    // And it must not have quietly left a database behind.
+    const strays = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+    assert.deepEqual(strays, [], `no database file may be created in a serverless runtime: ${strays.join(', ')}`);
+  } finally {
+    process.env = saved;
+    setDb(null);
+    resetOperatorIdentity();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The refusal has to be real behaviour, not a documented intention.
+ *
+ * `scripts/guard-deployment-config.mjs` scans for the explanation in the source, which
+ * is all a text check can do — and it passed against `if (false)`, verified by
+ * sabotage. This calls the actual factory in a serving runtime with no `DATABASE_URL`
+ * and requires it to throw, then requires the local case to still work. A fallback that
+ * silently writes to `/tmp` on a serverless runtime is the bug that lost every write
+ * this product ever accepted there.
+ */
+test('db: a serving runtime without DATABASE_URL throws instead of creating a file', async () => {
+  const saved = { ...process.env };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-engine-'));
+  try {
+    delete process.env.DATABASE_URL;
+    process.env.DB_PATH = path.join(dir, 'should-not-exist.sqlite');
+
+    const { createDb } = await import('../src/db/index.ts');
+
+    // Serverless.
+    process.env.VERCEL = '1';
+    process.env.NODE_ENV = 'production';
+    await assert.rejects(
+      () => createDb(),
+      (err) => {
+        assert.match(String(err.message), /DATABASE_URL/);
+        assert.match(String(err.message), /PostgreSQL/);
+        return true;
+      },
+      'a serverless runtime with no DATABASE_URL must refuse to open a file',
+    );
+
+    // A production process on a server is no different.
+    delete process.env.VERCEL;
+    await assert.rejects(() => createDb(), /DATABASE_URL/);
+
+    // Nothing may have been created while refusing.
+    assert.deepEqual(fs.readdirSync(dir), [], 'the refusal must not leave a database file behind');
+
+    // The local case is deliberately still allowed: that is development.
+    process.env.NODE_ENV = 'development';
+    const local = await createDb();
+    try {
+      assert.equal(local.dialect, 'sqlite');
+      assert.ok(fs.existsSync(process.env.DB_PATH), 'a local run opens the file it was told to');
+    } finally {
+      await local.close();
+    }
+  } finally {
+    process.env = saved;
+    setDb(null);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The read contract is unchanged for the runtime that *is* configured correctly:
+ * no credential of any kind is needed to read the product.
+ *
+ * This keeps the half of the old cold-start test that still matters — that the app
+ * is genuinely usable without signing in — on a local engine, which is the engine a
+ * developer actually runs.
+ */
+test('a locally-run deployment serves real seeded data with no credential', async () => {
+  const saved = { ...process.env };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-local-'));
+  try {
+    delete process.env.DATABASE_URL;
+    delete process.env.VERCEL;
+    delete process.env.AWS_LAMBDA_FUNCTION_NAME;
+    process.env.NODE_ENV = 'development';
+    process.env.DB_PATH = path.join(dir, 'relay.sqlite');
+
+    setDb(null);
+    resetOperatorIdentity();
     const { app } = await buildApp({ serveStatic: false, logger: false });
     try {
-      assert.ok(fs.existsSync(process.env.DB_PATH), 'the SQLite file must be created where it was configured');
+      assert.ok(fs.existsSync(process.env.DB_PATH), 'a local run creates its database where it was told to');
 
       const ready = await app.inject({ method: 'GET', url: '/api/ready' });
-      assert.equal(ready.statusCode, 200, 'a deployment with no DATABASE_URL must still be ready');
-      assert.equal(ready.json().data.engine, 'sqlite');
+      assert.equal(ready.statusCode, 200, ready.body);
 
-      // The startup probe the frontend makes, with no cookie and no token.
-      const session = await app.inject({ method: 'GET', url: '/api/auth/session' });
-      assert.equal(session.statusCode, 200, `the startup probe failed: ${session.body}`);
-      assert.equal(session.json().data.authMode, 'none');
-
-      // Real seeded data, not an empty shell — and no credential of any kind.
       const projects = await app.inject({ method: 'GET', url: '/api/projects' });
       assert.equal(projects.statusCode, 200, projects.body);
       assert.ok(projects.json().data.length > 0, 'the seeded projects must be visible without signing in');
@@ -778,15 +877,6 @@ test('vercel: a deployment with no database and no environment configures itself
       const dashboard = await app.inject({ method: 'GET', url: '/api/dashboard' });
       assert.equal(dashboard.statusCode, 200);
       assert.ok(dashboard.json().data.kpis, 'the dashboard aggregates must be present');
-
-      // A write, unauthenticated, landing in the database it just created.
-      const created = await app.inject({
-        method: 'POST',
-        url: '/api/clients',
-        headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({ name: 'Cold Start Client' }),
-      });
-      assert.equal(created.statusCode, 201, created.body);
 
       // The retired login endpoints must be unmistakably gone, not merely quiet.
       for (const url of ['/api/auth/login', '/api/auth/dev-login']) {

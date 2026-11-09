@@ -97,9 +97,44 @@ async function request<T>(path: string, init?: RequestInit & { deadlineMs?: numb
    * both means a manual cancel still works and the deadline still applies.
    */
   const deadline = init?.deadlineMs ?? DEFAULT_TIMEOUT_MS;
-  const signal = init?.signal
-    ? AbortSignal.any([init.signal, AbortSignal.timeout(deadline)])
-    : AbortSignal.timeout(deadline);
+  /*
+   * Build the deadline defensively, and inside the protected region.
+   *
+   * `AbortSignal.timeout` is Safari 16+ and Chrome 103+; `AbortSignal.any` is
+   * newer still. On an older browser these are `undefined`, so calling them throws
+   * a TypeError — and because this ran *before* the try block below, that error
+   * escaped as a raw TypeError from every single request. One missing API, every
+   * panel dead at once, reported as "the request never reached the server". It was
+   * my bug, and it is the exact "fails in every feature" shape worth guarding.
+   *
+   * The fallback is a plain timer with `AbortController`, which every browser that
+   * can run this bundle at all supports. The deadline is a safety net, not a
+   * feature — it must never be the reason the application stops working.
+   */
+  const controller = AbortSignal.timeout && typeof AbortSignal.timeout === 'function' ? null : new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let signal: AbortSignal;
+  try {
+    if (controller) {
+      timer = setTimeout(() => controller.abort(), deadline);
+      signal = init?.signal
+        ? (AbortSignal.any?.([init.signal, controller.signal]) ?? controller.signal)
+        : controller.signal;
+    } else if (init?.signal && AbortSignal.any) {
+      signal = AbortSignal.any([init.signal, AbortSignal.timeout(deadline)]);
+    } else {
+      // A caller-supplied signal without `AbortSignal.any`: honour the deadline,
+      // since a stuck request is worse than an uncancellable one.
+      signal = AbortSignal.timeout(deadline);
+    }
+  } catch {
+    /*
+     * No usable abort primitive at all. Proceed without a deadline rather than
+     * failing the request: an unbounded wait is bad, and every screen failing is
+     * worse.
+     */
+    signal = init?.signal ?? new AbortController().signal;
+  }
 
   /*
    * `credentials: 'omit'` states the intent: no cookie is sent, because the API
@@ -110,6 +145,7 @@ async function request<T>(path: string, init?: RequestInit & { deadlineMs?: numb
   try {
     res = await fetch((init?.base ?? BASE) + path, { ...init, headers, credentials: 'omit', signal });
   } catch (cause) {
+    if (timer) clearTimeout(timer);
     /*
      * The fetch itself failed, so there is no status to report. Previously this
      * escaped as a bare `TypeError: Failed to fetch` — and, before the timeout
@@ -140,6 +176,7 @@ async function request<T>(path: string, init?: RequestInit & { deadlineMs?: numb
    * arrive as HTML. Reporting the status is honest; reporting "Unexpected token
    * '<'" sends the reader hunting for a bug that does not exist.
    */
+  if (timer) clearTimeout(timer);
   const text = await res.text();
   let body: any = null;
   let parsed = false;
@@ -346,11 +383,72 @@ export const api = {
   updateQA: (id: string, patch: Record<string, unknown>) => request(`/qa/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   releases: () => request<Release[]>('/releases'),
   releaseGate: (id: string) => request<ShipGate>(`/releases/${id}/gate`),
-  insights: () => request<{ insights: Issue[]; generatedAt: string }>('/insights'),
+  /*
+   * The change feed: one integer that says whether anything was written.
+   *
+   * `since` is exclusive, so the caller passes the last id it accounted for.
+   */
+  changes: (since: number) =>
+    request<{ since: number; latestId: number; changed: string[]; writes: number }>(
+      `/changes?since=${since}`,
+    ),
+  audit: (params: { limit?: number; entityType?: string } = {}) =>
+    request<Array<{
+      id: number; action: string; entityType: string; entityId: string;
+      actor: string | null; actorInitials: string | null;
+      before: unknown; after: unknown; createdAt: string;
+    }>>(`/audit${qs(params)}`),
+  insights: () => request<{
+    insights: Issue[];
+    dismissed: Array<{
+      key: string; kind: string; subject: string; reason: string;
+      dismissedBy: string | null; dismissedAt: string; mutedUntil: string | null;
+      /** The live finding, or `null` when it no longer fires. */
+      insight: Issue | null;
+    }>;
+    generatedAt: string;
+  }>('/insights'),
+  /*
+   * Acknowledging a finding. The analysis is untouched — what is recorded is that a
+   * person looked at it and chose to accept it, with a reason and a name.
+   */
+  dismissInsight: (key: string, payload: { reason?: string; muteHours?: number }) =>
+    request<{ key: string; dismissed: true; mutedUntil: string | null }>(
+      `/insights/${encodeURIComponent(key)}/dismiss`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  restoreInsight: (key: string) =>
+    request<void>(`/insights/${encodeURIComponent(key)}/dismiss`, { method: 'DELETE' }),
   activity: (limit = 30) => request<Activity[]>(`/activity?limit=${limit}`),
   notifications: () => request<Array<{ id: string; kind: string; title: string; body: string; readAt: string | null; createdAt: string }>>('/notifications'),
   readNotification: (id: string) => request(`/notifications/${id}/read`, { method: 'POST' }),
   docs: (projectId?: string) => request<Doc[]>(`/docs${qs({ projectId })}`),
+  /*
+   * The document writes.
+   *
+   * Until now `docs()` was the whole contract: the knowledge base could be read and
+   * never written, which is a strange thing for the one artefact in a delivery org
+   * that people actually author.
+   *
+   * `remove()` returns `void` because the route answers 204 with no body; asking for
+   * JSON there would parse an empty string and throw on a successful delete.
+   */
+  createDoc: (payload: {
+    title: string;
+    kind?: string;
+    body?: string;
+    status?: string;
+    projectId?: string | null;
+    clientVisible?: boolean;
+  }) => request<Doc>('/docs', { method: 'POST', body: JSON.stringify(payload) }),
+  updateDoc: (id: string, patch: Partial<Pick<Doc, 'title' | 'kind' | 'body' | 'status'>> & { clientVisible?: boolean }) =>
+    request<Doc>(`/docs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteDoc: (id: string) => request<void>(`/docs/${id}`, { method: 'DELETE' }),
+  updateClient: (id: string, patch: Record<string, unknown>) =>
+    request<ClientSummary>(`/clients/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteClient: (id: string) => request<void>(`/clients/${id}`, { method: 'DELETE' }),
+  updatePartner: (id: string, patch: Record<string, unknown>) =>
+    request<Partner>(`/partners/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   search: (q: string) =>
     request<{ tasks: Task[]; projects: Array<{ id: string; key: string; name: string }>; clients: Array<{ id: string; name: string }>; deals: Deal[]; docs: Doc[] }>(
       `/search?q=${encodeURIComponent(q)}`,

@@ -5,7 +5,6 @@
  */
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import os from 'node:os';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, '../../..');
@@ -38,25 +37,25 @@ const env = () => ({
   host: process.env.HOST ?? '0.0.0.0',
   port: int('PORT', 4000),
   /**
-   * SQLite file path (WAL mode). Swap to Postgres via DATABASE_URL.
+   * The local development database file.
    *
-   * The default is deliberately writable on a read-only deployment. `ROOT` is the
-   * source tree — on Vercel that is the deployed bundle, which is mounted
-   * read-only, so opening a database inside it fails with `unable to open
-   * database file` and the API cannot boot at all. When no `DATABASE_URL` and no
-   * `DB_PATH` are provided on a serverless platform, the temp directory is the
-   * only location that exists and accepts writes.
+   * PostgreSQL is the only *deployment* engine: `DATABASE_URL` is required in
+   * production and in every serverless runtime, and there is no longer a fallback
+   * that puts a SQLite file somewhere writable and calls it a database. That
+   * fallback was the worst kind of convenience. On Vercel it wrote to `/tmp`,
+   * which is per-instance and discarded — so the application accepted writes,
+   * served them back all day, and lost every one of them on the next cold start.
+   * Nothing failed, which is exactly why it needed deleting rather than
+   * documenting.
    *
-   * This is a fallback for a single-instance demonstration, not a production
-   * store: `/tmp` is per-instance and discarded, so data does not survive a cold
-   * start or reach a second instance concurrently. `docs/DEPLOYMENT.md` says so
-   * plainly, and `/api/health` reports the engine so it is never a mystery.
+   * This path is now used only when `DATABASE_URL` is absent *and* the runtime is
+   * a local one — `npm run dev`, the unit tests and the edge-case harness. It is
+   * resolved by `createDb()` in `db/index.ts`, which refuses to start a long-running
+   * server without DATABASE_URL rather than falling back.
    */
   dbPath:
     process.env.DB_PATH
-    ?? (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
-      ? path.join(os.tmpdir(), 'relay.sqlite')
-      : path.join(ROOT, 'data', 'relay.sqlite')),
+    ?? path.join(ROOT, 'data', 'relay.sqlite'),
   databaseUrl: process.env.DATABASE_URL ?? '',
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Background clock sweeper cadence. */

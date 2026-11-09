@@ -10,65 +10,53 @@ directly**, and **Docker Compose**.
 > The requester imports the repository into their own Vercel account and generates
 > the URL. Section 8 states exactly what that requires.
 
-## 1. Vercel — two services
+## 1. Vercel — one service, one origin
 
-The repository deploys as **one Vercel project containing two services**. Vercel
-builds each independently and routes to them from a single top-level rewrite table,
-so the deployment has one domain and one set of environment variables.
+The repository deploys as **one Vercel project containing one service**. That
+service is the Fastify process itself: it answers `/api/*` and it serves the built
+SPA, from the same origin, in the same invocation model.
 
 ```
 vercel.json
 ├── services
-│   ├── api   framework: fastify   apps/api/src/entrypoints/index.ts → /api/*
-│   └── web   framework: vite      apps/web/  + /(.*) → /index.html  → everything else
+│   └── app   framework: fastify   apps/api/src/entrypoints/index.ts
+│             buildCommand: npm run build:service   (API + SPA, one command)
 └── rewrites
-    ├── /api/(.*) → api      (specific first)
-    └── /(.*)     → web      (catch-all last)
+    └── /(.*) → app
 ```
 
-Both services are public, and each one receives exactly the traffic it is built for:
+### 1.0 Why not two services
 
-* **`api`** is reachable only under `/api/*`. It has no rewrite of its own; the
-  top-level `/api/(.*)` rule is the only way in.
-* **`web`** is the catch-all. Because routing into a service is final, the service
-  owns its own deep-link behaviour — `web` declares a service-level fallback so that
-  reloading `/projects/pr_northwind` returns the document rather than a 404.
-* **The fallback is not `/(.*)`.** That pattern also matches `/assets/index-abc123.js`,
-  so a missing or stale hashed asset would be answered with the HTML document and
-  status 200: the browser reports a MIME type error instead of a 404, and a stale
-  reference renders a blank page rather than failing cleanly. The fallback excludes
-  file-like paths:
+An earlier revision split this into an `api` service routed under `/api/(.*)` and a
+`web` service routed under `/(.*)`. It was the conventional shape and it was the
+source of every deployment failure this repository had:
 
-  ```json
-  { "source": "/((?!assets/)[^.]*)", "destination": "/index.html" }
-  ```
+| Failure | Cause |
+| --- | --- |
+| Every panel reported "a non-JSON response" | `/api` was answered by the frontend service with `index.html` and status 200 — a rewrite ordered or targeted wrongly |
+| The API was absent from the deployment entirely | The project's Framework Preset was not `Services`, so Vercel ignored the `services` block **silently** and built only the root app |
+| A framework prefix that could not be asserted | The preset is a dashboard setting; no committed file can prove it |
 
-  Deep links (`/projects/pr_northwind`) contain no dot and resolve to the document;
-  anything with an extension 404s. `npm run verify:routing` proves this against the
-  built output — `vercel dev` cannot, because it proxies the Vite dev server, which
-  serves `index.html` for every unmatched path itself.
-* Order matters. Vercel routes to the first match, so a catch-all listed first would
-  swallow `/api` entirely. The guard asserts the order.
+A boundary between two deployments is a thing that can be misconfigured, and all
+three failures were that boundary. The application never needed it: every number on
+every screen is computed by this process from PostgreSQL, and the process can serve
+the built assets itself. Removing the split removes the class of failure rather than
+documenting it, and `npm run verify:routing` now boots the real server and asserts
+the behaviour instead of simulating a routing table.
 
-There is **no container service**, and no `Dockerfile.vercel`. An earlier revision
-ran an `app` container serving the SPA while `web` built the same bundle: two
-artifacts for one frontend, and `vercel dev` could not even start the container
-(`DEV_SERVICE_START_FAILED`), so the primary deployment path was untestable locally.
-The root `Dockerfile` and `docker-compose.yml` are untouched and remain the local
-and CI path — see §1.6.
-
-### 1.1 Architecture on Vercel
+### 1.1 What the single service does
 
 | Concern | How it is handled | Why not the obvious way |
 | --- | --- | --- |
-| API | The `api` service, entrypoint `apps/api/src/entrypoints/index.ts` → `entrypoints/vercel.ts`, compiled to `apps/api/dist/entrypoints/vercel.js` | Vercel's Fastify preset discovers entrypoints by filename, and `src/index.ts` is on that list — but that file calls `app.listen()` and starts a `setInterval`. The handler lives in `entrypoints/` precisely so the preset cannot resolve to the long-lived entry. `api/index.js` is retained as the wrapper and delegates to the same artefact. |
-| SPA | The `web` service — `vite build` to `apps/web/dist`, declared with `framework: "vite"` | The same bundle the frontend is developed as, built once. The service-level `/(.*) → /index.html` fallback handles deep links; Vite's asset hashing means a real asset either resolves or is genuinely absent. |
-| Listening | Never. The handler mounts `app.server` and returns | `app.listen()` binds a port nothing routes to. It works locally and fails silently on the platform. |
+| API | `apps/api/src/entrypoints/index.ts` → `entrypoints/vercel.ts`, compiled to `apps/api/dist/entrypoints/vercel.js` | Vercel's Fastify preset discovers entrypoints by filename, and `src/index.ts` is on that list — but that file calls `app.listen()` and starts a `setInterval`. The handler lives in `entrypoints/` precisely so the preset cannot resolve to the long-lived entry. `api/index.js` is retained as the wrapper and delegates to the same artefact. |
+| SPA | The same process serves `apps/web/dist` through `@fastify/static`, with a not-found handler | One origin means the browser has no cross-origin hop, and `/api` has no route to misconfigure. |
+| Deep links | The not-found handler answers a browser route with `index.html` | Reloading `/projects/pr_northwind` must not 404. |
+| Missing assets | The not-found handler returns **404** for any path that names a file | The naive fallback answers `/assets/index-abc123.js` with the document and status 200, so a stale reference renders a blank page with a MIME-type error instead of failing cleanly. A rewrite rule used to prevent this; the rule now lives in the handler, and `verify:routing` asserts it against the running process. |
+| Listening | Never, in the function. The handler mounts `app.server` and returns | `app.listen()` binds a port nothing routes to. It works locally and fails silently on the platform. |
 | `app.ready()` | Called once per instance, explicitly | Fastify installs its hook pipeline here. `listen()` does that for you; without `listen()` the first request crashes inside the hook runner. |
-| Background sweeper | Removed. Replaced by a lazy sweep on real requests + `/api/cron/sweep` | `setInterval` does not survive between invocations, and instances are concurrent — a timer would either never fire or double-fire. |
-| Routing | Two top-level rewrites to service *names*, specific before catch-all | Vercel routes to the first match and routing into a service is final — there is no fallback to another service. A catch-all listed first would swallow `/api` entirely. |
-| Service-to-service | **No bindings.** Nothing calls anything privately | The `api` service talks to PostgreSQL; the browser reaches it over the public `/api` rewrite. There is no third internal service to call, so a binding would inject an unused variable. |
-| Database | `DATABASE_URL` (PostgreSQL, **pooled** endpoint) | SQLite cannot be written from parallel serverless instances. |
+| Background sweeper | A lazy sweep on real requests + `/api/cron/sweep` | `setInterval` does not survive between invocations, and instances are concurrent — a timer would either never fire or double-fire. |
+| Service-to-service | **None.** There is one service | With a single service there is no private URL to bind, and a hardcoded `localhost` in server code resolves to the caller itself in production. The guard fails on any loopback URL in server code. |
+| Database | `DATABASE_URL` (PostgreSQL, **pooled** endpoint) — **required** | SQLite cannot be written from parallel serverless instances. A local file in `/tmp` accepted writes and lost them on the next cold start; the runtime now refuses to boot without `DATABASE_URL` rather than falling back. |
 | Connections | `DATABASE_POOL_MAX`, defaulting to 3 on Vercel | Each instance owns a pool. `pg`'s default of 10 × concurrent instances exhausts a managed database. |
 | Migrations | `npm run db:migrate:prod`, run by the operator | Migrating on every request is a race and a latency tax. One command, deliberately separate. |
 | Auth | **None.** The API authenticates nobody | This is a deliberate, single-tenant deployment: `/` opens the dashboard with no sign-in. Access control belongs to the hosting layer — see `docs/AUTH-REMOVAL.md`. |
@@ -106,9 +94,9 @@ Three signals in that log identify it, and none of them is a repository defect:
 | --- | --- |
 | **Framework Preset** | **`Services`** — required, see above |
 | Root Directory | Repository root — **leave blank** |
-| Build Command | **Leave empty.** A value here overrides the per-service `buildCommand`s even when the preset is Services |
+| Build Command | **Leave empty.** A value here overrides the service's `buildCommand` even when the preset is Services |
 | Install Command | **Leave empty.** Same reason |
-| Output Directory | **Leave empty** — the `web` service declares `dist` itself |
+| Output Directory | **Leave empty** — the Fastify service has no static output directory; it serves `apps/web/dist` itself |
 | Node.js Version | **22.x** (`engines.node` is `>=22.5.0 <23`; verified on v22.22.3) |
 
 If an existing project was imported before the preset was switched, the framework
@@ -122,16 +110,17 @@ Clearing those two overrides matters as much as the preset: a stale
 `services` is present, so writing them there to compensate would produce a
 configuration error instead of a fix.
 
-### 1.2.1 Which service exists to do what
+### 1.2.1 What the one service builds
 
-| Service | Builds | Serves | Public path |
-| --- | --- | --- | --- |
-| `api` | The Fastify application from `apps/api/src/entrypoints/index.ts` | The API | `/api/*` |
-| `web` | `vite build` → `apps/web/dist` | The SPA document and its assets | `/` and every other path |
+| Artefact | Produced by | Served as |
+| --- | --- | --- |
+| `apps/api/dist/` | `npm run build -w @relay/api` | The function itself, plus `api/index.js`'s delegated handler |
+| `apps/web/dist/` | `npm run install:web && npm run build --prefix apps/web` | The SPA document and its hashed assets, through `@fastify/static` |
 
-Both are public because both need public traffic: the browser fetches the document
-and then calls `/api` same-origin. Only `web` needs a fallback, and only `web` has
-one.
+Both come from the single `build:service` command, and the guard asserts that the
+script names both workspaces. A build that compiles only the API deploys a working
+API in front of a 404 for every page — the sort of half-deployment that looks
+healthy in the build log.
 
 The root `Dockerfile` is **not** used by any service. It remains the long-lived
 single-process deployment — API and SPA in one process on :4000, with a
@@ -167,25 +156,27 @@ Two independent mistakes, each fatal on its own:
    service's build command compiles the sibling too, and fails as soon as that
    sibling's dependencies are missing.
 
-So each service declares both commands. These keys are invalid at the top level in
+So the service declares both commands. These keys are invalid at the top level in
 services mode and belong in the service object:
 
-| Service | `installCommand` | `buildCommand` | `outputDirectory` |
-| --- | --- | --- | --- |
-| `api` | `npm ci --include=dev --no-audit --no-fund` | `npm run build -w @relay/api` | — |
-| `web` | `npm ci --include=dev --no-audit --no-fund` | `npm run build` | `dist` |
+| Service | `installCommand` | `buildCommand` |
+| --- | --- | --- |
+| `app` | `npm ci --include=dev --no-audit --no-fund` | `npm run build:service` |
+
+`build:service` is the contract the whole shape rests on: it compiles the API **and**
+builds the SPA, because the API serves `apps/web/dist` itself. The deployment guard
+resolves the script from `package.json` and fails if it stops naming both workspaces.
 
 `vite` stays a devDependency. Moving it into `dependencies` would hide mistake 1
 rather than correct it: the build would work for the wrong reason, and the next
 build-time tool to be added would fail the same way.
 
-**Reproducing this locally.** `npm run build:service` runs
-`scripts/verify-service-builds.mjs` for each service in turn: cwd at the service
-`root`, `NODE_ENV=production`, the service's own `installCommand` and `buildCommand`,
-then asserts the tool (`vite` / `tsc`) exists *before* the build and the expected
-output exists after. One service per invocation, so a pass proves that service builds
-alone. It correctly reproduces the original failure when the install command is
-reverted to a production-only one.
+**Reproducing this locally.** `npm run build:service` runs the service's own
+`buildCommand` from a clean tree with `NODE_ENV=production`, exactly as the platform
+does. `npm run verify:routing` then boots the compiled server against that build and
+asserts what it serves. CI runs both in the `single-service-build` job, which installs
+at production mode and asserts that the handler, the container entry, the SPA document
+and its assets all exist afterwards.
 
 CI runs the same harness as a separate `service-builds` job. The main `verify` job
 installs at the root and builds both workspaces — a genuinely different thing, and
@@ -300,10 +291,11 @@ So `apps/web` is a **standalone project**, not a workspace member:
 | `apps/web/package.json` | no `workspaces` key, own `allowScripts` for `esbuild` |
 | `apps/web/package-lock.json` | **committed**; without it npm resolves the repo-root lockfile, treats the directory as part of the workspace, and wipes the shared tree again |
 
-Each service now installs into its own `node_modules`, so nothing can delete the
-other's. Verified by replaying Vercel's exact sequence — api install, api build, web
-install, web build — and then checking `node_modules/fastify/package.json` still exists.
-`scripts/verify-service-builds.mjs` asserts this on every CI run.
+The frontend now installs into its own `node_modules`, so nothing can delete the API's.
+This still matters in a single-service deployment: `build:service` runs
+`npm run install:web`, and that install must not walk up and replace the repo-root tree
+the API was just compiled against. The deployment guard asserts that `apps/web` is not
+a workspace member and keeps its own lockfile.
 
 Consequences worth knowing:
 
@@ -398,7 +390,7 @@ it is a supported (if non-durable) configuration.
 ```bash
 # 1. Migrate the schema. Idempotent, safe to re-run.
 DATABASE_URL='postgres://…' npm run db:migrate:prod
-# Expected: "✓ migrations applied: 15" (or "already at version 15" on a re-run)
+# Expected: "✓ migrations applied: 17" (or "already at version N" on a re-run)
 
 # 2. Seed the demo studio. Required only on a fresh database: the API attributes
 #    requests to a row in `users`, and cannot invent one.
@@ -538,7 +530,7 @@ never failed is a guard you do not know works.
 | **`500` with a non-JSON body on every `/api` route** | The function has no handler at all. A version-gated built-in (`node:sqlite`) or a native binding (`argon2`) was imported statically, so the module graph threw while loading — before any error handling existed | Both are now imported on demand. If it recurs, check for a newly added static import of a native/version-gated module in the request graph |
 | Sign-in shows *"Could not reach the API"* rather than the variables above | The request never reached the function — the deployment has no `api` service, or the `/api` rewrite is missing | Check the rewrite order (§1.2) and that both services are detected in the build log |
 | The identity list never loads in development mode | Fixed: the screen called `GET /api/users`, the authenticated directory, which no anonymous visitor can read | `GET /api/auth/dev-users` is the anonymous, minimal counterpart. Update rather than special-casing the 401 |
-| `deployment_build_incomplete` from `/api` | `apps/api/dist/entrypoints/vercel.js` is absent because the api service's build did not compile the API | Check the `api` service build; redeploy |
+| `deployment_build_incomplete` from `/api` | `apps/api/dist/entrypoints/vercel.js` is absent because the build did not compile the API | Check the build log for the API half of `build:service`; redeploy |
 | `/` returns JSON `not_found` instead of a page | The catch-all rewrite is missing or points at `api`, so a browser route reached the API function | Confirm `/(.*) → web` is last in `rewrites` |
 | Every `/api/*` call returns HTML | The `/api` rewrite is missing, or the catch-all is listed before it | Order the rewrites specific-first; the guard checks this |
 | 500 with `Cannot read properties of undefined (reading 'length')` | `app.ready()` was skipped — a stale build | Rebuild; this is fixed in `apps/api/src/vercel.ts` |
@@ -547,7 +539,7 @@ never failed is a guard you do not know works.
 | `/api/ready` returns 503 | `DATABASE_URL` wrong, or TLS required but not requested | Add `?sslmode=require`; check the pooled host |
 | Random timeouts under load | Pool exhaustion — too many instances × pool size | Use the pooled endpoint; lower `DATABASE_POOL_MAX` |
 | `/api/cron/sweep` returns 503 | `CRON_SECRET` unset | Set it; redeploy |
-| `ENOENT: lstat '…/node_modules/fastify/package.json'` at **Deploying outputs**, after both builds succeeded | The web service's install replaced the shared workspace-root `node_modules` | `apps/web` must not be an npm workspace member and must keep its own `package-lock.json`; see §1.2.6 |
+| `ENOENT: lstat '…/node_modules/fastify/package.json'` at **Deploying outputs**, after a successful build | The web install replaced the shared workspace-root `node_modules` | `apps/web` must not be an npm workspace member and must keep its own `package-lock.json`; see §1.2.6 |
 | `vite: command not found` (or `tsc: command not found`) during the build | Vercel installed with production-mode npm, which omits `devDependencies` | The service's `installCommand` must be `npm ci --include=dev --no-audit --no-fund`; confirm with `npm run build:service` |
 | The API build fails on a deploy but the web build is fine | That service is running the root `build` script, which compiles both workspaces | `api` must use `npm run build -w @relay/api`; `web` must use `npm run build`. Each service builds only its own workspace |
 | Password login returns 500 `no such table: local_credentials` | The database predates migration 0014; login is the first thing to touch that table | Run `npm run db:migrate:prod`, then `npm run db:pg:assign-login` |
@@ -555,7 +547,7 @@ never failed is a guard you do not know works.
 | `npm warn Unknown env config "cache-dir"` | Vercel's build image exports `npm_config_cache_dir`; npm 11+ rejects the key | Cosmetic. `.npmrc` pins the supported `cache` key; see §1.2.4 |
 | Deep links 404 but the root works | The `web` service is not falling back to the document | `web` must declare a fallback to `/index.html` that excludes file-like paths, e.g. `{"source": "/((?!assets/)[^.]*)", "destination": "/index.html"}`; confirm the request reached `web` and not `api` |
 | The app loads but shows a MIME type error, or a page goes blank after a deploy | A stale or missing hashed asset was answered with the SPA document (200) instead of 404 | The fallback is too broad — `/(.*)` catches `/assets/*`. Use the extension-guarded pattern above |
-| The deployment builds the root app instead of the two services | Framework Preset is not `Services`, or a project-level Build Command overrides the service commands | See §1.2: set the preset to Services and clear Build/Install Command |
+| The build log shows a single root `npm run build` | Framework Preset is not `Services`, or a project-level Build Command overrides the service command | See §1.2: set the preset to Services and clear Build/Install Command |
 | `/api/*` returns the HTML page | The `/api` rewrite is missing | Check `vercel.json` rewrites are present and ordered |
 
 ### 1.7 What is not proven about the Vercel path

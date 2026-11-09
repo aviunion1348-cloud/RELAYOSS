@@ -69,20 +69,31 @@ export default function Dashboard() {
         </div>
       )}
       {/* ------------------------------------------------------------ hero */}
-      <div className="relative overflow-hidden border-b border-ink-700/70">
+      <div className="relative overflow-hidden">
+        {/* Light: one wide gold wash from the top-left, one cool fill from the right. */}
         <div className="pointer-events-none absolute inset-0 aurora opacity-90" />
-        <div className="pointer-events-none absolute inset-0 grid-fade opacity-60" />
-        <div className="relative px-5 pb-5 pt-6">
+        <div className="pointer-events-none absolute inset-0 grid-fade opacity-50" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-gold-600/25 to-transparent" />
+        <div className="relative px-5 pb-6 pt-7">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-iris-500/30 bg-iris-500/10 px-2.5 py-1 text-[10.5px] font-medium text-iris-300">
-                <span className="size-1.5 rounded-full bg-iris-400 pulse-dot" />
-                Studio · {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+              {/*
+                The date capsule. Gold rather than the old iris, and the dot is the
+                only element on the screen that pulses — a live indicator should be
+                the one thing that moves.
+              */}
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-gold-600/35 bg-gold-500/[0.07] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gold-300">
+                <span className="size-1.5 rounded-full bg-gold-400 pulse-dot shadow-[0_0_8px_0_rgb(212_164_76/0.9)]" />
+                Studio · {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'long' })}
               </div>
-              <h1 className="text-balance text-[26px] font-semibold leading-tight tracking-[-0.02em] text-white">
-                Good morning, {data.focus.length ? 'the deck is live.' : 'nothing urgent.'}
+              <h1 className="display max-w-[24ch] text-[30px] text-white">
+                {new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'}
+                {', '}
+                <span className="gold-text">
+                  {data.focus.length ? 'the deck is live.' : 'nothing is on fire.'}
+                </span>
               </h1>
-              <p className="mt-1.5 max-w-[86ch] text-[12.5px] leading-relaxed text-mist-400">
+              <p className="mt-2 max-w-[86ch] text-[12.5px] leading-relaxed text-mist-400">
                 {k.openTasks} open units of work across {data.projects.length} client projects ·{' '}
                 <span className={k.slaBreaches > 0 ? 'text-rose-400' : 'text-mint-400'}>{k.slaBreaches} SLA breaches</span> ·{' '}
                 <span className={k.blocked > 0 ? 'text-amber-400' : 'text-mist-400'}>{k.blocked} blocked</span> ·{' '}

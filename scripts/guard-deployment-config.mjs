@@ -55,19 +55,34 @@ const stripDockerComments = (src) =>
 
 // ---------------------------------------------------------------- vercel.json
 /*
- * Services mode, and what actually breaks.
+ * One service, one origin.
  *
- * The previous guard knew the single-service layout: one top-level buildCommand, one
- * outputDirectory, one `api/index.js` function. Services mode moves build and runtime
- * keys into the service they belong to and makes public routing a top-level table of
- * rewrites to service *names*. That change is exactly the kind that fails silently —
- * a service with no rewrite receives no traffic and looks fine, and a rewrite naming a
- * service that does not exist deploys and then 404s every API call.
+ * This deployment used to be two Vercel services — a Fastify API routed under
+ * `/api/(.*)` and a static Vite build routed under `/(.*)` — with the browser
+ * crossing between them on every request. That split was the source of the
+ * failures it was supposed to prevent: `/api` answered with the SPA document
+ * because a rewrite was ordered or targeted wrongly; the API function was absent
+ * from the deployment entirely because the project preset was not "Services"; and
+ * a framework prefix that is a dashboard setting could not be asserted from here at
+ * all.
  *
- * What this must never do is fail open. In the previous revision a check was silently
- * skipped because a path was built wrongly, and the guard printed its green tick having
- * run nothing. So every structural surprise below is a failure, and anything this guard
- * cannot verify is written to the notes rather than passed over.
+ * The application does not need the split. The Fastify process already serves the
+ * built SPA, with a deep-link fallback and an extension guard, and every piece of
+ * data on every screen is computed by that process. So it is now **one service on
+ * one origin**: the same process answers `/api/*` and every browser route, and
+ * there is no route between them to misconfigure.
+ *
+ * What this guard therefore has to defend is different, and narrower:
+ *
+ *   1. exactly one service, and it is the application itself;
+ *   2. one catch-all rewrite to it — a rule that sends `/api` somewhere else, or a
+ *      catch-all before a more specific rule, is the bug this shape removes;
+ *   3. a single build command that produces *both* artefacts. The API is useless
+ *      without `apps/web/dist`, and a build that compiles only one workspace is how
+ *      a deploy serves an empty shell;
+ *   4. `api/index.js` still delegating to the one serverless handler;
+ *   5. no service bindings and no hardcoded loopback URLs, because with one service
+ *      there is nothing private to call.
  */
 let cfg;
 try {
@@ -78,18 +93,13 @@ try {
 
 if (cfg) {
   const pkg = JSON.parse(read('package.json'));
-  const services = cfg.services && typeof cfg.services === 'object' ? cfg.services : null;
 
   /**
-   * Top-level build and runtime keys are invalid in services mode. Vercel documents
-   * them as belonging to a service, and a config that keeps them at the top level is
-   * either ignored or rejected — both of which present as a confusing build error
-   * rather than as a config error.
+   * Top-level build and runtime keys are invalid in services mode, where they
+   * belong to a service. A config that keeps them at the top level is ignored or
+   * rejected, and both present as a confusing build error rather than a config one.
    */
-  const MOVED_INTO_SERVICES = [
-    'buildCommand', 'installCommand', 'outputDirectory', 'framework', 'functions', 'devCommand', 'ignoreCommand',
-  ];
-  for (const key of MOVED_INTO_SERVICES) {
+  for (const key of ['buildCommand', 'installCommand', 'outputDirectory', 'framework', 'functions', 'devCommand', 'ignoreCommand']) {
     if (cfg[key] !== undefined) {
       fail(
         `vercel.json sets "${key}" at the top level, which is not valid in services mode — ` +
@@ -98,423 +108,227 @@ if (cfg) {
     }
   }
 
+  const services = cfg.services && typeof cfg.services === 'object' ? cfg.services : null;
   if (!services) {
-    fail('vercel.json has no "services" object — this deployment is configured for services mode');
+    fail('vercel.json has no "services" object');
   } else {
     const names = Object.keys(services);
-    for (const name of names) {
-      const svc = services[name] ?? {};
-      if (!svc.root) fail(`service "${name}" has no "root"`);
-      if (svc.root && !exists(String(svc.root).replace(/^\.\/?/, '').replace(/\/$/, '') || '.')) {
-        fail(`service "${name}" root "${svc.root}" does not exist`);
-      }
-      // A build/runtime key stranded at the top level is checked above; one belonging
-      // to a *different* service is undetectable here, so unknown keys are reported.
-      for (const key of Object.keys(svc)) {
-        const known = [
-          'root', 'framework', 'runtime', 'entrypoint', 'command', 'installCommand', 'buildCommand',
-          'devCommand', 'ignoreCommand', 'outputDirectory', 'bindings', 'functions', 'headers',
-          'redirects', 'rewrites', 'routes', 'cleanUrls', 'trailingSlash',
-        ];
-        if (!known.includes(key)) fail(`service "${name}" has an unknown key "${key}"`);
-      }
-    }
-
-    /**
-     * Every service must be reachable or deliberately internal, and that has to be a
-     * decision rather than an oversight. A service matched by no rewrite receives no
-     * public traffic at all, which is correct for a private backend and a silent
-     * outage for a frontend.
-     */
-    const rewrites = Array.isArray(cfg.rewrites) ? cfg.rewrites : [];
-    const publicServices = new Set();
-    for (const rule of rewrites) {
-      const target = rule?.destination;
-      if (target && typeof target === 'object' && target.service) {
-        if (!names.includes(target.service)) {
-          fail(
-            `rewrite "${rule.source}" targets service "${target.service}", which is not in "services" ` +
-              `(known: ${names.join(', ')})`,
-          );
-        } else {
-          publicServices.add(target.service);
-        }
-      } else {
-        fail(
-          `rewrite "${rule.source}" has destination ${JSON.stringify(target)}; in services mode the ` +
-            'destination must be an object of the form { "service": "<name>" }',
-        );
-      }
-    }
-
-    /**
-     * Rewrite order. Vercel routes to the first match, so a catch-all before a
-     * specific rule silently swallows it: if `/(.*)` preceded `/api/(.*)`, every API
-     * call would be answered by the frontend service with an HTML document and a 200.
-     */
-    const catchAll = rewrites.findIndex((r) => String(r.source ?? '') === '/(.*)');
-    const specific = rewrites.findIndex((r) => String(r.source ?? '') !== '/(.*)');
-    if (catchAll !== -1 && specific > catchAll) {
+    if (names.length !== 1) {
       fail(
-        'the catch-all rewrite "/(.*)" is listed before a more specific rule; Vercel routes to the ' +
-          'first match, so the specific rule would never run',
+        `vercel.json declares ${names.length} services (${names.join(', ')}); this deployment is one ` +
+          'process serving the SPA and the API from one origin. A second service reintroduces the ' +
+          'rewrite boundary every previous outage came from',
       );
     }
-    if (!rewrites.some((r) => String(r.source ?? '').startsWith('/api'))) {
-      fail('no rewrite sends /api to a service — API calls would fall through to the frontend');
+
+    const [name, svc] = Object.entries(services)[0] ?? ['(none)', {}];
+    for (const key of Object.keys(svc)) {
+      const known = [
+        'root', 'framework', 'runtime', 'entrypoint', 'command', 'installCommand', 'buildCommand',
+        'devCommand', 'ignoreCommand', 'outputDirectory', 'bindings', 'functions', 'headers',
+        'redirects', 'rewrites', 'routes', 'cleanUrls', 'trailingSlash',
+      ];
+      if (!known.includes(key)) fail(`service "${name}" has an unknown key "${key}"`);
     }
 
-    /* ---------------------------------------------------------- api service -- */
-    const api = services.api;
-    if (!api) {
-      fail('no "api" service — the Fastify application would not be deployed');
+    if (svc.root && !exists(String(svc.root).replace(/^\.\/?/, '').replace(/\/$/, '') || '.')) {
+      fail(`service "${name}" root "${svc.root}" does not exist`);
+    }
+    if (svc.runtime === 'container') {
+      fail(
+        `service "${name}" uses runtime "container". A container binding a port is a different ` +
+          'deployment model from the function this repository ships, and mixing the two is how the ' +
+          'earlier three-service revision became untestable',
+      );
+    }
+
+    /* ------------------------------------------------------- the entrypoint -- */
+    /*
+     * The Fastify preset discovers its entrypoint from a fixed list of filenames,
+     * and that list includes `src/index.ts` — the long-lived container entry, which
+     * calls `app.listen()` and starts a `setInterval`. Landing on it in a function is
+     * a deployment that looks healthy and never sweeps a deadline, so the declared
+     * entrypoint must be the serverless one.
+     */
+    const entry = String(svc.entrypoint ?? '');
+    if (!entry) {
+      fail(
+        `service "${name}" declares no entrypoint. The Fastify preset would scrape the service root ` +
+          'and may resolve apps/api/src/index.ts, which calls app.listen() — which a function cannot do',
+      );
+    } else if (!exists(entry.replace(/^\.\//, ''))) {
+      fail(`service "${name}" entrypoint "${entry}" does not exist`);
     } else {
-      /**
-       * The Fastify preset discovers its entrypoint from a fixed list of filenames, and
-       * that list includes `src/index.ts` — the long-lived container entry, which calls
-       * `app.listen()` and starts a `setInterval`. Landing on it in a function is a
-       * deployment that looks healthy and never sweeps a deadline. The declared
-       * entrypoint must therefore be the serverless one.
-       */
-      const entry = String(api.entrypoint ?? '');
-      if (!entry) {
-        fail(
-          'the api service declares no entrypoint. The Fastify preset would scrape the service root and ' +
-            'may resolve apps/api/src/index.ts, which calls app.listen() and starts a setInterval — ' +
-            'neither works in a function invocation',
-        );
-      } else {
-        const entryPath = entry.replace(/^\.\//, '');
-        if (!exists(entryPath)) {
-          fail(`the api service entrypoint "${entry}" does not exist`);
-        } else {
-          const src = stripComments(read(entryPath));
-          if (/\bapp\.listen\s*\(/.test(src)) {
-            fail(`the api service entrypoint "${entry}" calls app.listen(): a function is invoked per request`);
-          }
-          if (/setInterval\s*\(/.test(src) && !/re-export/i.test(read(entryPath))) {
-            fail(`the api service entrypoint "${entry}" starts a background timer, which will not survive`);
-          }
-        }
-        // The wrapper Vercel actually runs must point at the same artefact.
-        if (exists('api/index.js')) {
-          const wrapper = stripComments(read('api/index.js'));
-          const artefact = wrapper.match(/apps\/api\/dist\/[\w/.]+\.js/)?.[0];
-          if (!artefact) {
-            fail('api/index.js does not delegate to a compiled apps/api/dist artefact');
-          } else if (!/entrypoints\/vercel\.js$/.test(artefact)) {
-            fail(
-              `api/index.js delegates to "${artefact}"; the serverless handler is ` +
-                'apps/api/dist/entrypoints/vercel.js, and a mismatch means a 500 from every API route',
-            );
-          }
-        }
+      const src = stripComments(read(entry.replace(/^\.\//, '')));
+      if (/\bapp\.listen\s*\(/.test(src)) {
+        fail(`service "${name}" entrypoint "${entry}" calls app.listen(): a function is invoked per request`);
       }
-      if (api.framework !== 'fastify') {
-        note(`the api service framework is "${api.framework ?? '(auto)'}" rather than "fastify"`);
+      if (/setInterval\s*\(/.test(src) && !/re-export/i.test(read(entry.replace(/^\.\//, '')))) {
+        fail(`service "${name}" entrypoint "${entry}" starts a background timer, which will not survive`);
       }
     }
-
-    /*
-     * Build and install commands, per service.
-     *
-     * This is the check that was missing when a production deploy failed with
-     * `vite: command not found` after installing 95 packages.
-     *
-     * Two independent mistakes produced it, and either alone is fatal:
-     *
-     *  1. Vercel installs with production-mode npm, which omits devDependencies.
-     *     `vite` and `typescript` are devDependencies — correctly, they are build
-     *     tools, not runtime code — so they are simply absent when the build runs.
-     *     Verified here: `npm ci --omit=dev` from apps/web adds 52 packages and
-     *     leaves no vite; `--include=dev` adds 134 and hoists it to the root bin.
-     *  2. The root `build` script builds *both* workspaces in sequence. Using it as
-     *     one service's build command compiles the other service too, and fails the
-     *     moment that sibling's own dependencies are absent.
-     *
-     * So each service declares its own install command (with dev dependencies) and
-     * its own single-workspace build command. The fix is configuration; moving Vite
-     * into dependencies would hide mistake 1 rather than correct it.
-     */
-    for (const [name, svc] of Object.entries(services)) {
-      if (!svc || svc.runtime === 'container') continue;
-
-      const install = String(svc.installCommand ?? '');
-      if (!install) {
-        fail(
-          `service "${name}" declares no installCommand. Vercel's default production install omits ` +
-            'devDependencies, so build tools such as vite and tsc are missing when the build runs',
-        );
-      } else if (!install.includes('--include=dev')) {
-        fail(
-          `service "${name}" installCommand ("${install}") does not include devDependencies; ` +
-            'add --include=dev or the build tools will be absent',
-        );
-      }
-
-      const build = String(svc.buildCommand ?? '');
-      if (!build) {
-        fail(`service "${name}" declares no buildCommand; the platform would run the wrong default`);
-      } else if (/\bgit\b/.test(build) || build.includes('--ignore-scripts')) {
-        fail(`service "${name}" buildCommand looks unrelated to building this workspace: "${build}"`);
-      }
+    if (svc.framework !== 'fastify') {
+      note(`the service framework is "${svc.framework ?? '(auto)'}" rather than "fastify"`);
     }
 
-    /*
-     * No shared npm workspace between the two services.
-     *
-     * This is the defect that produced
-     *   ENOENT: no such file or directory, lstat '/vercel/path0/node_modules/fastify/package.json'
-     * at `Deploying outputs`, after both builds had already succeeded.
-     *
-     * `npm ci` deletes `node_modules` at the project root *before* installing. For a
-     * workspace member, "project root" is the workspace root — so when the web service
-     * ran its install from `apps/web`, npm walked up and replaced the repo-root
-     * `node_modules`, deleting `fastify` out from under the API function that had just
-     * been compiled against it. Narrowing the command does not help: any `npm ci` from a
-     * workspace member wipes the shared tree (verified with --workspace too).
-     *
-     * So `apps/web` must not be a workspace member and must not sit inside one for npm's
-     * purposes: it needs its own lockfile and no `workspaces` key in its manifest.
-     */
-    {
-      const rootPkg = JSON.parse(read('package.json'));
-      const members = (rootPkg.workspaces ?? []).map((w) => String(w).replace(/\/+$/, ''));
-      if (members.some((w) => /^apps\/web$|^apps\/web\//.test(w))) {
-        fail(
-          'apps/web is an npm workspace member. Its install then resolves the workspace root ' +
-            'and deletes the root node_modules, which removes the API dependencies the api ' +
-            'service just built against (ENOENT fastify/package.json at Deploying outputs)',
-        );
-      }
-      const webPkg = JSON.parse(read('apps/web/package.json'));
-      if (webPkg.workspaces) {
-        fail('apps/web/package.json declares "workspaces"; the web service must install as a standalone project');
-      }
-      if (!exists('apps/web/package-lock.json')) {
-        fail(
-          'apps/web has no package-lock.json. Without its own lockfile npm resolves the repo-root ' +
-            'lockfile, treats the directory as part of the workspace, and wipes the shared tree',
-        );
-      }
-      if (String(services.web?.root ?? '').replace(/\/+$/, '') !== 'apps/web') {
-        fail(`the web service root is "${services.web?.root}", expected apps/web`);
-      }
+    /* ------------------------------------------------------------- the build -- */
+    const install = String(svc.installCommand ?? '');
+    if (!install) {
+      fail(
+        'the service declares no installCommand. Vercel installs in production mode by default, so ' +
+          'devDependencies — and therefore tsc and vite — are missing when the build runs',
+      );
+    } else if (!install.includes('--include=dev')) {
+      fail(`installCommand ("${install}") omits devDependencies; add --include=dev`);
     }
 
-    /*
-     * The .npmrc fallback.
-     *
-     * The service installCommands are the primary fix, but the failing deployment ran
-     * the *root* `npm run build` — not a service build — which means the install that
-     * starved the build did not come from a service installCommand. `include=dev` in
-     * .npmrc makes every install include the build toolchain regardless of which
-     * command or directory drives it, so a config path we have not anticipated cannot
-     * reintroduce `vite: command not found`.
-     */
-    if (!exists('.npmrc')) {
-      fail('.npmrc is missing; it carries `include=dev`, the fallback that keeps a plain production install from omitting the build toolchain');
+    const build = String(svc.buildCommand ?? '');
+    if (!build) {
+      fail('the service declares no buildCommand');
     } else {
-      const npmrc = read('.npmrc')
-        .split('\n')
-        .filter((line) => !line.trim().startsWith('#'))
-        .join('\n');
-      if (!/^\s*include\s*=\s*dev\s*$/m.test(npmrc)) {
-        fail('.npmrc must set `include=dev`; without it a production install omits vite and tsc');
-      }
-      if (/^\s*ignore-scripts\s*=/m.test(npmrc)) {
-        fail(
-          '.npmrc sets `ignore-scripts`, which disables every dependency lifecycle script. ' +
-            'Approve the scripts that are needed via `allowScripts` in package.json instead',
-        );
-      }
-      if (/^\s*cache-dir\s*=/m.test(npmrc)) {
-        fail('.npmrc sets `cache-dir`, which npm no longer recognises; use `cache`');
-      }
-    }
-
-    // The API must build only the API, and the web service only the web.
-    if (api?.buildCommand && !String(api.buildCommand).includes('-w @relay/api')) {
-      fail(
-        `api buildCommand is "${api.buildCommand}"; it must build only @relay/api. The root ` +
-          '"npm run build" builds both workspaces sequentially and is not a valid service build command',
-      );
-    }
-    const webSvc = services.web;
-    if (webSvc?.buildCommand && /-w @relay\/api|\bbuild --workspaces\b/.test(String(webSvc.buildCommand))) {
-      fail(
-        `web buildCommand "${webSvc.buildCommand}" builds the API as well; each service builds independently`,
-      );
-    }
-    if (webSvc && String(webSvc.outputDirectory ?? '') !== 'dist') {
-      fail(`web outputDirectory is "${webSvc.outputDirectory ?? '(unset)'}" but the Vite build writes to dist`);
-    }
-
-    /*
-     * `services` vs `experimentalServices`.
-     *
-     * There are two related-but-distinct configuration models. `services` (the one used
-     * here) pairs with "build and runtime settings belong in the service" and public
-     * routing at the top level. `experimentalServices` is the earlier model, keyed by
-     * `entrypoint` + `routePrefix`.
-     *
-     * Vercel rejects declaring both, and a project still configured against the old model
-     * fails to build as services. Either way the symptom appears far from the cause, which
-     * is why this is asserted rather than remembered.
-     */
-    if (cfg.experimentalServices) {
-      fail(
-        'vercel.json declares "experimentalServices"; this project uses the current "services" ' +
-          'model, and the two cannot be declared together',
-      );
-    }
-
-    /*
-     * No container service.
-     *
-     * The `app` service existed to serve the SPA from an image while the `web`
-     * service built the same bundle — two artifacts for one frontend. It is gone,
-     * and this check keeps it gone: a container service here would reintroduce the
-     * duplicate, and the Dockerfile it would use runs `apps/api/dist/index.js`,
-     * which calls `app.listen()` and starts an interval behind a router that never
-     * routes to that port.
-     */
-    if (services.app) {
-      fail(
-        'the "app" container service duplicates the web service: both build the same SPA. ' +
-          'Serve the frontend from "web" alone and route /(.*) to it',
-      );
-    }
-    if (Object.values(services).some((svc) => svc?.runtime === 'container')) {
-      fail('a container service is declared, but this project serves the SPA from the static web service');
-    }
-    for (const stale of ['Dockerfile.vercel', 'deploy/web-server.mjs']) {
-      if (exists(stale)) {
-        fail(`${stale} is no longer part of the deployment and must not be left behind as dead configuration`);
-      }
-    }
-
-    /* -------------------------------------------------------- web service ---- */
-    const web = services.web;
-    if (!web) {
-      fail('no "web" service — the SPA would not be built or served');
-    } else {
-      const outRel = String(web.outputDirectory ?? 'dist');
-      const webRoot = String(web.root ?? '.').replace(/\/$/, '');
-      const outPath = `${webRoot}/${outRel}`.replace(/^\.\//, '');
-      if (outPath !== 'apps/web/dist') {
-        fail(
-          `the web service builds to "${outPath}"; Vite writes apps/web/dist and the app image copies ` +
-            'apps/web/dist, so the two would disagree',
-        );
-      }
-      if (web.framework !== 'vite') {
-        note(`the web service framework is "${web.framework ?? '(auto)'}" rather than "vite"`);
-      }
       /*
-       * The service owns its deep-link fallback.
+       * Both artefacts, in one command.
        *
-       * A top-level `/(.*) → web` rewrite routes a request into the service, and then
-       * the service's own routing decides what to do. Without a fallback to the
-       * document, `/projects/pr_northwind` is a hard 404 after a browser refresh —
-       * the classic SPA-on-a-static-host failure, and one that only appears when
-       * someone reloads a deep link rather than clicking through the app.
+       * The build script is the contract the whole shape rests on: the API serves
+       * `apps/web/dist`, so a build that produces only `apps/api/dist` deploys a
+       * working API in front of a 404 for every page. Rather than trusting the
+       * script name, this resolves it from package.json and asserts that it names
+       * both workspaces.
        */
-      const webRewrites = Array.isArray(web.rewrites) ? web.rewrites : [];
-      const fallback = webRewrites.find((r) => String(r.destination ?? '') === '/index.html');
-      if (!fallback) {
-        fail('the web service has no fallback to /index.html — a deep-link refresh would 404');
-      } else if (String(fallback.source ?? '') === '/(.*)') {
-        /*
-         * The naive catch-all. It fixes deep links and quietly breaks assets.
-         *
-         * `/(.*)` also matches `/assets/index-abc123.js`, so a request for a missing or
-         * stale hashed asset is answered with the HTML document and status 200. The
-         * browser reports a MIME type error instead of a 404, and a stale reference
-         * renders a blank page rather than failing cleanly.
-         *
-         * The fallback therefore has to exclude anything that looks like a file. Verified
-         * against the real build: with `/(.*)` three missing-asset cases return the
-         * document; with the extension guard they 404 and deep links still resolve.
-         * `scripts/verify-web-routing.mjs` proves it against the built output, because
-         * `vercel dev` proxies the Vite dev server, which applies its own fallback first.
-         */
-        fail(
-          'the web fallback is "/(.*) → /index.html", which also swallows missing assets: ' +
-            'they would return the SPA document with status 200 instead of 404. Exclude ' +
-            'file-like paths, e.g. "/((?!assets/)[^.]*)"',
-        );
-      } else if (!/\[\^\.\]|\.\+|\{\d/.test(String(fallback.source ?? ''))) {
-        fail(
-          `the web fallback source "${fallback.source}" does not appear to exclude file-like ` +
-            'paths; missing assets would receive the SPA document instead of a 404',
-        );
+      const scriptName = build.match(/npm run ([\w:-]+)/)?.[1] ?? '';
+      const script = String(pkg.scripts?.[scriptName] ?? '');
+      if (!script) {
+        fail(`buildCommand "${build}" does not resolve to a script in package.json (looked for "${scriptName}")`);
+      } else {
+        const buildsApi = /-w @relay\/api|--workspace @relay\/api/.test(script);
+        const buildsWeb = /--prefix apps\/web|-w @relay\/web|install:web/.test(script);
+        if (!buildsApi || !buildsWeb) {
+          fail(
+            `the build script "${scriptName}" does not produce both artefacts: ` +
+              `api=${buildsApi ? 'yes' : 'NO'} web=${buildsWeb ? 'yes' : 'NO'}. ` +
+              'The API serves apps/web/dist, so a build that skips the web workspace deploys a ' +
+              'working API behind a page that 404s',
+          );
+        }
       }
     }
 
-    /* -------------------------------------------------------------- bindings -- */
-    /**
-     * A binding is a caller-side grant: it injects the target's internal URL into an
-     * environment variable. Three things make it fail quietly.
-     *
-     *   - A binding naming a service that does not exist deploys and never resolves.
-     *   - A binding whose `env` the application never reads is dead configuration: the
-     *     code keeps using whatever it used before, and the topology looks correct.
-     *   - The inverse is the dangerous one — code reading a bound URL that no service
-     *     grants. `process.env.X_URL` is `undefined`, and `fetch(undefined)` throws at
-     *     runtime in production while passing every test that mocks the variable.
-     */
-    const boundTargets = [];
-    for (const name of names) {
-      const bindings = services[name]?.bindings;
-      if (!bindings) continue;
-      if (!Array.isArray(bindings)) {
-        fail(`service "${name}" bindings must be an array`);
-        continue;
-      }
-      for (const b of bindings) {
-        const label = `service "${name}" binding to "${b?.service ?? '(unset)'}"`;
-        if (b?.type !== 'service') fail(`${label}: type must be "service"`);
-        if (b?.format !== 'url') fail(`${label}: format must be "url"`);
-        if (!b?.env) fail(`${label}: env is required — it names the injected variable`);
-        if (b?.service && !names.includes(b.service)) {
-          fail(`${label}: "${b.service}" is not a service in this deployment`);
-        }
-        if (b?.service === name) fail(`${label}: a service cannot bind to itself`);
-        boundTargets.push(b?.service);
-        // The variable is injected by the platform; setting it yourself silently wins
-        // in local runs and is undefined in production.
-        if (b?.env && exists('.env.example')) {
-          const example = read('.env.example');
-          if (new RegExp(`^${b.env}=`, 'm').test(example)) {
-            fail(`${b.env} is injected by the binding and must not be set in .env.example`);
-          }
-        }
+    /* ---------------------------------------------------------- the rewrites -- */
+    const rewrites = Array.isArray(cfg.rewrites) ? cfg.rewrites : [];
+    if (rewrites.length === 0) {
+      fail('vercel.json has no rewrites, so no public path reaches the service');
+    }
+    const targetOf = (rule) =>
+      rule?.destination && typeof rule.destination === 'object' ? rule.destination.service : null;
+
+    for (const rule of rewrites) {
+      const target = targetOf(rule);
+      if (!target) {
+        fail(
+          `rewrite "${rule?.source}" has destination ${JSON.stringify(rule?.destination)}; in services ` +
+            'mode the destination must be an object of the form { "service": "<name>" }',
+        );
+      } else if (!names.includes(target)) {
+        fail(`rewrite "${rule.source}" targets service "${target}", which is not declared (known: ${names.join(', ')})`);
       }
     }
 
     /*
-     * The application must not invent a service URL. Any hardcoded hostname or port in
-     * server-side code is either a binding that should exist or a dead path.
+     * Every public path must land in the same service. A rule that carves `/api`
+     * out to a different service is the exact split this shape deletes, and it is
+     * also how `/api` came to be answered with an HTML document and a 200.
      */
-    const RUNTIME_DIRS = ['apps/api/src', 'deploy'];
+    const specific = rewrites.filter((r) => String(r.source ?? '') !== '/(.*)');
+    if (specific.length > 0) {
+      fail(
+        `vercel.json has ${specific.length} rewrite(s) narrower than the catch-all ` +
+          `(${specific.map((r) => r.source).join(', ')}). With one service there is nothing to carve out, ` +
+          'and a narrower rule that wins first is how /api stopped reaching the API',
+      );
+    }
+    const catchAll = rewrites.find((r) => String(r.source ?? '') === '/(.*)');
+    if (!catchAll) {
+      fail('vercel.json has no catch-all rewrite "/(.*)", so browser routes never reach the application');
+    } else if (String(targetOf(catchAll)) !== name) {
+      fail(`the catch-all rewrite targets "${targetOf(catchAll)}" rather than the application service "${name}"`);
+    }
+
+    /* ------------------------------------------------------- the static shell -- */
+    /*
+     * Deep links and assets are now the *server's* job, not a rewrite table's. The
+     * application answers an unknown browser route with `index.html` and an unknown
+     * `/api` route with JSON, and it must refuse to answer a missing asset with the
+     * document — that would return 200 for a stale hashed filename and leave the
+     * page blank with a MIME-type error instead of a clean 404.
+     */
+    const appSource = read('apps/api/src/app.ts');
+    if (!/setNotFoundHandler/.test(appSource)) {
+      fail('apps/api/src/app.ts has no not-found handler, so a deep-link refresh would 404 instead of loading the app');
+    }
+    if (!/startsWith\('\/api'\)/.test(appSource)) {
+      fail(
+        'the not-found handler does not separate /api from browser routes: an unknown API path would ' +
+          'be answered with the SPA document',
+      );
+    }
+    if (!/index\.html/.test(appSource)) {
+      fail('the not-found handler does not serve index.html, so browser routes would not resolve');
+    }
+    if (!/fastifyStatic|@fastify\/static/.test(appSource)) {
+      fail('the API does not serve the built assets, so the SPA cannot load in this single-service shape');
+    }
+
+    /* ------------------------------------------------------------ the wrapper -- */
+    /*
+     * `api/index.js` is what Vercel actually executes, and it must delegate to the
+     * compiled serverless handler. A mismatch is a 500 from every route while the
+     * build log reports success.
+     */
+    if (!exists('api/index.js')) {
+      fail('api/index.js is missing; the platform would have no function to invoke');
+    } else {
+      const wrapper = stripComments(read('api/index.js'));
+      const artefact = wrapper.match(/apps\/api\/dist\/[\w/.]+\.js/)?.[0];
+      if (!artefact) {
+        fail('api/index.js does not delegate to a compiled apps/api/dist artefact');
+      } else if (!/entrypoints\/vercel\.js$/.test(artefact)) {
+        fail(
+          `api/index.js delegates to "${artefact}"; the serverless handler is ` +
+            'apps/api/dist/entrypoints/vercel.js',
+        );
+      }
+      if (/\bapp\.listen\s*\(/.test(wrapper)) {
+        fail('api/index.js calls app.listen(): a function is invoked per request');
+      }
+    }
+
+    /*
+     * No bindings, and no loopback URLs.
+     *
+     * A binding injects another service's internal URL. With one service there is
+     * nothing to bind to, and a hardcoded `localhost` in server code resolves to the
+     * caller itself in production — a call that can only ever fail.
+     */
+    if (services[name]?.bindings) {
+      fail(
+        `service "${name}" declares bindings. This deployment has one service: the browser reaches it ` +
+          'on the same origin and its only egress is PostgreSQL',
+      );
+    }
     const URL_LITERAL = /\bhttps?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])/;
-    for (const dir of RUNTIME_DIRS) {
+    for (const dir of ['apps/api/src', 'deploy']) {
       if (!exists(dir)) continue;
       const walk = (rel) => {
         for (const entry of fs.readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
           const child = path.join(rel, entry.name);
-          if (entry.isDirectory()) {
-            walk(child);
-            continue;
-          }
+          if (entry.isDirectory()) { walk(child); continue; }
           if (!/\.(ts|mjs|js)$/.test(entry.name)) continue;
           if (/\.test\.mjs$/.test(entry.name)) continue;
           const src = stripComments(fs.readFileSync(path.join(ROOT, child), 'utf8'));
           if (URL_LITERAL.test(src)) {
             fail(
-              `${child} contains a hardcoded loopback URL. In services mode a service reaches another ` +
-                'over a binding, and localhost resolves to the caller itself',
+              `${child} contains a hardcoded loopback URL. In a deployment there is no loopback service ` +
+                'to call — localhost resolves to the caller itself',
             );
           }
         }
@@ -522,22 +336,10 @@ if (cfg) {
       walk(dir);
     }
 
-    if (boundTargets.length === 0) {
-      note(
-        'no service bindings declared. The api service makes no outbound call to another service: ' +
-          'the browser reaches it through the public /api rewrite, and its only egress is the identity ' +
-          'provider. If a future service calls another, declare the binding on the caller.',
-      );
-    }
-
-    /* ------------------------------------------------------------------ cron -- */
-    /*
-     * Crons are public routing, so they stay at the top level in services mode. The
-     * path must still reach the api service and still be authenticated.
-     */
+    /* -------------------------------------------------------------------- cron -- */
     for (const cron of Array.isArray(cfg.crons) ? cfg.crons : []) {
       if (!String(cron.path ?? '').startsWith('/api/')) {
-        fail(`cron "${cron.path}" is not under /api, so it would be routed to the frontend service`);
+        fail(`cron "${cron.path}" is not under /api`);
       }
       if (cron.path === '/api/cron/sweep') {
         const routes = read('apps/api/src/routes/index.ts');
@@ -549,11 +351,105 @@ if (cfg) {
       }
       const fields = String(cron.schedule ?? '').trim().split(/\s+/);
       if (fields.length === 5 && fields[0] !== '0' && !fields[0].startsWith('*')) {
-        note(
-          `cron "${cron.schedule}" may exceed the Hobby plan's one-run-per-day limit; ` +
-            'docs/DEPLOYMENT.md §1.5 explains the trade-off',
-        );
+        note(`cron "${cron.schedule}" may exceed the Hobby plan's one-run-per-day limit`);
       }
+    }
+  }
+
+  /*
+   * `.npmrc` carries `include=dev`.
+   *
+   * The service installCommand is the primary fix for the build-tool starvation, but
+   * the failing deployment ran the *root* build, not a service build — so the install
+   * that starved it did not come from a service installCommand. This makes every
+   * install include the toolchain regardless of which command drives it.
+   */
+  if (!exists('.npmrc')) {
+    fail('.npmrc is missing; it carries `include=dev`, the fallback that keeps a production install from omitting the build toolchain');
+  } else {
+    const npmrc = read('.npmrc').split('\n').filter((line) => !line.trim().startsWith('#')).join('\n');
+    if (!/^\s*include\s*=\s*dev\s*$/m.test(npmrc)) {
+      fail('.npmrc must set `include=dev`; without it a production install omits vite and tsc');
+    }
+    if (/^\s*ignore-scripts\s*=/m.test(npmrc)) {
+      fail('.npmrc sets `ignore-scripts`, which disables every dependency lifecycle script');
+    }
+    if (/^\s*cache-dir\s*=/m.test(npmrc)) {
+      fail('.npmrc sets `cache-dir`, which npm no longer recognises; use `cache`');
+    }
+  }
+
+  /*
+   * `apps/web` must keep its own lockfile and must not be a workspace member.
+   *
+   * This used to prevent one service's install from wiping another's `node_modules`.
+   * It still matters for a different reason: `build:service` installs the web app
+   * separately (`install:web`), and an `npm ci` from a workspace member walks up and
+   * replaces the repo-root tree — deleting `fastify` out from under the API that was
+   * just compiled against it.
+   */
+  {
+    const rootPkg = JSON.parse(read('package.json'));
+    const members = (rootPkg.workspaces ?? []).map((w) => String(w).replace(/\/+$/, ''));
+    if (members.some((w) => /^apps\/web$|^apps\/web\//.test(w))) {
+      fail(
+        'apps/web is an npm workspace member. Its install then resolves the workspace root and ' +
+          'deletes the root node_modules, removing the API dependencies the build just compiled against',
+      );
+    }
+    if (JSON.parse(read('apps/web/package.json')).workspaces) {
+      fail('apps/web/package.json declares "workspaces"; the web app must install as a standalone project');
+    }
+    if (!exists('apps/web/package-lock.json')) {
+      fail('apps/web has no package-lock.json, so npm would resolve the repo-root lockfile and wipe the shared tree');
+    }
+  }
+
+  /*
+   * The obsolete shapes must stay obsolete.
+   *
+   * Each of these existed and was removed for a specific failure. Leaving one behind
+   * as dead configuration is how it gets resurrected: a stale `deploy/web-server.mjs`
+   * looks like the way to serve the SPA, and `Dockerfile.vercel` looks like a
+   * deployment path.
+   */
+  for (const stale of ['Dockerfile.vercel', 'deploy/web-server.mjs', 'scripts/verify-service-builds.mjs']) {
+    if (exists(stale)) {
+      fail(`${stale} belongs to the retired multi-service deployment and must not be left behind as dead configuration`);
+    }
+  }
+
+  /*
+   * PostgreSQL is the only deployment database.
+   *
+   * The removed fallback wrote a SQLite file to `/tmp` on a serverless runtime, where
+   * it was per-instance and discarded: the API accepted writes, served them back, and
+   * lost every one on the next cold start. So the code must refuse to boot a serving
+   * runtime without `DATABASE_URL`, and must not contain a temporary-directory
+   * database path at all.
+   */
+  {
+    /*
+     * Text checks only. Whether a serving runtime actually refuses is *behaviour*, and a
+     * scan for the identifier `isServingRuntime` passes against `if (false)` — verified,
+     * it did. That assertion lives in apps/api/test/vercel.test.mjs, which calls
+     * `buildApp()` in a production Vercel environment with no DATABASE_URL and asserts
+     * the refusal. What is checkable here is that the explanation exists at all, so the
+     * failure a person sees names the variable instead of surfacing as a blank 500.
+     */
+    const dbSource = read('apps/api/src/db/index.ts');
+    if (!/DATABASE_URL is not set/.test(dbSource)) {
+      fail('apps/api/src/db/index.ts does not explain what is missing when DATABASE_URL is absent, so the refusal would be opaque');
+    }
+    if (!/per-instance|discarded/i.test(dbSource)) {
+      fail('apps/api/src/db/index.ts does not explain why a local file is not an alternative to DATABASE_URL');
+    }
+    const configSource = read('apps/api/src/config.ts');
+    if (/os\.tmpdir\(\)/.test(stripComments(configSource))) {
+      fail(
+        'apps/api/src/config.ts still resolves a database path into the temporary directory. On a ' +
+          'serverless runtime that is per-instance storage, so writes are accepted and then lost',
+      );
     }
   }
 

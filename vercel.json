@@ -1,39 +1,19 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
-    "api": {
+    "app": {
       "root": ".",
       "framework": "fastify",
       "entrypoint": "apps/api/src/entrypoints/index.ts",
       "installCommand": "npm ci --include=dev --no-audit --no-fund",
-      "buildCommand": "npm run build -w @relay/api",
-      "devCommand": "npm run dev:api"
-    },
-    "web": {
-      "root": "apps/web/",
-      "framework": "vite",
-      "installCommand": "npm ci --include=dev --no-audit --no-fund",
-      "buildCommand": "npm run build",
-      "outputDirectory": "dist",
-      "rewrites": [
-        {
-          "source": "/((?!assets/)[^.]*)",
-          "destination": "/index.html"
-        }
-      ]
+      "buildCommand": "npm run build:service"
     }
   },
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": {
-        "service": "api"
-      }
-    },
-    {
       "source": "/(.*)",
       "destination": {
-        "service": "web"
+        "service": "app"
       }
     }
   ],
@@ -58,6 +38,15 @@
         {
           "key": "Referrer-Policy",
           "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
         }
       ]
     },

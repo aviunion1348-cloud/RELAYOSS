@@ -553,6 +553,278 @@ for (const [name, , route, endpoints] of SCREENS) {
 }
 
 /*
+ * An older browser must still be able to make a request.
+ *
+ * AbortSignal.timeout is Safari 16+ / Chrome 103+ and AbortSignal.any is newer.
+ * The client used both unconditionally, outside its try/catch — so on an older
+ * browser calling them threw a TypeError before the fetch was even attempted, and
+ * every panel in the product failed at once with "the request never reached the
+ * server". Deleting the two statics here reproduces that browser exactly: a server
+ * is listening and reachable, so a working client must get its response.
+ */
+{
+  const http = await import('node:http');
+  const stub = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ data: { ok: true } }));
+  });
+  await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+  const base = 'http://127.0.0.1:' + stub.address().port;
+
+  const savedTimeout = AbortSignal.timeout;
+  const savedAny = AbortSignal.any;
+  // A browser from before these existed: the properties are simply absent.
+  delete AbortSignal.timeout;
+  delete AbortSignal.any;
+  let result = null;
+  let failure = null;
+  try {
+    result = await requestWithDeadline('/api/meta', { base, deadlineMs: 5000 });
+  } catch (e) {
+    failure = e;
+  } finally {
+    AbortSignal.timeout = savedTimeout;
+    AbortSignal.any = savedAny;
+    stub.close();
+  }
+  const ok = !failure && result && result.ok === true;
+  check('no-abortsignal', Boolean(ok), ok
+    ? 'a browser without AbortSignal.timeout/any can still load data'
+    : 'a browser without AbortSignal.timeout/any cannot make a request: ' +
+      (failure ? failure.name + ': ' + failure.message : 'no data returned'));
+}
+
+/*
+ * The shell must actually mount the live feed.
+ *
+ * "Live updateable" is easy to claim and easy to lose: the hook exists, the endpoint
+ * exists, and one refactor removes the useLiveUpdates call from the shell and nothing
+ * fails. The screens simply stop updating, and they look fine while they do it.
+ *
+ * The assertion is made against source, deliberately, because that is the level the
+ * property lives at: a server render cannot show a polling loop (effects do not run),
+ * and there is no browser here. What this proves is that the shell imports and calls
+ * the feed, that the pulse is rendered in the header, and that the hook actually
+ * invalidates queries. change-feed.test.mjs proves the endpoint behaves.
+ */
+{
+  const nodeFs = await import('node:fs');
+  /*
+   * Resolved from this file, never hardcoded: an absolute sandbox path passes here and
+   * fails on CI, which is the worst kind of green.
+   */
+  const shellPath = ${JSON.stringify(path.join(ROOT, 'apps', 'web', 'src', 'components', 'Shell.tsx'))};
+  const livePath = ${JSON.stringify(path.join(ROOT, 'apps', 'web', 'src', 'lib', 'live.ts'))};
+
+  const shellSource = nodeFs.readFileSync(shellPath, 'utf8');
+  /*
+   * Comments go first. This module explains the feed at length in prose, and a naive
+   * match would find the explanation rather than the call — a false positive that keeps
+   * passing after the call is deleted.
+   */
+  const clean = shellSource
+    .replace(/\\/\\*[\\s\\S]*?\\*\\//g, '')
+    .split('\\n')
+    .map((line) => line.replace(/(^|\\s)\\/\\/.*$/, '$1'))
+    .join('\\n');
+
+  const imported = /import\\s*\\{[^}]*useLiveUpdates[^}]*\\}/.test(clean);
+  const called = /useLiveUpdates\\s*\\(/.test(clean);
+  const pulseImported = /import\\s*\\{[^}]*LivePulse[^}]*\\}/.test(clean);
+  const pulseRendered = /<LivePulse/.test(clean);
+  const hookExists = nodeFs.existsSync(livePath);
+  const hookInvalidates = hookExists && /invalidateQueries/.test(nodeFs.readFileSync(livePath, 'utf8'));
+
+  const problems = [
+    imported ? null : 'useLiveUpdates is not imported by Shell',
+    called ? null : 'useLiveUpdates is not called by Shell',
+    pulseImported ? null : 'LivePulse is not imported by Shell',
+    pulseRendered ? null : 'LivePulse is not rendered in the header',
+    hookExists ? null : 'lib/live.ts is missing',
+    hookInvalidates ? null : 'the live hook never invalidates a query',
+  ].filter(Boolean);
+
+  check('live-feed', problems.length === 0, problems.length === 0
+    ? 'the shell mounts the feed, renders the pulse, and the hook invalidates the queries it affects'
+    : problems.join('; '));
+}
+
+/*
+ * The diagnosis must discriminate, not console.
+ *
+ * A failure panel that always prints the same advice is worse than no panel: it
+ * costs the reader time and confidence. There are four distinct deployment faults
+ * that all surface in a browser as "could not load", and each has a different fix
+ * — the API never deployed (404), traffic misrouted to the SPA (200 + a document),
+ * the API crashing (5xx), and something between browser and host refusing the
+ * request (the fetch itself throws). This drives the diagnoseApiFailure probe against
+ * four stub servers that reproduce exactly those behaviours and asserts each one
+ * gets its own verdict and its own remedies.
+ *
+ * The module is TypeScript, so it is compiled first with the same tsconfig the app
+ * uses — the check must exercise the shipped code, not a copy of its logic.
+ */
+{
+  const http = await import('node:http');
+
+  /*
+   * Compile the module with the esbuild binary, not the API: this check itself runs
+   * inside the bundle above, where a bare import of esbuild resolves to the JS that
+   * expects CommonJS and fails on its own require of fs. The CLI has no such problem,
+   * and it is already the tool this file uses to compile the screens.
+   */
+  const diagnoseOut = ${JSON.stringify(path.join(WORK, 'diagnose.mjs'))};
+  (await import('node:child_process')).execFileSync(
+    ${JSON.stringify(fs.existsSync(ESBUILD) ? ESBUILD : 'esbuild')},
+    [
+      ${JSON.stringify(path.join(ROOT, 'apps/web/src/lib/diagnose.ts'))},
+      '--bundle', '--platform=neutral', '--format=esm', '--outfile=' + diagnoseOut,
+      '--log-level=error',
+    ],
+    { stdio: 'inherit' },
+  );
+  const diagnoseSource = (await import('node:fs')).readFileSync(diagnoseOut, 'utf8');
+  const modUrl =
+    'data:text/javascript;base64,' + Buffer.from(diagnoseSource).toString('base64');
+
+  // The module reads "window", "navigator" and "fetch"; that is its whole world.
+  /*
+   * Node 22 defines navigator as a getter with no setter, so it has to be replaced
+   * by descriptor rather than assigned. Everything else the module touches is
+   * plain globals it owns.
+   */
+  const realNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const diagnosisFor = async (base, { online = true } = {}) => {
+    globalThis.window = { location: { origin: base } };
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { onLine: online },
+      configurable: true,
+      writable: true,
+    });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (url, init) => realFetch(new URL(url, base).href, init);
+    try {
+      const mod = await import(modUrl + '#' + Math.random());
+      return await mod.diagnoseApiFailure();
+    } finally {
+      globalThis.fetch = realFetch;
+      delete globalThis.window;
+      if (realNavigator) Object.defineProperty(globalThis, 'navigator', realNavigator);
+      else delete globalThis.navigator;
+    }
+  };
+
+  const serve = async (handler) => {
+    const server = http.createServer(handler);
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    return { base: 'http://127.0.0.1:' + server.address().port, close: () => server.close() };
+  };
+  const json = (res, status, body) => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
+  };
+
+  const cases = [
+    {
+      label: 'not-deployed',
+      // A host that serves the SPA but has no API at all.
+      start: () => serve((_q, res) => { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('Not Found'); }),
+      code: 'not-deployed',
+      expect: /not deployed/i,
+      remedy: /Preset|services block/i,
+    },
+    {
+      label: 'not-json',
+      // The exact failure of the last deployment: /api answered with the SPA.
+      start: () => serve((_q, res) => {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.end('<!doctype html><html><body><div id="root"></div></body></html>');
+      }),
+      code: 'not-json',
+      expect: /routed to the frontend/i,
+      remedy: /rewrite|targets the \"api\" service/i,
+    },
+    {
+      label: 'server-error',
+      start: () => serve((_q, res) => json(res, 503, { code: 'misconfigured', summary: 'No DATABASE_URL' })),
+      code: 'server-error',
+      expect: /server-side fault/i,
+      remedy: /logs|environment variable/i,
+    },
+    {
+      label: 'api-ok',
+      start: () => serve((_q, res) => json(res, 200, { status: 'ok' })),
+      code: 'api-ok',
+      expect: /transient/i,
+      remedy: /Retry/i,
+    },
+  ];
+
+  for (const c of cases) {
+    const stub = await c.start();
+    let d = null;
+    let err = null;
+    try {
+      d = await diagnosisFor(stub.base);
+    } catch (e) {
+      err = e;
+    } finally {
+      stub.close();
+    }
+    const ok =
+      !err &&
+      d &&
+      d.code === c.code &&
+      c.expect.test(d.summary) &&
+      d.remedies.some((r) => c.remedy.test(r)) &&
+      d.evidence.length >= 3;
+    check(
+      'diagnose-' + c.label,
+      Boolean(ok),
+      ok
+        ? 'a ' + c.label + ' fault is named and given its own remedy'
+        : 'wrong verdict for ' + c.label + ': ' +
+          (err ? err.message : (d && d.code + ' / ' + d.summary) || 'nothing'),
+    );
+  }
+
+  // A refused connection is the fourth fault and needs its own verdict.
+  {
+    const { createServer } = await import('node:net');
+    const probe = createServer();
+    await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+    const deadPort = probe.address().port;
+    await new Promise((r) => probe.close(r));
+    let d = null;
+    try {
+      d = await diagnosisFor('http://127.0.0.1:' + deadPort);
+    } catch {
+      /* the assertion below reports it */
+    }
+    const ok =
+      d && d.code === 'blocked' && /refused before any response/i.test(d.summary) &&
+      d.remedies.some((r) => /ad-blocker|VPN/i.test(r));
+    check('diagnose-blocked', Boolean(ok), ok
+      ? 'a request refused before any response is named as blocking, not as a missing API'
+      : 'a refused connection was misdiagnosed: ' + (d ? d.code : 'no verdict'));
+  }
+
+  // Offline is its own cause and must not blame the deployment.
+  {
+    let d = null;
+    try {
+      d = await diagnosisFor('http://127.0.0.1:1', { online: false });
+    } catch {
+      /* reported below */
+    }
+    const ok = d && d.code === 'offline' && d.remedies.length > 0;
+    check('diagnose-offline', Boolean(ok), ok
+      ? 'a browser that reports no network is not blamed on the deployment'
+      : 'offline browser was misdiagnosed: ' + (d ? d.code : 'no verdict'));
+  }
+}
+
+/*
  * The timeout must render as a timeout, not as a generic network fault: the two
  * have different remedies, and conflating them is the mistake ApiFailure was
  * written to stop.

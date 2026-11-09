@@ -13,6 +13,7 @@ data/
 *.log
 .vite/
 .pgdata/
+.pgdata-boot/
 backups/
 .e2e/
 
@@ -23,3 +24,4 @@ backups/
 # Local env variants that hold real secrets.
 .env.*
 !.env.example
+.routing-db-*/

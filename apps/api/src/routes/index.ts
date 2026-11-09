@@ -19,7 +19,7 @@ import {
   dealsWhere,
   assertProjectInScope,
 } from '../auth/scope.ts';
-import { id, nowIso } from '../lib/ids.ts';
+import { id, nowIso, nowIsoAt } from '../lib/ids.ts';
 import { toDate } from '../lib/dates.ts';
 import { TASK_SELECT, mapTask, mapUser, mapClient, mapProject, mapDeal } from '../repositories/query.ts';
 import { SLA_HOURS, scoreRisk, slaState } from '../domain/risk.ts';
@@ -1292,6 +1292,100 @@ export async function registerRoutes(
     return ok(mapClient(row));
   });
 
+  /*
+   * Editing and retiring a client.
+   *
+   * `POST /api/clients` existed and nothing could change a client afterwards: the
+   * tier, health and contact details on the Clients screen were seed data, so the
+   * one record the rest of the product is organised around was write-once.
+   *
+   * `slug` is deliberately not editable. It is the stable identifier quoted in
+   * integrations and URLs, and renaming it silently breaks every caller holding the
+   * old value; moving a client to a new slug is a migration, not a form edit.
+   */
+  app.patch('/api/clients/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
+    const { id: clientId } = req.params as { id: string };
+    const parsed = z.object({
+      name: z.string().trim().min(1, 'a client needs a name').max(120).optional(),
+      industry: z.string().max(80).optional(),
+      initials: z.string().max(3).optional(),
+      accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'accentColor is a hex colour such as #c9a227').optional(),
+      tier: z.enum(['strategic', 'enterprise', 'growth', 'starter']).optional(),
+      health: z.enum(['healthy', 'watch', 'at_risk', 'churn']).optional(),
+      primaryContactName: z.string().max(120).optional(),
+      primaryContactEmail: z.union([z.literal(''), z.string().email('that is not an email address')]).optional(),
+      primaryContactRole: z.string().max(80).optional(),
+      notes: z.string().max(5000).optional(),
+      mrrCents: z.number().int().min(0).max(1_000_000_000).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid client payload', parsed.error.issues);
+    const patch = parsed.data;
+    if (Object.keys(patch).length === 0) throw badRequest('Nothing to change');
+
+    const conn = await db();
+    const existing = await conn.get<{ id: string }>('SELECT id FROM clients WHERE id = ?', [clientId]);
+    if (!existing) throw notFound('No such client');
+
+    const columns: Record<string, string> = {
+      name: 'name', industry: 'industry', initials: 'initials', accentColor: 'accent_color',
+      tier: 'tier', health: 'health', primaryContactName: 'primary_contact_name',
+      primaryContactEmail: 'primary_contact_email', primaryContactRole: 'primary_contact_role',
+      notes: 'notes', mrrCents: 'mrr_cents',
+    };
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    for (const [field, column] of Object.entries(columns)) {
+      if (patch[field as keyof typeof patch] !== undefined) {
+        sets.push(`${column} = ?`);
+        params.push(patch[field as keyof typeof patch]);
+      }
+    }
+    sets.push('updated_at = ?');
+    params.push(nowIso());
+    await conn.run(`UPDATE clients SET ${sets.join(', ')} WHERE id = ?`, [...params, clientId]);
+    const row = await conn.get<Record<string, any>>('SELECT * FROM clients WHERE id = ?', [clientId]);
+    if (!row) throw notFound('The client was written but could not be read back');
+    return ok(mapClient(row));
+  });
+
+  /*
+   * Deleting a client is refused while it still owns work.
+   *
+   * `projects.client_id` and `partners.client_id` cascade, so a DELETE would
+   * succeed and take every project, task and document belonging to that client
+   * with it — silently, in one statement. The failure a person actually wants is a
+   * refusal that names what is in the way.
+   */
+  app.delete('/api/clients/:id', async (req, reply) => {
+    await requireRole(req, ['admin']);
+    const { id: clientId } = req.params as { id: string };
+    const conn = await db();
+    const existing = await conn.get<{ id: string; name: string }>(
+      'SELECT id, name FROM clients WHERE id = ?', [clientId],
+    );
+    if (!existing) throw notFound('No such client');
+
+    const projects = await conn.get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM projects WHERE client_id = ?', [clientId],
+    );
+    const partners = await conn.get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM partners WHERE client_id = ?', [clientId],
+    );
+    const blockers: string[] = [];
+    if (Number(projects?.n ?? 0) > 0) blockers.push(`${projects?.n} project(s)`);
+    if (Number(partners?.n ?? 0) > 0) blockers.push(`${partners?.n} partner record(s)`);
+    if (blockers.length) {
+      throw conflict(
+        `"${existing.name}" still owns ${blockers.join(' and ')}. ` +
+          'Move or retire those first — deleting the client would cascade to them.',
+      );
+    }
+    await conn.run('DELETE FROM clients WHERE id = ?', [clientId]);
+    reply.code(204);
+    return null;
+  });
+
   app.get('/api/clients', async () => {
     const clients = (await (await db()).all<Record<string, any>>('SELECT * FROM clients ORDER BY name')).map(mapClient);
     const deals = await (await db()).all<Record<string, any>>('SELECT client_id, value_cents, status FROM deals');
@@ -1411,6 +1505,75 @@ export async function registerRoutes(
       identity.userId,
     );
     return reply.code(201).send({ data: result });
+  });
+
+  /*
+   * Editing a partner.
+   *
+   * The partner console shows a plan, a status and three limits that decide what
+   * the tenant is allowed to do, and none of them could be changed. Lowering a
+   * device limit is the interesting case: `enforceDeviceLimit` re-reads the live
+   * row on every registration, so a reduction takes effect on the next device
+   * rather than requiring anything to be rebuilt or restarted.
+   */
+  app.patch('/api/partners/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead']);
+    const { id: partnerId } = req.params as { id: string };
+    const parsed = z.object({
+      name: z.string().trim().min(1).max(120).optional(),
+      consoleUrl: z.union([z.literal(''), z.string().url('consoleUrl must be a URL')]).optional(),
+      plan: z.enum(['starter', 'growth', 'enterprise']).optional(),
+      status: z.enum(['active', 'trial', 'suspended']).optional(),
+      deviceLimit: z.number().int().min(0).max(1_000_000).optional(),
+      apiQuotaMonth: z.number().int().min(0).max(1_000_000_000).optional(),
+      seatLimit: z.number().int().min(0).max(100_000).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid partner payload', parsed.error.issues);
+    const patch = parsed.data;
+    if (Object.keys(patch).length === 0) throw badRequest('Nothing to change');
+
+    const conn = await db();
+    const existing = await conn.get<Record<string, any>>('SELECT * FROM partners WHERE id = ?', [partnerId]);
+    if (!existing) throw notFound('No such partner');
+
+    /*
+     * A limit may not be cut below what the tenant has already consumed: the rows
+     * would then be permanently over quota, and every subsequent request would be
+     * refused for a reason the operator cannot see. Refusing the edit with the
+     * current usage is the only answer that leaves the console truthful.
+     */
+    if (patch.deviceLimit !== undefined) {
+      const used = await conn.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM device_licenses WHERE partner_id = ? AND status != 'revoked'",
+        [partnerId],
+      );
+      if (Number(used?.n ?? 0) > patch.deviceLimit) {
+        throw conflict(
+          `This partner already has ${used?.n} registered device(s); a limit of ${patch.deviceLimit} ` +
+            'would put it over quota. Revoke devices first.',
+        );
+      }
+    }
+
+    const columns: Record<string, string> = {
+      name: 'name', consoleUrl: 'console_url', plan: 'plan', status: 'status',
+      deviceLimit: 'device_limit', apiQuotaMonth: 'api_quota_month', seatLimit: 'seat_limit',
+    };
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    for (const [field, column] of Object.entries(columns)) {
+      if (patch[field as keyof typeof patch] !== undefined) {
+        sets.push(`${column} = ?`);
+        params.push(patch[field as keyof typeof patch]);
+      }
+    }
+    await conn.run(`UPDATE partners SET ${sets.join(', ')} WHERE id = ?`, [...params, partnerId]);
+    const row = await conn.get<Record<string, any>>('SELECT * FROM partners WHERE id = ?', [partnerId]);
+    return ok({
+      id: row?.id, name: row?.name, slug: row?.slug, plan: row?.plan, status: row?.status,
+      consoleUrl: row?.console_url, deviceLimit: row?.device_limit,
+      apiQuotaMonth: row?.api_quota_month, seatLimit: row?.seat_limit,
+    });
   });
 
   app.post('/api/partners/:id/devices/:deviceId/activate', async (req) => {
@@ -1879,6 +2042,7 @@ export async function registerRoutes(
       const t = tasks.find((x) => x.id === taskId);
       if (t && count > 1) {
         insights.push({
+          key: `bottleneck:${t.id}`,
           kind: 'bottleneck', severity: 'high', title: `${t.key} is blocking ${count} downstream tasks`,
           body: `“${t.title}” sits on the critical path for ${count} other units of work. Pull it forward or split it.`,
           action: { label: 'Open task', taskId: t.id },
@@ -1893,6 +2057,7 @@ export async function registerRoutes(
     );
     if (reviewers.length === 1) {
       insights.push({
+        key: 'concentration:lead_approved',
         kind: 'concentration', severity: 'medium', title: 'Every lead approval is one person',
         body: `${reviewers[0].full_name} has approved 100% of lead gates. Add a second approver before Q4 to remove the bus factor.`,
         action: null,
@@ -1913,6 +2078,7 @@ export async function registerRoutes(
       const ratio = d.est ? d.logged / d.est : 0;
       if (ratio > 1.15) {
         insights.push({
+          key: `estimate_drift:${key}`,
           kind: 'estimate_drift', severity: ratio > 1.4 ? 'high' : 'medium',
           title: `${key} is burning ${Math.round((ratio - 1) * 100)}% over estimate`,
           body: `${Math.round(d.logged)}h logged against ${Math.round(d.est)}h estimated on open work. Re-baseline before the next demo promise.`,
@@ -1928,6 +2094,7 @@ export async function registerRoutes(
     });
     if (stale.length) {
       insights.push({
+        key: 'stale_wip:open_work',
         kind: 'stale_wip', severity: stale.length > 4 ? 'high' : 'medium',
         title: `${stale.length} tasks have not moved in 5+ days`,
         body: 'Work-in-progress is ageing, which raises cycle time for everything else. Consider a WIP limit on In Progress.',
@@ -1942,6 +2109,7 @@ export async function registerRoutes(
     );
     for (const f of failedGates) {
       insights.push({
+        key: `turnover_cluster:${f.key}`,
         kind: 'turnover_cluster', severity: 'medium',
         title: `${f.name} fails most often (${f.c}×)`,
         body: 'A gate that fails repeatedly usually means the policy is under-specified, not that the team is careless. Add the failing condition to the template.',
@@ -1953,6 +2121,7 @@ export async function registerRoutes(
     const visibleLate = tasks.filter((t) => t.client_visible && t.due_at && (toDate(t.due_at)?.getTime() ?? Infinity) < now);
     if (visibleLate.length) {
       insights.push({
+        key: 'client_risk:overdue_visible',
         kind: 'client_risk', severity: 'critical',
         title: `${visibleLate.length} client-visible commitments are past due`,
         body: 'These appear on the client status page. Send a written position with a date, or renegotiate the commitment today.',
@@ -1960,20 +2129,213 @@ export async function registerRoutes(
       });
     }
 
+    /*
+     * Apply the dismissals.
+     *
+     * A dismissed finding is *not* deleted from the analysis — it is returned in a
+     * separate list with the reason and the person who decided. Hiding it entirely
+     * would mean the next person cannot tell "we analysed this and chose to accept
+     * it" from "we never noticed", which is the difference between a decision and an
+     * omission. The UI shows dismissed findings collapsed, with an undo.
+     *
+     * `muted_until` makes a dismissal expire on its own: "snooze until the sprint
+     * ends" is the common case, and a dismissal nobody can remember to undo is how a
+     * real problem stays invisible forever.
+     */
+    const dismissals = await (await db()).all<Record<string, any>>(
+      `SELECT d.*, u.full_name AS dismissed_by_name FROM insight_dismissals d
+       LEFT JOIN users u ON u.id = d.dismissed_by`,
+    ).catch(() => [] as Array<Record<string, any>>);
+    /*
+     * Timestamps in this application are `YYYY-MM-DD HH:MM:SS` (see `nowIso`), while
+     * `toISOString()` produces `YYYY-MM-DDTHH:MM:SS.sssZ`. Comparing the two as
+     * strings is not a formatting quibble: `' '` (0x20) sorts before `'T'` (0x54), so
+     * a stored timestamp always compares as *less* than an ISO one from the same
+     * second — an expiry written in ISO would be read as already elapsed, and a
+     * snooze would never hide anything. `new Date()` parses both formats, so the
+     * comparison is done on instants and the storage format stays as it is.
+     */
+    const nowMs = Date.now();
+    const activeKeys = new Set(
+      dismissals
+        .filter((d) => !d.muted_until || new Date(String(d.muted_until).replace(' ', 'T') + 'Z').getTime() > nowMs)
+        .map((d) => String(d.key)),
+    );
+    const byKey = new Map(dismissals.map((d) => [String(d.key), d]));
+
+    const open = insights.filter((i) => !activeKeys.has(String(i.key)));
+    const dismissed = dismissals
+      .filter((d) => activeKeys.has(String(d.key)))
+      .map((d) => ({
+        key: d.key, kind: d.kind, subject: d.subject, reason: d.reason,
+        dismissedBy: d.dismissed_by_name ?? null, dismissedAt: d.dismissed_at,
+        mutedUntil: d.muted_until,
+        // The live finding, when it is still being produced. A dismissal for a
+        // finding that no longer fires is stale, and saying so is more useful than
+        // quietly listing a warning about work that is done.
+        insight: insights.find((i) => String(i.key) === String(d.key)) ?? null,
+      }));
+
     const order = { critical: 0, high: 1, medium: 2, low: 3 } as Record<string, number>;
-    insights.sort((a, b) => order[String(a.severity)] - order[String(b.severity)]);
-    return ok({ insights, generatedAt: nowIso() });
+    open.sort((a, b) => order[String(a.severity)] - order[String(b.severity)]);
+    void byKey;
+    return ok({ insights: open, dismissed, generatedAt: nowIso() });
+  });
+
+  /*
+   * Dismissing a finding, and taking the dismissal back.
+   *
+   * This is the only mutation the Intelligence screen needs, and it is deliberately
+   * the *decision* rather than the finding: the analysis stays exactly as it is, and
+   * what is recorded is that a person looked at it and chose to accept it — with a
+   * reason and a name, because that is what gets asked after an incident.
+   *
+   * `key` is validated against the shape the analyser produces rather than accepted
+   * as free text, so the table cannot fill with arbitrary strings from a client.
+   */
+  app.post('/api/insights/:key/dismiss', async (req, reply) => {
+    const actorId = await requireRole(req, ['admin', 'lead', 'member']);
+    const key = decodeURIComponent((req.params as { key: string }).key);
+    if (!/^[a-z_]+:[A-Za-z0-9_:-]{1,120}$/.test(key)) throw badRequest('Not a finding key');
+
+    const parsed = z.object({
+      reason: z.string().max(500).default(''),
+      /** Hours to snooze. Absent or 0 means indefinitely. */
+      muteHours: z.number().int().min(0).max(24 * 365).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid dismissal payload', parsed.error.issues);
+
+    const [kind, ...rest] = key.split(':');
+    const mutedUntil = parsed.data.muteHours
+      ? nowIsoAt(Date.now() + parsed.data.muteHours * 3600_000)
+      : null;
+
+    const conn = await db();
+    /*
+     * An upsert, because dismissing twice must be idempotent: two people clicking
+     * "acknowledge" at the same moment should not produce a conflict or a duplicate
+     * row, and the second click should not clear the first person's reason.
+     */
+    const existing = await conn.get<{ key: string }>('SELECT key FROM insight_dismissals WHERE key = ?', [key]);
+    if (existing) {
+      await conn.run(
+        'UPDATE insight_dismissals SET reason = ?, muted_until = ? WHERE key = ?',
+        [parsed.data.reason, mutedUntil, key],
+      );
+    } else {
+      await conn.run(
+        `INSERT INTO insight_dismissals (key, kind, subject, reason, dismissed_by, dismissed_at, muted_until)
+         VALUES (?,?,?,?,?,?,?)`,
+        [key, kind, rest.join(':'), parsed.data.reason, actorId, nowIso(), mutedUntil],
+      );
+    }
+    reply.code(existing ? 200 : 201);
+    return ok({ key, dismissed: true, mutedUntil });
+  });
+
+  /** Un-dismiss: the finding returns to the open list immediately. */
+  app.delete('/api/insights/:key/dismiss', async (req, reply) => {
+    await requireRole(req, ['admin', 'lead', 'member']);
+    const key = decodeURIComponent((req.params as { key: string }).key);
+    const conn = await db();
+    const existing = await conn.get<{ key: string }>('SELECT key FROM insight_dismissals WHERE key = ?', [key]);
+    if (!existing) throw notFound('That finding is not dismissed');
+    await conn.run('DELETE FROM insight_dismissals WHERE key = ?', [key]);
+    reply.code(204);
+    return null;
+  });
+
+  /*
+   * The change feed.
+   *
+   * "Live updateable" needs one thing the application did not have: a cheap way to
+   * ask "has anything changed since X?". Without it every screen has to poll its own
+   * endpoint on a timer, which is a request per screen per interval and still leaves
+   * the reader looking at stale numbers until their own timer fires.
+   *
+   * The first attempt read `MAX(audit_log.id)`, on the assumption that every mutation
+   * wrote an audit row. It did not: five of forty-nine mutating routes did, so the feed
+   * was blind to most edits and every screen would have gone quietly stale — the worst
+   * kind of bug, because nothing looks broken. `change_log` (migration 0017) is written
+   * by one `onResponse` hook for every successful mutation instead, so a route added
+   * tomorrow is covered without anyone remembering to instrument it. Its integer id is
+   * the version counter, and one indexed `MAX(id)` answers the question.
+   *
+   * `since` is exclusive: a caller passes the last id it saw and gets back only what
+   * is newer, which makes the client's refresh edge-triggered rather than
+   * time-triggered. `changed` names the entity types involved so a screen can decide
+   * whether it cares, instead of refetching the whole application.
+   *
+   * Deliberately not built here: websockets or SSE. Those are a second transport to
+   * operate, authenticate and reconnect, and on a serverless platform a long-lived
+   * connection is the one thing the runtime will not keep. Polling one integer is
+   * correct on every platform and costs a single indexed read.
+   */
+  app.get('/api/changes', async (req) => {
+    const since = queryInt(req, 'since', 0);
+    const newest = await (await db()).get<{ id: number }>('SELECT MAX(id) AS id FROM change_log');
+    const latestId = Number(newest?.id ?? 0);
+    if (since >= latestId) {
+      return ok({ since, latestId, changed: [], writes: 0 });
+    }
+    const rows = await (await db()).all<Record<string, any>>(
+      `SELECT entity_type, COUNT(*) AS n FROM change_log WHERE id > ? GROUP BY entity_type ORDER BY n DESC`,
+      [since],
+    );
+    const total = await (await db()).get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM change_log WHERE id > ?', [since],
+    );
+    return ok({
+      since,
+      latestId,
+      changed: rows.map((r) => r.entity_type),
+      writes: Number(total?.n ?? 0),
+    });
   });
 
   /* ------------------------------------------------------------- audit ---- */
+  /*
+   * The audit trail, readable.
+   *
+   * It was written by every mutation and surfaced by nothing: the data existed for an
+   * auditor and was invisible to the people doing the work. This returns it with the
+   * actor joined and the payloads parsed, newest first, so the Activity surface can
+   * answer "who changed this, and when" without a SQL console.
+   */
   app.get('/api/audit', async (req) => {
     await requireRole(req, ['admin', 'lead']);
     const limit = Math.min(queryInt(req, 'limit', 50), 200);
+    const entityType = queryStr(req, 'entityType');
     const rows = await (await db()).all<Record<string, any>>(
-      `SELECT a.*, u.full_name AS actor FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
-       ORDER BY a.id DESC LIMIT ?`, [limit],
+      `SELECT a.*, u.full_name AS actor, u.initials AS actor_initials FROM audit_log a
+       LEFT JOIN users u ON u.id = a.actor_id
+       ${entityType ? 'WHERE a.entity_type = ?' : ''}
+       ORDER BY a.id DESC LIMIT ?`,
+      entityType ? [entityType, limit] : [limit],
     );
-    return ok(rows);
+    /*
+     * Parse the JSON payloads here rather than sending strings.
+     *
+     * `before_json` and `after_json` are TEXT with a `'null'` default, and a client
+     * that has to `JSON.parse` a column it did not know was JSON is a client that will
+     * render the literal string `null` on screen. Malformed history is returned as
+     * null rather than throwing: one bad row must not make the whole trail unreadable.
+     */
+    const parse = (value: unknown) => {
+      if (value === null || value === undefined) return null;
+      try { return JSON.parse(String(value)); } catch { return null; }
+    };
+    return ok(rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      actor: r.actor ?? null,
+      actorInitials: r.actor_initials ?? null,
+      before: parse(r.before_json),
+      after: parse(r.after_json),
+      createdAt: r.created_at,
+    })));
   });
 
   /* ------------------------------------------------------------- search --- */
@@ -2544,8 +2906,143 @@ export async function registerRoutes(
         );
     return ok(rows.map((d) => ({
       id: d.id, title: d.title, kind: d.kind, body: d.body, status: d.status,
-      projectName: d.project_name, clientVisible: !!d.client_visible, updatedAt: d.updated_at,
+      projectName: d.project_name, projectId: d.project_id, clientVisible: !!d.client_visible,
+      updatedAt: d.updated_at,
     })));
+  });
+
+  /*
+   * Documents were read-only.
+   *
+   * The Docs screen rendered a list of records that nothing in the product could
+   * create, edit or retire — the `docs` table was only ever populated by the seed.
+   * A document is the one artefact in a delivery org that people genuinely write,
+   * so this is the feature where "read-only" was least defensible.
+   *
+   * The three writes below are the smallest complete set: create, edit, retire.
+   * Deliberately no PATCH for `author_id` and no way to move a document between
+   * projects, because both would rewrite history rather than edit the document.
+   */
+
+  /** Create a document. Authored by the caller; scope-checked against its project. */
+  app.post('/api/docs', async (req, reply) => {
+    const actorId = await requireRole(req, ['admin', 'lead', 'member']);
+    const parsed = z.object({
+      title: z.string().trim().min(1, 'a document needs a title').max(200),
+      kind: z.enum(['runbook', 'adr', 'spec', 'note', 'retro', 'exec_summary', 'onboarding']).default('note'),
+      body: z.string().max(100_000).default(''),
+      status: z.enum(['draft', 'in_review', 'approved', 'archived']).default('draft'),
+      projectId: z.string().min(1).nullable().default(null),
+      clientVisible: z.boolean().default(false),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid document payload', parsed.error.issues);
+    const input = parsed.data;
+
+    const conn = await db();
+    if (input.projectId) {
+      const scope = await resolveReadScope(conn, await currentIdentity(req));
+      await assertProjectInScope(scope, input.projectId);
+      const project = await conn.get<{ id: string }>('SELECT id FROM projects WHERE id = ?', [input.projectId]);
+      if (!project) throw badRequest(`No project "${input.projectId}" to attach this document to`);
+    }
+
+    const docId = `doc_${Math.random().toString(36).slice(2, 10)}`;
+    const at = nowIso();
+    await conn.run(
+      `INSERT INTO docs (id,project_id,title,kind,body,status,author_id,client_visible,updated_at,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [
+        docId, input.projectId, input.title, input.kind, input.body, input.status, actorId,
+        input.clientVisible ? 1 : 0, at, at,
+      ],
+    );
+    reply.code(201);
+    return ok({
+      id: docId, title: input.title, kind: input.kind, body: input.body, status: input.status,
+      projectId: input.projectId, clientVisible: input.clientVisible, updatedAt: at,
+    });
+  });
+
+  /** Edit a document's prose and metadata. Every field is optional; `updated_at` moves. */
+  app.patch('/api/docs/:id', async (req) => {
+    await requireRole(req, ['admin', 'lead', 'member']);
+    const { id: docId } = req.params as { id: string };
+    const parsed = z.object({
+      title: z.string().trim().min(1, 'a document needs a title').max(200).optional(),
+      kind: z.enum(['runbook', 'adr', 'spec', 'note', 'retro', 'exec_summary', 'onboarding']).optional(),
+      body: z.string().max(100_000).optional(),
+      status: z.enum(['draft', 'in_review', 'approved', 'archived']).optional(),
+      clientVisible: z.boolean().optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) throw badRequest('Invalid document payload', parsed.error.issues);
+    const patch = parsed.data;
+    if (Object.keys(patch).length === 0) throw badRequest('Nothing to change');
+
+    const conn = await db();
+    /*
+     * Read the row through the caller's scope first. A document the caller cannot
+     * see is answered exactly as one that does not exist — otherwise a 403 would
+     * confirm the id is real, which is the enumeration oracle scope.ts exists to
+     * avoid.
+     */
+    const scope = await resolveReadScope(conn, await currentIdentity(req));
+    const dw = docsWhere(scope, 'd');
+    const existing = await conn.get<Record<string, unknown>>(
+      `SELECT d.* FROM docs d WHERE d.id = ? AND (${dw.sql})`,
+      [docId, ...dw.params],
+    );
+    if (!existing) throw notFound('No such document');
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const columns: Record<string, string> = {
+      title: 'title', kind: 'kind', body: 'body', status: 'status',
+    };
+    for (const [field, column] of Object.entries(columns)) {
+      if (patch[field as keyof typeof patch] !== undefined) {
+        sets.push(`${column} = ?`);
+        params.push(patch[field as keyof typeof patch]);
+      }
+    }
+    if (patch.clientVisible !== undefined) {
+      sets.push('client_visible = ?');
+      params.push(patch.clientVisible ? 1 : 0);
+    }
+    const at = nowIso();
+    sets.push('updated_at = ?');
+    params.push(at);
+    await conn.run(`UPDATE docs SET ${sets.join(', ')} WHERE id = ?`, [...params, docId]);
+
+    const row = await conn.get<Record<string, unknown>>('SELECT * FROM docs WHERE id = ?', [docId]);
+    return ok({
+      id: docId,
+      title: row?.title, kind: row?.kind, body: row?.body, status: row?.status,
+      projectId: row?.project_id, clientVisible: !!row?.client_visible, updatedAt: row?.updated_at,
+    });
+  });
+
+  /**
+   * Retire a document.
+   *
+   * A real delete, not an `archived` status in disguise: the caller asked to
+   * remove it, and silently keeping the row would make the list disagree with the
+   * database. Archiving is available separately as a status change for documents
+   * that must be kept for audit.
+   */
+  app.delete('/api/docs/:id', async (req, reply) => {
+    await requireRole(req, ['admin', 'lead']);
+    const { id: docId } = req.params as { id: string };
+    const conn = await db();
+    const scope = await resolveReadScope(conn, await currentIdentity(req));
+    const dw = docsWhere(scope, 'd');
+    const existing = await conn.get<{ id: string }>(
+      `SELECT d.id FROM docs d WHERE d.id = ? AND (${dw.sql})`,
+      [docId, ...dw.params],
+    );
+    if (!existing) throw notFound('No such document');
+    await conn.run('DELETE FROM docs WHERE id = ?', [docId]);
+    reply.code(204);
+    return null;
   });
 }
 

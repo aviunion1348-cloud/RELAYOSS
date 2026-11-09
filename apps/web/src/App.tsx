@@ -64,10 +64,19 @@ function useSession() {
  */
 export default function App() {
   const session = useSession();
+  /*
+   * `grain` and `vignette` are ambient layers rendered behind everything: a 3% noise
+   * field so a large black display reads as a surface rather than a switched-off
+   * screen, and a soft vignette that pulls the eye to the content. Both are
+   * `pointer-events: none` and fixed, so they never move under scroll and never
+   * intercept a click.
+   */
   return (
-    <Shell session={session}>
-      <AppRoutes />
-    </Shell>
+    <div className="grain vignette">
+      <Shell session={session}>
+        <AppRoutes />
+      </Shell>
+    </div>
   );
 }
 
