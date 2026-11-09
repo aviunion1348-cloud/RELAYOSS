@@ -69,7 +69,7 @@ const env = () => ({
    * reasonably assume the deployment still had a mode to select.
    */
   /** Which `users` row every request is attributed to. */
-  operatorUserId: process.env.OPERATOR_USER_ID ?? process.env.DEMO_USER_ID ?? 'usr_maya',
+  operatorUserId: process.env.OPERATOR_USER_ID ?? process.env.DEMO_USER_ID ?? 'usr_owner',
   /**
    * Per-process request budgets (requests per minute, per client address).
    * The auth budget is intentionally small: a human logs in a handful of times

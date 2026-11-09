@@ -14,7 +14,7 @@ import path from 'node:path';
 import { config } from './config.ts';
 import { getDb, setDb, type Db } from './db/index.ts';
 import { migrate } from './db/migrate.ts';
-import { seed } from './db/seed.ts';
+import { ensureOperator, type BootstrapResult } from './db/bootstrap.ts';
 import { registerRoutes } from './routes/index.ts';
 import { createOperatorAuth, registerOperatorHook, resolveOperator } from './auth/operator-middleware.ts';
 import { registerOperatorRoutes } from './routes/operator.ts';
@@ -67,63 +67,52 @@ export async function buildApp(opts: BuildOptions = {}): Promise<{ app: FastifyI
   const migrated = opts.migrateOnBoot ?? (process.env.SKIP_MIGRATE !== '1' && !opts.db);
   if (migrated) {
     await migrate(db, { log: () => {} });
-    /**
-     * Seed a database that has no people in it.
-     *
-     * Without a PostgreSQL instance the API falls back to SQLite, and on Vercel
-     * that file starts empty on every cold start. An empty database is not merely
-     * sparse: `users` is a foreign key target for every attribution column, so
-     * there is nobody to attribute a request to and every write would fail.
-     *
-     * The failure this replaced was worse and less obvious: the same empty database
-     * used to resolve no credential, fall back to `dev` mode, and be refused at boot
-     * in production — so the deployment answered nothing, and the frontend showed a
-     * sign-in screen that could never work. Seeding is what makes the no-database
-     * configuration genuinely usable rather than nominally supported.
-     *
-     * Seeding is gated three ways so it cannot touch real data:
-     *
-     *   - only when the database was just migrated by this boot (never for an
-     *     injected/test database, and never on a Postgres deployment, which is
-     *     migrated deliberately by `npm run db:migrate:prod`);
-     *   - only when `users` is empty, so an existing installation is left alone;
-     *   - only when `SEED_DEMO_DATA` is not `0`, so an operator can turn it off.
-     *
-     * Together that means "a demonstration instance gets its demo data", which is
-     * what the whole product already assumes on a laptop.
+  }
+
+  /**
+   * First-run bootstrap: one operator, and nothing else.
+   *
+   * This replaces a demo seed that ran on every boot of an empty database and created
+   * a fictional studio — twelve people, six projects, 89 tasks, deals, invoices. It made
+   * a fresh installation look populated and made invented data indistinguishable from
+   * real data, which is the defect: a dashboard showing numbers nobody entered is a
+   * false claim about the business, not a demonstration of the product.
+   *
+   * The bind that forces this to exist at all is attribution: every `created_by` is a
+   * foreign key to `users`, so a database with no people cannot accept a write. One
+   * operator row, named from configuration, is the minimum that makes the product
+   * usable; every client, project, task and deal is entered by the operator.
+   *
+   * Demo data is still available, deliberately and explicitly, via `npm run db:seed`.
+   */
+  let bootstrap: BootstrapResult | null = null;
+  try {
+    bootstrap = await ensureOperator(db);
+  } catch (err) {
+    /*
+     * A bootstrap failure must not take the API down: `/api/health` still needs to
+     * answer so an operator can see the engine and run the CLI. It is logged loudly
+     * because the first write will fail with the same reason.
      */
-    if (process.env.SEED_DEMO_DATA !== '0' && !config.databaseUrl) {
-      try {
-        const people = await db.get<{ c: number }>('SELECT COUNT(*) AS c FROM users');
-        if (Number(people?.c ?? 0) === 0) {
-          // `seed` refuses in production without FORCE, and that guard is worth
-          // keeping for the CLI — where an operator must mean it — while this call
-          // is the boot of an empty demonstration instance, already gated above.
-          const previous = process.env.FORCE;
-          process.env.FORCE = '1';
-          try {
-            await seed(db, () => {});
-          } finally {
-            if (previous === undefined) delete process.env.FORCE;
-            else process.env.FORCE = previous;
-          }
-        }
-      } catch (err) {
-        /**
-         * A failed seed must not prevent the server from starting: an operator can
-         * still reach `/api/health`, see the engine, and seed by hand. It is logged
-         * loudly because silently serving an empty database is worse.
-         */
-        // eslint-disable-next-line no-console
-        console.error(
-          JSON.stringify({
-            level: 40,
-            msg: 'Demo seeding failed. The API will start with an empty database.',
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        );
-      }
-    }
+    // eslint-disable-next-line no-console
+    console.error(
+      JSON.stringify({
+        level: 40,
+        msg: 'operator bootstrap failed; the API will start but cannot attribute writes',
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+
+  if (bootstrap?.created) {
+    // eslint-disable-next-line no-console
+    console.info(
+      JSON.stringify({
+        level: 30,
+        msg: `created the operator (${bootstrap.userId}) and no other records; ` +
+          'clients, projects and tasks are yours to enter or import',
+      }),
+    );
   }
 
   const app = Fastify({

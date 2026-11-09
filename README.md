@@ -19,11 +19,29 @@ Requires Node **22.18+** (24 is fine). Nothing else: no database server, no Dock
 
 ```bash
 npm install
-npm run db:reset     # migrate + seed a realistic studio (89 tasks, 6 projects, 12 deals)
+npm run db:migrate   # create the schema and the one operator account
 npm run dev          # API :4000 + SPA :5173
 ```
 
 Open <http://localhost:5173>.
+
+The application starts **empty**: one operator account, and no clients, projects, tasks
+or deals. That is deliberate — a dashboard pre-filled with a fictional studio makes it
+impossible to tell your data from invented data. You add your real records through the
+app; everything you see is something you entered.
+
+Name the operator after yourself (or your company) before the first run if you like:
+
+```bash
+OPERATOR_NAME="Excali" OPERATOR_EMAIL="ops@excali.example" npm run db:migrate
+```
+
+Want the demo dataset anyway, for a screenshot or a walkthrough? It is an explicit
+command, never automatic:
+
+```bash
+npm run db:seed      # fictional studio: 12 people, 6 projects, 89 tasks — demo only
+```
 
 `npm install` installs both projects. `apps/web` is a separate npm project — its own
 lockfile, and deliberately not a workspace member so its install cannot disturb the

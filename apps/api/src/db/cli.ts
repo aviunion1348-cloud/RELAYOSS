@@ -17,6 +17,7 @@ import { config } from '../config.ts';
 import { createDb, setDb } from './index.ts';
 import { migrate, schemaVersion } from './migrate.ts';
 import { seed } from './seed.ts';
+import { ensureOperator } from './bootstrap.ts';
 
 const cmd = process.argv[2] ?? 'migrate';
 
@@ -64,9 +65,20 @@ try {
     console.log('• migrating');
     const result = await migrate(db);
     if (!result.applied.length) console.log(`  ✓ already up to date (version ${result.version})`);
+    /*
+     * Migrating is what a deployment runs, so the operator is created here too. Without
+     * one, every write fails on a foreign key: `created_by` has to point at a real user.
+     * This creates a single row and nothing else — the demo seed is a separate command.
+     */
+    const operator = await ensureOperator(db);
+    console.log(
+      operator.created
+        ? `  ✓ created operator ${operator.userId} (${operator.name}); no other data was added`
+        : `  ✓ operator already present (${operator.userId})`,
+    );
   }
   if (cmd === 'seed' || cmd === 'reset') {
-    console.log('• seeding');
+    console.log('• seeding DEMO data (fictional studio; not for a real deployment)');
     await seed(db);
   }
   if (cmd === 'status') {
