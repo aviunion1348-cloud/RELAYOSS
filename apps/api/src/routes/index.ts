@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getDb, type Db } from '../db/index.ts';
 import { config } from '../config.ts';
+import { describeWebServing, resolveWebDist } from '../lib/web-dist.ts';
 import { badRequest, notFound, ok, page, queryInt, queryList, queryStr, forbidden, unauthorized, conflict, serviceUnavailable, optionalString, optionalNumber } from '../lib/http.ts';
 import type { Identity } from '../auth/index.ts';
 import { resolveOperator } from '../auth/operator-middleware.ts';
@@ -137,6 +138,14 @@ export async function registerRoutes(
       worker: { name: 'clock-sweeper', intervalMs: config.sweepIntervalMs },
       memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
       authMode: 'none',
+      /*
+       * Which files are serving the dashboard, and where from. A deployment that lost
+       * the SPA answers `/` with a JSON 404, which looks like a frontend bug from the
+       * browser and logs nothing on the server. This makes the answer one request:
+       * `"source": "embedded"` means the build travelled inside the function.
+       */
+      /* The directory itself is server-internal; the source and the count are not. */
+      web: describeWebServing(resolveWebDist(config.webDist).dir),
     };
     // No secrets, no connection strings, no user data — safe for an
     // unauthenticated probe to read.

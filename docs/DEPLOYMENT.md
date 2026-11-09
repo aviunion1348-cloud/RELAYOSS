@@ -155,6 +155,19 @@ Three things are enforced rather than remembered:
 - **An unbuilt SPA is visible.** With neither a directory nor an embedded build the
   server answers a JSON 404 naming the path, rather than a 200 with nothing in it.
 
+**Checking a live deployment.** `GET /api/health` reports which files are serving the
+dashboard and where from:
+
+```json
+{ "data": { "web": { "source": "embedded", "files": 16 } } }
+```
+
+`embedded` is the only correct answer in a bundle; `disk` means a build directory was
+found (a workstation, a container, `npm start`); `none` means nothing is there and every
+browser path is answering a JSON 404. That single request replaces build logs for the
+question "did the dashboard actually ship", and the 404 body carries the same field.
+Both report a real file count — 16 for the current build — rather than a placeholder.
+
 `apps/api/test/deployment-layout.test.mjs` builds that layout in a temporary directory —
 compiled API **only**, no `apps/web/dist`, no repository — and runs the server there. It
 asserts `/`, a deep link, a real asset from the embedded map, and

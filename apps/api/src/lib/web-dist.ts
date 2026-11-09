@@ -21,6 +21,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { embeddedFileCount } from './embedded-web.ts';
+
 export type WebDistResolution = {
   /** The directory that contains `index.html`, or null if none does. */
   dir: string | null;
@@ -77,4 +79,40 @@ export function resolveWebDist(preferred?: string): WebDistResolution {
     if (exists) return { dir: candidate, tried };
   }
   return { dir: null, tried };
+}
+
+/**
+ * How this process is serving the SPA — the question a deployment always raises and can
+ * never answer from the outside.
+ *
+ * `disk` is a workstation, a container image or `npm start`: the build directory was
+ * found. `embedded` is a deployment bundle: the build was compiled in, which is the only
+ * way it could have arrived. `none` is a fault — every browser path answers a JSON 404 —
+ * so it is reported rather than hidden. `files` counts what is actually there either way;
+ * there is no sentinel for "did not look", because not looking is how this went wrong.
+ */
+export function describeWebServing(resolvedDir: string | null): {
+  source: 'disk' | 'embedded' | 'none';
+  files: number;
+} {
+  if (resolvedDir) return { source: 'disk', files: countFiles(resolvedDir) };
+  const embedded = embeddedFileCount();
+  return embedded > 0 ? { source: 'embedded', files: embedded } : { source: 'none', files: 0 };
+}
+
+function countFiles(dir: string): number {
+  let total = 0;
+  const walk = (current: string) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(path.join(current, entry.name));
+      else if (entry.isFile()) total += 1;
+    }
+  };
+  try {
+    walk(dir);
+  } catch {
+    /* An unreadable directory serves nothing; the count says so rather than throwing. */
+    return 0;
+  }
+  return total;
 }
